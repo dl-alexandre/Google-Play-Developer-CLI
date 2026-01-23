@@ -1,0 +1,61 @@
+# Binaries
+bin/
+dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+gpd
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage.html
+coverage.txt
+
+# Go workspace file
+go.work
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Sensitive files
+*.pem
+*.key
+*.json.key
+service-account*.json
+credentials*.json
+
+# Local config
+.gpd/
+.env
+.env.local
+.env.*.local
+
+# Build artifacts
+*.tar.gz
+*.zip
+checksums.txt
+
+# Collaboration results
+.collaborate_results/
+
+# Temporary files
+tmp/
+temp/

@@ -6,7 +6,7 @@ dist/
 *.dll
 *.so
 *.dylib
-gpd
+/gpd
 
 # Test binary, built with `go test -c`
 *.test

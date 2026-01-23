@@ -92,7 +92,7 @@ release:
 
     ### Homebrew
     ```bash
-    brew tap dl-alexandre/homebrew-tap
+    brew tap dl-alexandre/tap
     brew install gpd
     ```
 
@@ -116,7 +116,7 @@ brews:
   - name: gpd
     repository:
       owner: dl-alexandre
-      name: homebrew-tap
+      name: tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     folder: Formula
     homepage: "https://github.com/dl-alexandre/gpd"

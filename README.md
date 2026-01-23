@@ -19,7 +19,7 @@ A fast, lightweight command-line interface for the Google Play Developer Console
 ### Homebrew (macOS/Linux)
 
 ```bash
-brew tap dl-alexandre/homebrew-tap
+brew tap dl-alexandre/tap
 brew install gpd
 ```
 

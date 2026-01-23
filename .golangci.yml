@@ -59,7 +59,7 @@ linters-settings:
       - whyNoLint
       - wrapperFunc
   goimports:
-    local-prefixes: github.com/google-play-cli/gpd
+    local-prefixes: github.com/dl-alexandre/gpd
   revive:
     rules:
       - name: blank-imports

@@ -10,12 +10,13 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"google.golang.org/api/androidpublisher/v3"
 
-	"github.com/google-play-cli/gpd/internal/api"
-	"github.com/google-play-cli/gpd/internal/config"
-	"github.com/google-play-cli/gpd/internal/edits"
-	"github.com/google-play-cli/gpd/internal/errors"
-	"github.com/google-play-cli/gpd/internal/output"
+	"github.com/dl-alexandre/gpd/internal/api"
+	"github.com/dl-alexandre/gpd/internal/config"
+	"github.com/dl-alexandre/gpd/internal/edits"
+	"github.com/dl-alexandre/gpd/internal/errors"
+	"github.com/dl-alexandre/gpd/internal/output"
 )
 
 func (c *CLI) addPublishCommands() {
@@ -536,12 +537,81 @@ func (c *CLI) publishRollout(ctx context.Context, track string, percentage float
 		return c.Output(result.WithServices("androidpublisher"))
 	}
 
-	// Implementation would update the track's user fraction
+	// Get API client
+	client, err := c.getAPIClient(ctx)
+	if err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+
+	publisher, err := client.AndroidPublisher()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+
+	// Acquire lock for package
+	editMgr := edits.NewManager()
+	if err := editMgr.AcquireLock(ctx, c.packageName); err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+	defer editMgr.ReleaseLock(c.packageName)
+
+	// Create edit
+	edit, err := publisher.Edits.Insert(c.packageName, nil).Context(ctx).Do()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
+			fmt.Sprintf("failed to create edit: %v", err)))
+	}
+
+	// Get current track info
+	trackInfo, err := publisher.Edits.Tracks.Get(c.packageName, edit.Id, track).Context(ctx).Do()
+	if err != nil {
+		publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+		return c.OutputError(errors.NewAPIError(errors.CodeNotFound,
+			fmt.Sprintf("track not found: %s", track)))
+	}
+
+	// Find the in-progress release and update its user fraction
+	var updatedRelease *androidpublisher.TrackRelease
+	for i, release := range trackInfo.Releases {
+		if release.Status == "inProgress" {
+			// Convert percentage to fraction (0.01 to 1.0)
+			userFraction := percentage / 100.0
+			trackInfo.Releases[i].UserFraction = userFraction
+			updatedRelease = trackInfo.Releases[i]
+			break
+		}
+	}
+
+	if updatedRelease == nil {
+		publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+		return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
+			"no in-progress release found on track").
+			WithHint("Create a staged rollout release first with status 'inProgress'"))
+	}
+
+	// Update the track
+	_, err = publisher.Edits.Tracks.Update(c.packageName, edit.Id, track, trackInfo).Context(ctx).Do()
+	if err != nil {
+		publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
+			fmt.Sprintf("failed to update track: %v", err)))
+	}
+
+	// Commit edit
+	_, err = publisher.Edits.Commit(c.packageName, edit.Id).Context(ctx).Do()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
+			fmt.Sprintf("failed to commit edit: %v", err)))
+	}
+
 	result := output.NewResult(map[string]interface{}{
-		"success":    true,
-		"track":      track,
-		"percentage": percentage,
-		"package":    c.packageName,
+		"success":      true,
+		"track":        track,
+		"percentage":   percentage,
+		"userFraction": percentage / 100.0,
+		"versionCodes": updatedRelease.VersionCodes,
+		"package":      c.packageName,
+		"editId":       edit.Id,
 	})
 	return c.Output(result.WithServices("androidpublisher"))
 }
@@ -553,6 +623,11 @@ func (c *CLI) publishPromote(ctx context.Context, fromTrack, toTrack string, per
 
 	if !config.IsValidTrack(fromTrack) || !config.IsValidTrack(toTrack) {
 		return c.OutputError(errors.ErrTrackInvalid)
+	}
+
+	if fromTrack == toTrack {
+		return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
+			"source and destination tracks must be different"))
 	}
 
 	if dryRun {
@@ -567,12 +642,105 @@ func (c *CLI) publishPromote(ctx context.Context, fromTrack, toTrack string, per
 		return c.Output(result.WithServices("androidpublisher"))
 	}
 
+	// Get API client
+	client, err := c.getAPIClient(ctx)
+	if err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+
+	publisher, err := client.AndroidPublisher()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+
+	// Acquire lock for package
+	editMgr := edits.NewManager()
+	if err := editMgr.AcquireLock(ctx, c.packageName); err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+	defer editMgr.ReleaseLock(c.packageName)
+
+	// Create edit
+	edit, err := publisher.Edits.Insert(c.packageName, nil).Context(ctx).Do()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
+			fmt.Sprintf("failed to create edit: %v", err)))
+	}
+
+	// Get source track info
+	sourceTrack, err := publisher.Edits.Tracks.Get(c.packageName, edit.Id, fromTrack).Context(ctx).Do()
+	if err != nil {
+		publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+		return c.OutputError(errors.NewAPIError(errors.CodeNotFound,
+			fmt.Sprintf("source track not found: %s", fromTrack)))
+	}
+
+	// Find the active release on the source track
+	var sourceRelease *androidpublisher.TrackRelease
+	for _, release := range sourceTrack.Releases {
+		if release.Status == "completed" || release.Status == "inProgress" {
+			sourceRelease = release
+			break
+		}
+	}
+
+	if sourceRelease == nil {
+		publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+		return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
+			fmt.Sprintf("no active release found on track: %s", fromTrack)).
+			WithHint("Ensure the source track has a completed or in-progress release"))
+	}
+
+	// Get or create destination track
+	destTrack, err := publisher.Edits.Tracks.Get(c.packageName, edit.Id, toTrack).Context(ctx).Do()
+	if err != nil {
+		// Track might not exist, create new track config
+		destTrack = &androidpublisher.Track{
+			Track: toTrack,
+		}
+	}
+
+	// Create new release for destination track
+	newRelease := &androidpublisher.TrackRelease{
+		Name:         sourceRelease.Name,
+		VersionCodes: sourceRelease.VersionCodes,
+		ReleaseNotes: sourceRelease.ReleaseNotes,
+	}
+
+	// Set status and user fraction based on percentage
+	if percentage > 0 && percentage < 100 {
+		newRelease.Status = "inProgress"
+		newRelease.UserFraction = percentage / 100.0
+	} else {
+		newRelease.Status = "completed"
+	}
+
+	destTrack.Releases = []*androidpublisher.TrackRelease{newRelease}
+
+	// Update destination track
+	_, err = publisher.Edits.Tracks.Update(c.packageName, edit.Id, toTrack, destTrack).Context(ctx).Do()
+	if err != nil {
+		publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
+			fmt.Sprintf("failed to update destination track: %v", err)))
+	}
+
+	// Commit edit
+	_, err = publisher.Edits.Commit(c.packageName, edit.Id).Context(ctx).Do()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
+			fmt.Sprintf("failed to commit edit: %v", err)))
+	}
+
 	result := output.NewResult(map[string]interface{}{
-		"success":    true,
-		"fromTrack":  fromTrack,
-		"toTrack":    toTrack,
-		"percentage": percentage,
-		"package":    c.packageName,
+		"success":      true,
+		"fromTrack":    fromTrack,
+		"toTrack":      toTrack,
+		"versionCodes": sourceRelease.VersionCodes,
+		"status":       newRelease.Status,
+		"percentage":   percentage,
+		"package":      c.packageName,
+		"editId":       edit.Id,
 	})
 	return c.Output(result.WithServices("androidpublisher"))
 }
@@ -592,11 +760,78 @@ func (c *CLI) publishHalt(ctx context.Context, track, editID string, dryRun bool
 		return c.Output(result.WithServices("androidpublisher"))
 	}
 
+	// Get API client
+	client, err := c.getAPIClient(ctx)
+	if err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+
+	publisher, err := client.AndroidPublisher()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+
+	// Acquire lock for package
+	editMgr := edits.NewManager()
+	if err := editMgr.AcquireLock(ctx, c.packageName); err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+	defer editMgr.ReleaseLock(c.packageName)
+
+	// Create edit
+	edit, err := publisher.Edits.Insert(c.packageName, nil).Context(ctx).Do()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
+			fmt.Sprintf("failed to create edit: %v", err)))
+	}
+
+	// Get current track info
+	trackInfo, err := publisher.Edits.Tracks.Get(c.packageName, edit.Id, track).Context(ctx).Do()
+	if err != nil {
+		publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+		return c.OutputError(errors.NewAPIError(errors.CodeNotFound,
+			fmt.Sprintf("track not found: %s", track)))
+	}
+
+	// Find the in-progress release and halt it
+	var haltedRelease *androidpublisher.TrackRelease
+	for i, release := range trackInfo.Releases {
+		if release.Status == "inProgress" {
+			trackInfo.Releases[i].Status = "halted"
+			haltedRelease = trackInfo.Releases[i]
+			break
+		}
+	}
+
+	if haltedRelease == nil {
+		publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+		return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
+			"no in-progress release found on track").
+			WithHint("Only releases with status 'inProgress' can be halted"))
+	}
+
+	// Update the track
+	_, err = publisher.Edits.Tracks.Update(c.packageName, edit.Id, track, trackInfo).Context(ctx).Do()
+	if err != nil {
+		publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
+			fmt.Sprintf("failed to update track: %v", err)))
+	}
+
+	// Commit edit
+	_, err = publisher.Edits.Commit(c.packageName, edit.Id).Context(ctx).Do()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
+			fmt.Sprintf("failed to commit edit: %v", err)))
+	}
+
 	result := output.NewResult(map[string]interface{}{
-		"success": true,
-		"track":   track,
-		"status":  "halted",
-		"package": c.packageName,
+		"success":      true,
+		"track":        track,
+		"status":       "halted",
+		"versionCodes": haltedRelease.VersionCodes,
+		"package":      c.packageName,
+		"editId":       edit.Id,
 	})
 	return c.Output(result.WithServices("androidpublisher"))
 }
@@ -610,6 +845,17 @@ func (c *CLI) publishRollback(ctx context.Context, track, versionCode, editID st
 		return c.OutputError(errors.ErrTrackInvalid)
 	}
 
+	// Parse version code if provided
+	var targetVersionCode int64
+	if versionCode != "" {
+		parsed, err := strconv.ParseInt(versionCode, 10, 64)
+		if err != nil {
+			return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
+				fmt.Sprintf("invalid version code: %s", versionCode)))
+		}
+		targetVersionCode = parsed
+	}
+
 	if dryRun {
 		result := output.NewResult(map[string]interface{}{
 			"dryRun":      true,
@@ -621,11 +867,116 @@ func (c *CLI) publishRollback(ctx context.Context, track, versionCode, editID st
 		return c.Output(result.WithServices("androidpublisher"))
 	}
 
+	// Get API client
+	client, err := c.getAPIClient(ctx)
+	if err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+
+	publisher, err := client.AndroidPublisher()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+
+	// Acquire lock for package
+	editMgr := edits.NewManager()
+	if err := editMgr.AcquireLock(ctx, c.packageName); err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+	defer editMgr.ReleaseLock(c.packageName)
+
+	// Create edit
+	edit, err := publisher.Edits.Insert(c.packageName, nil).Context(ctx).Do()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
+			fmt.Sprintf("failed to create edit: %v", err)))
+	}
+
+	// Get current track info
+	trackInfo, err := publisher.Edits.Tracks.Get(c.packageName, edit.Id, track).Context(ctx).Do()
+	if err != nil {
+		publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+		return c.OutputError(errors.NewAPIError(errors.CodeNotFound,
+			fmt.Sprintf("track not found: %s", track)))
+	}
+
+	// Find the target version in history or halted releases
+	var rollbackVersionCodes []int64
+	var foundRelease *androidpublisher.TrackRelease
+
+	// If version code specified, look for it
+	if targetVersionCode > 0 {
+		for _, release := range trackInfo.Releases {
+			for _, vc := range release.VersionCodes {
+				if vc == targetVersionCode {
+					rollbackVersionCodes = []int64{targetVersionCode}
+					foundRelease = release
+					break
+				}
+			}
+			if foundRelease != nil {
+				break
+			}
+		}
+		if foundRelease == nil {
+			publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+			return c.OutputError(errors.NewAPIError(errors.CodeNotFound,
+				fmt.Sprintf("version code %d not found in track history", targetVersionCode)).
+				WithHint("Check available versions with 'gpd publish status --track " + track + "'"))
+		}
+	} else {
+		// Find the previous completed release (not current inProgress or halted)
+		var currentRelease *androidpublisher.TrackRelease
+		var previousRelease *androidpublisher.TrackRelease
+		for _, release := range trackInfo.Releases {
+			if release.Status == "inProgress" || release.Status == "halted" {
+				currentRelease = release
+			} else if release.Status == "completed" && previousRelease == nil {
+				previousRelease = release
+			}
+		}
+		if previousRelease == nil {
+			publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+			return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
+				"no previous release found to rollback to").
+				WithHint("Specify a version code with --version-code flag"))
+		}
+		_ = currentRelease // For future use
+		rollbackVersionCodes = previousRelease.VersionCodes
+		foundRelease = previousRelease
+	}
+
+	// Create a new release with the rollback version
+	newRelease := &androidpublisher.TrackRelease{
+		VersionCodes: rollbackVersionCodes,
+		Status:       "completed",
+	}
+
+	// Replace releases on track
+	trackInfo.Releases = []*androidpublisher.TrackRelease{newRelease}
+
+	// Update the track
+	_, err = publisher.Edits.Tracks.Update(c.packageName, edit.Id, track, trackInfo).Context(ctx).Do()
+	if err != nil {
+		publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
+			fmt.Sprintf("failed to update track: %v", err)))
+	}
+
+	// Commit edit
+	_, err = publisher.Edits.Commit(c.packageName, edit.Id).Context(ctx).Do()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
+			fmt.Sprintf("failed to commit edit: %v", err)))
+	}
+
 	result := output.NewResult(map[string]interface{}{
-		"success":     true,
-		"track":       track,
-		"versionCode": versionCode,
-		"package":     c.packageName,
+		"success":      true,
+		"track":        track,
+		"versionCodes": rollbackVersionCodes,
+		"releaseName":  foundRelease.Name,
+		"package":      c.packageName,
+		"editId":       edit.Id,
 	})
 	return c.Output(result.WithServices("androidpublisher"))
 }
@@ -718,13 +1069,68 @@ func (c *CLI) publishListingUpdate(ctx context.Context, locale, title, shortDesc
 		return c.Output(result.WithServices("androidpublisher"))
 	}
 
+	// Get API client
+	client, err := c.getAPIClient(ctx)
+	if err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+
+	publisher, err := client.AndroidPublisher()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+
+	// Acquire lock for package
+	editMgr := edits.NewManager()
+	if err := editMgr.AcquireLock(ctx, c.packageName); err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+	defer editMgr.ReleaseLock(c.packageName)
+
+	// Create edit
+	edit, err := publisher.Edits.Insert(c.packageName, nil).Context(ctx).Do()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
+			fmt.Sprintf("failed to create edit: %v", err)))
+	}
+
+	// Build listing update
+	listing := &androidpublisher.Listing{
+		Language: locale,
+	}
+	if title != "" {
+		listing.Title = title
+	}
+	if shortDesc != "" {
+		listing.ShortDescription = shortDesc
+	}
+	if fullDesc != "" {
+		listing.FullDescription = fullDesc
+	}
+
+	// Update the listing
+	updatedListing, err := publisher.Edits.Listings.Update(c.packageName, edit.Id, locale, listing).Context(ctx).Do()
+	if err != nil {
+		publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
+			fmt.Sprintf("failed to update listing: %v", err)))
+	}
+
+	// Commit edit
+	_, err = publisher.Edits.Commit(c.packageName, edit.Id).Context(ctx).Do()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
+			fmt.Sprintf("failed to commit edit: %v", err)))
+	}
+
 	result := output.NewResult(map[string]interface{}{
 		"success":          true,
-		"locale":           locale,
-		"title":            title,
-		"shortDescription": shortDesc,
-		"fullDescription":  fullDesc,
+		"locale":           updatedListing.Language,
+		"title":            updatedListing.Title,
+		"shortDescription": updatedListing.ShortDescription,
+		"fullDescription":  updatedListing.FullDescription,
 		"package":          c.packageName,
+		"editId":           edit.Id,
 	})
 	return c.Output(result.WithServices("androidpublisher"))
 }
@@ -734,10 +1140,64 @@ func (c *CLI) publishListingGet(ctx context.Context, locale string) error {
 		return c.OutputError(err.(*errors.APIError))
 	}
 
-	// Implementation would fetch listing from API
+	// Get API client
+	client, err := c.getAPIClient(ctx)
+	if err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+
+	publisher, err := client.AndroidPublisher()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+
+	// Create edit (read-only, won't commit)
+	edit, err := publisher.Edits.Insert(c.packageName, nil).Context(ctx).Do()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
+			fmt.Sprintf("failed to create edit: %v", err)))
+	}
+	defer publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+
+	if locale != "" {
+		// Get specific locale listing
+		locale = config.NormalizeLocale(locale)
+		listing, err := publisher.Edits.Listings.Get(c.packageName, edit.Id, locale).Context(ctx).Do()
+		if err != nil {
+			return c.OutputError(errors.NewAPIError(errors.CodeNotFound,
+				fmt.Sprintf("listing not found for locale: %s", locale)))
+		}
+		result := output.NewResult(map[string]interface{}{
+			"locale":           listing.Language,
+			"title":            listing.Title,
+			"shortDescription": listing.ShortDescription,
+			"fullDescription":  listing.FullDescription,
+			"video":            listing.Video,
+			"package":          c.packageName,
+		})
+		return c.Output(result.WithServices("androidpublisher"))
+	}
+
+	// Get all listings
+	listings, err := publisher.Edits.Listings.List(c.packageName, edit.Id).Context(ctx).Do()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+
+	var listingResults []map[string]interface{}
+	for _, listing := range listings.Listings {
+		listingResults = append(listingResults, map[string]interface{}{
+			"locale":           listing.Language,
+			"title":            listing.Title,
+			"shortDescription": listing.ShortDescription,
+			"fullDescription":  listing.FullDescription,
+		})
+	}
+
 	result := output.NewResult(map[string]interface{}{
-		"locale":  locale,
-		"package": c.packageName,
+		"listings": listingResults,
+		"count":    len(listingResults),
+		"package":  c.packageName,
 	})
 	return c.Output(result.WithServices("androidpublisher"))
 }
@@ -814,6 +1274,11 @@ func (c *CLI) publishTestersAdd(ctx context.Context, track string, groups []stri
 		return c.OutputError(err.(*errors.APIError))
 	}
 
+	if len(groups) == 0 {
+		return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
+			"at least one group email is required").WithHint("Use --group to specify tester group emails"))
+	}
+
 	if dryRun {
 		result := output.NewResult(map[string]interface{}{
 			"dryRun":  true,
@@ -825,11 +1290,71 @@ func (c *CLI) publishTestersAdd(ctx context.Context, track string, groups []stri
 		return c.Output(result.WithServices("androidpublisher"))
 	}
 
+	// Get API client
+	client, err := c.getAPIClient(ctx)
+	if err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+
+	publisher, err := client.AndroidPublisher()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+
+	// Acquire lock for package
+	editMgr := edits.NewManager()
+	if err := editMgr.AcquireLock(ctx, c.packageName); err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+	defer editMgr.ReleaseLock(c.packageName)
+
+	// Create edit
+	edit, err := publisher.Edits.Insert(c.packageName, nil).Context(ctx).Do()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
+			fmt.Sprintf("failed to create edit: %v", err)))
+	}
+
+	// Get current testers
+	testers, err := publisher.Edits.Testers.Get(c.packageName, edit.Id, track).Context(ctx).Do()
+	if err != nil {
+		// Might not exist, create new
+		testers = &androidpublisher.Testers{}
+	}
+
+	// Add new groups
+	existingGroups := make(map[string]bool)
+	for _, g := range testers.GoogleGroups {
+		existingGroups[g] = true
+	}
+	for _, g := range groups {
+		if !existingGroups[g] {
+			testers.GoogleGroups = append(testers.GoogleGroups, g)
+		}
+	}
+
+	// Update testers
+	_, err = publisher.Edits.Testers.Update(c.packageName, edit.Id, track, testers).Context(ctx).Do()
+	if err != nil {
+		publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
+			fmt.Sprintf("failed to update testers: %v", err)))
+	}
+
+	// Commit edit
+	_, err = publisher.Edits.Commit(c.packageName, edit.Id).Context(ctx).Do()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
+			fmt.Sprintf("failed to commit edit: %v", err)))
+	}
+
 	result := output.NewResult(map[string]interface{}{
-		"success": true,
-		"track":   track,
-		"groups":  groups,
-		"package": c.packageName,
+		"success":     true,
+		"track":       track,
+		"groupsAdded": groups,
+		"totalGroups": testers.GoogleGroups,
+		"package":     c.packageName,
+		"editId":      edit.Id,
 	})
 	return c.Output(result.WithServices("androidpublisher"))
 }
@@ -837,6 +1362,11 @@ func (c *CLI) publishTestersAdd(ctx context.Context, track string, groups []stri
 func (c *CLI) publishTestersRemove(ctx context.Context, track string, groups []string, dryRun bool) error {
 	if err := c.requirePackage(); err != nil {
 		return c.OutputError(err.(*errors.APIError))
+	}
+
+	if len(groups) == 0 {
+		return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
+			"at least one group email is required").WithHint("Use --group to specify tester group emails"))
 	}
 
 	if dryRun {
@@ -850,11 +1380,74 @@ func (c *CLI) publishTestersRemove(ctx context.Context, track string, groups []s
 		return c.Output(result.WithServices("androidpublisher"))
 	}
 
+	// Get API client
+	client, err := c.getAPIClient(ctx)
+	if err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+
+	publisher, err := client.AndroidPublisher()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+
+	// Acquire lock for package
+	editMgr := edits.NewManager()
+	if err := editMgr.AcquireLock(ctx, c.packageName); err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+	defer editMgr.ReleaseLock(c.packageName)
+
+	// Create edit
+	edit, err := publisher.Edits.Insert(c.packageName, nil).Context(ctx).Do()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
+			fmt.Sprintf("failed to create edit: %v", err)))
+	}
+
+	// Get current testers
+	testers, err := publisher.Edits.Testers.Get(c.packageName, edit.Id, track).Context(ctx).Do()
+	if err != nil {
+		publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+		return c.OutputError(errors.NewAPIError(errors.CodeNotFound,
+			fmt.Sprintf("no testers found for track: %s", track)))
+	}
+
+	// Remove specified groups
+	removeSet := make(map[string]bool)
+	for _, g := range groups {
+		removeSet[g] = true
+	}
+	var remaining []string
+	for _, g := range testers.GoogleGroups {
+		if !removeSet[g] {
+			remaining = append(remaining, g)
+		}
+	}
+	testers.GoogleGroups = remaining
+
+	// Update testers
+	_, err = publisher.Edits.Testers.Update(c.packageName, edit.Id, track, testers).Context(ctx).Do()
+	if err != nil {
+		publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
+			fmt.Sprintf("failed to update testers: %v", err)))
+	}
+
+	// Commit edit
+	_, err = publisher.Edits.Commit(c.packageName, edit.Id).Context(ctx).Do()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
+			fmt.Sprintf("failed to commit edit: %v", err)))
+	}
+
 	result := output.NewResult(map[string]interface{}{
-		"success": true,
-		"track":   track,
-		"groups":  groups,
-		"package": c.packageName,
+		"success":         true,
+		"track":           track,
+		"groupsRemoved":   groups,
+		"remainingGroups": remaining,
+		"package":         c.packageName,
+		"editId":          edit.Id,
 	})
 	return c.Output(result.WithServices("androidpublisher"))
 }
@@ -864,9 +1457,55 @@ func (c *CLI) publishTestersList(ctx context.Context, track string) error {
 		return c.OutputError(err.(*errors.APIError))
 	}
 
+	// Get API client
+	client, err := c.getAPIClient(ctx)
+	if err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+
+	publisher, err := client.AndroidPublisher()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+
+	// Create edit (read-only, won't commit)
+	edit, err := publisher.Edits.Insert(c.packageName, nil).Context(ctx).Do()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
+			fmt.Sprintf("failed to create edit: %v", err)))
+	}
+	defer publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+
+	if track != "" {
+		// Get testers for specific track
+		testers, err := publisher.Edits.Testers.Get(c.packageName, edit.Id, track).Context(ctx).Do()
+		if err != nil {
+			return c.OutputError(errors.NewAPIError(errors.CodeNotFound,
+				fmt.Sprintf("no testers found for track: %s", track)))
+		}
+		result := output.NewResult(map[string]interface{}{
+			"track":        track,
+			"googleGroups": testers.GoogleGroups,
+			"package":      c.packageName,
+		})
+		return c.Output(result.WithServices("androidpublisher"))
+	}
+
+	// Get testers for all tracks
+	tracks := []string{"internal", "alpha", "beta", "production"}
+	testersData := make(map[string]interface{})
+
+	for _, t := range tracks {
+		testers, err := publisher.Edits.Testers.Get(c.packageName, edit.Id, t).Context(ctx).Do()
+		if err == nil && len(testers.GoogleGroups) > 0 {
+			testersData[t] = map[string]interface{}{
+				"googleGroups": testers.GoogleGroups,
+			}
+		}
+	}
+
 	result := output.NewResult(map[string]interface{}{
-		"track":   track,
-		"groups":  []string{},
+		"testers": testersData,
 		"package": c.packageName,
 	})
 	return c.Output(result.WithServices("androidpublisher"))

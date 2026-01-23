@@ -2,8 +2,8 @@
 
 A fast, lightweight command-line interface for the Google Play Developer Console. The Google Play equivalent to the App Store Connect CLI.
 
-[![CI](https://github.com/example/gpd/actions/workflows/ci.yml/badge.svg)](https://github.com/example/gpd/actions/workflows/ci.yml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/google-play-cli/gpd)](https://goreportcard.com/report/github.com/google-play-cli/gpd)
+[![CI](https://github.com/dl-alexandre/gpd/actions/workflows/ci.yml/badge.svg)](https://github.com/dl-alexandre/gpd/actions/workflows/ci.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/dl-alexandre/gpd)](https://goreportcard.com/report/github.com/dl-alexandre/gpd)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
 ## Features
@@ -19,23 +19,30 @@ A fast, lightweight command-line interface for the Google Play Developer Console
 ### Homebrew (macOS/Linux)
 
 ```bash
+brew tap dl-alexandre/homebrew-tap
 brew install gpd
+```
+
+### Install Script (macOS/Linux)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/dl-alexandre/gpd/main/install.sh | bash
 ```
 
 ### Go Install
 
 ```bash
-go install github.com/google-play-cli/gpd/cmd/gpd@latest
+go install github.com/dl-alexandre/gpd/cmd/gpd@latest
 ```
 
 ### Download Binary
 
-Download the latest release from the [Releases](https://github.com/google-play-cli/gpd/releases) page.
+Download the latest release from the [Releases](https://github.com/dl-alexandre/gpd/releases) page.
 
 ### Build from Source
 
 ```bash
-git clone https://github.com/google-play-cli/gpd.git
+git clone https://github.com/dl-alexandre/gpd.git
 cd gpd
 make build
 ```

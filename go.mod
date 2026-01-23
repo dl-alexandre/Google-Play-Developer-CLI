@@ -1,4 +1,4 @@
-module github.com/google-play-cli/gpd
+module github.com/dl-alexandre/gpd
 
 go 1.21
 

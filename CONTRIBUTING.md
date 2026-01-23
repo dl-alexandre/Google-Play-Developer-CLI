@@ -72,7 +72,7 @@ Use clear, descriptive commit messages:
 
 ```bash
 # Clone the repository
-git clone https://github.com/google-play-cli/gpd.git
+git clone https://github.com/dl-alexandre/gpd.git
 cd gpd
 
 # Download dependencies

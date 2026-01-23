@@ -18,9 +18,9 @@ BINARY_NAME = gpd
 BINARY_DIR = bin
 
 # Build flags
-LDFLAGS = -ldflags "-X github.com/google-play-cli/gpd/pkg/version.Version=$(VERSION) \
-	-X github.com/google-play-cli/gpd/pkg/version.GitCommit=$(GIT_COMMIT) \
-	-X github.com/google-play-cli/gpd/pkg/version.BuildTime=$(BUILD_TIME)"
+LDFLAGS = -ldflags "-X github.com/dl-alexandre/gpd/pkg/version.Version=$(VERSION) \
+	-X github.com/dl-alexandre/gpd/pkg/version.GitCommit=$(GIT_COMMIT) \
+	-X github.com/dl-alexandre/gpd/pkg/version.BuildTime=$(BUILD_TIME)"
 
 # Platforms
 PLATFORMS = linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64

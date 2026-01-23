@@ -7,9 +7,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/google-play-cli/gpd/internal/auth"
-	"github.com/google-play-cli/gpd/internal/errors"
-	"github.com/google-play-cli/gpd/internal/output"
+	"github.com/dl-alexandre/gpd/internal/auth"
+	"github.com/dl-alexandre/gpd/internal/errors"
+	"github.com/dl-alexandre/gpd/internal/output"
 )
 
 func (c *CLI) addAuthCommands() {

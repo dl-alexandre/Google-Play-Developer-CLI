@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google-play-cli/gpd/internal/errors"
+	"github.com/dl-alexandre/gpd/internal/errors"
 )
 
 // Format represents the output format type.

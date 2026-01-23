@@ -13,9 +13,10 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"google.golang.org/api/androidpublisher/v3"
 
-	"github.com/google-play-cli/gpd/internal/errors"
-	"github.com/google-play-cli/gpd/internal/output"
+	"github.com/dl-alexandre/gpd/internal/errors"
+	"github.com/dl-alexandre/gpd/internal/output"
 )
 
 func (c *CLI) addReviewsCommands() {
@@ -277,12 +278,18 @@ func (c *CLI) reviewsReply(ctx context.Context, reviewID, replyText, templateFil
 	// Apply rate limiting
 	time.Sleep(rateDuration)
 
+	// Build the reply request
+	replyRequest := &androidpublisher.ReviewsReplyRequest{
+		ReplyText: replyText,
+	}
+
 	// Post reply
-	_, err = publisher.Reviews.Reply(c.packageName, reviewID, nil).Context(ctx).Do()
+	replyResp, err := publisher.Reviews.Reply(c.packageName, reviewID, replyRequest).Context(ctx).Do()
 	if err != nil {
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
 			fmt.Sprintf("failed to reply: %v", err)))
 	}
+	_ = replyResp // Contains the result with lastEdited timestamp
 
 	result := output.NewResult(map[string]interface{}{
 		"success":        true,

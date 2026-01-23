@@ -3,12 +3,46 @@ package cli
 
 import (
 	"context"
+	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
+	"google.golang.org/api/playdeveloperreporting/v1beta1"
 
-	"github.com/google-play-cli/gpd/internal/errors"
-	"github.com/google-play-cli/gpd/internal/output"
+	"github.com/dl-alexandre/gpd/internal/errors"
+	"github.com/dl-alexandre/gpd/internal/output"
 )
+
+// parseYear extracts year from ISO 8601 date (YYYY-MM-DD)
+func parseYear(date string) int64 {
+	parts := strings.Split(date, "-")
+	if len(parts) >= 1 {
+		y, _ := strconv.ParseInt(parts[0], 10, 64)
+		return y
+	}
+	return 0
+}
+
+// parseMonth extracts month from ISO 8601 date (YYYY-MM-DD)
+func parseMonth(date string) int64 {
+	parts := strings.Split(date, "-")
+	if len(parts) >= 2 {
+		m, _ := strconv.ParseInt(parts[1], 10, 64)
+		return m
+	}
+	return 0
+}
+
+// parseDay extracts day from ISO 8601 date (YYYY-MM-DD)
+func parseDay(date string) int64 {
+	parts := strings.Split(date, "-")
+	if len(parts) >= 3 {
+		d, _ := strconv.ParseInt(parts[2], 10, 64)
+		return d
+	}
+	return 0
+}
 
 func (c *CLI) addVitalsCommands() {
 	vitalsCmd := &cobra.Command{
@@ -118,16 +152,81 @@ func (c *CLI) vitalsCrashes(ctx context.Context, startDate, endDate string, dime
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
 	}
 
-	// Note: Simplified implementation
-	_ = reporting
+	// Build the app name for the API
+	appName := fmt.Sprintf("apps/%s", c.packageName)
+
+	// Build timeline spec
+	timelineSpec := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1TimelineSpec{
+		AggregationPeriod: "DAILY",
+		StartTime: &playdeveloperreporting.GoogleTypeDateTime{
+			Year:  parseYear(startDate),
+			Month: parseMonth(startDate),
+			Day:   parseDay(startDate),
+		},
+		EndTime: &playdeveloperreporting.GoogleTypeDateTime{
+			Year:  parseYear(endDate),
+			Month: parseMonth(endDate),
+			Day:   parseDay(endDate),
+		},
+	}
+
+	// Build query request
+	queryReq := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryCrashRateMetricSetRequest{
+		TimelineSpec: timelineSpec,
+		PageSize:     pageSize,
+	}
+
+	// Add dimensions if specified
+	if len(dimensions) > 0 {
+		queryReq.Dimensions = dimensions
+	}
+
+	if pageToken != "" {
+		queryReq.PageToken = pageToken
+	}
+
+	// Query crash rate metric set
+	var allRows []map[string]interface{}
+	for {
+		resp, err := reporting.Vitals.Crashrate.Query(appName, queryReq).Context(ctx).Do()
+		if err != nil {
+			return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
+				fmt.Sprintf("failed to query crash rate: %v", err)))
+		}
+
+		for _, row := range resp.Rows {
+			rowData := map[string]interface{}{
+				"startTime": row.StartTime,
+			}
+			// Extract metrics by name
+			for _, m := range row.Metrics {
+				if m.DecimalValue != nil {
+					rowData[m.Metric] = m.DecimalValue.Value
+				}
+			}
+			// Extract dimensions by name
+			for _, d := range row.Dimensions {
+				rowData[d.Dimension] = d.StringValue
+			}
+			allRows = append(allRows, rowData)
+		}
+
+		if !all || resp.NextPageToken == "" {
+			pageToken = resp.NextPageToken
+			break
+		}
+		queryReq.PageToken = resp.NextPageToken
+	}
 
 	result := output.NewResult(map[string]interface{}{
-		"metric":     "crashRate",
-		"startDate":  startDate,
-		"endDate":    endDate,
-		"dimensions": dimensions,
-		"package":    c.packageName,
-		"rows":       []interface{}{},
+		"metric":        "crashRate",
+		"startDate":     startDate,
+		"endDate":       endDate,
+		"dimensions":    dimensions,
+		"package":       c.packageName,
+		"rows":          allRows,
+		"rowCount":      len(allRows),
+		"nextPageToken": pageToken,
 		"dataFreshness": map[string]interface{}{
 			"note": "Vitals data may be delayed by 24-48 hours",
 		},
@@ -142,13 +241,92 @@ func (c *CLI) vitalsANRs(ctx context.Context, startDate, endDate string, dimensi
 		return c.OutputError(err.(*errors.APIError))
 	}
 
+	// Get API client
+	client, err := c.getAPIClient(ctx)
+	if err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+
+	reporting, err := client.PlayReporting()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+
+	// Build the app name for the API
+	appName := fmt.Sprintf("apps/%s", c.packageName)
+
+	// Build timeline spec
+	timelineSpec := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1TimelineSpec{
+		AggregationPeriod: "DAILY",
+		StartTime: &playdeveloperreporting.GoogleTypeDateTime{
+			Year:  parseYear(startDate),
+			Month: parseMonth(startDate),
+			Day:   parseDay(startDate),
+		},
+		EndTime: &playdeveloperreporting.GoogleTypeDateTime{
+			Year:  parseYear(endDate),
+			Month: parseMonth(endDate),
+			Day:   parseDay(endDate),
+		},
+	}
+
+	// Build query request
+	queryReq := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryAnrRateMetricSetRequest{
+		TimelineSpec: timelineSpec,
+		PageSize:     pageSize,
+	}
+
+	// Add dimensions if specified
+	if len(dimensions) > 0 {
+		queryReq.Dimensions = dimensions
+	}
+
+	if pageToken != "" {
+		queryReq.PageToken = pageToken
+	}
+
+	// Query ANR rate metric set
+	var allRows []map[string]interface{}
+	for {
+		resp, err := reporting.Vitals.Anrrate.Query(appName, queryReq).Context(ctx).Do()
+		if err != nil {
+			return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
+				fmt.Sprintf("failed to query ANR rate: %v", err)))
+		}
+
+		for _, row := range resp.Rows {
+			rowData := map[string]interface{}{
+				"startTime": row.StartTime,
+			}
+			// Extract metrics by name
+			for _, m := range row.Metrics {
+				if m.DecimalValue != nil {
+					rowData[m.Metric] = m.DecimalValue.Value
+				}
+			}
+			// Extract dimensions by name
+			for _, d := range row.Dimensions {
+				rowData[d.Dimension] = d.StringValue
+			}
+			allRows = append(allRows, rowData)
+		}
+
+		if !all || resp.NextPageToken == "" {
+			pageToken = resp.NextPageToken
+			break
+		}
+		queryReq.PageToken = resp.NextPageToken
+	}
+
 	result := output.NewResult(map[string]interface{}{
-		"metric":     "anrRate",
-		"startDate":  startDate,
-		"endDate":    endDate,
-		"dimensions": dimensions,
-		"package":    c.packageName,
-		"rows":       []interface{}{},
+		"metric":        "anrRate",
+		"startDate":     startDate,
+		"endDate":       endDate,
+		"dimensions":    dimensions,
+		"package":       c.packageName,
+		"rows":          allRows,
+		"rowCount":      len(allRows),
+		"nextPageToken": pageToken,
 		"dataFreshness": map[string]interface{}{
 			"note": "Vitals data may be delayed by 24-48 hours",
 		},
@@ -163,13 +341,42 @@ func (c *CLI) vitalsQuery(ctx context.Context, startDate, endDate string, metric
 		return c.OutputError(err.(*errors.APIError))
 	}
 
+	// The generic query routes to specific metric implementations
+	// based on the requested metrics
+	var allResults []map[string]interface{}
+
+	for _, metric := range metrics {
+		switch metric {
+		case "crashRate":
+			// Route to crash rate query
+			err := c.vitalsCrashes(ctx, startDate, endDate, dimensions, outputFmt, pageSize, pageToken, all)
+			if err != nil {
+				return err
+			}
+			return nil // Already output result
+		case "anrRate":
+			// Route to ANR rate query
+			err := c.vitalsANRs(ctx, startDate, endDate, dimensions, outputFmt, pageSize, pageToken, all)
+			if err != nil {
+				return err
+			}
+			return nil // Already output result
+		default:
+			allResults = append(allResults, map[string]interface{}{
+				"metric": metric,
+				"status": "unsupported",
+				"hint":   "Use 'gpd vitals capabilities' to see supported metrics",
+			})
+		}
+	}
+
 	result := output.NewResult(map[string]interface{}{
 		"metrics":    metrics,
 		"startDate":  startDate,
 		"endDate":    endDate,
 		"dimensions": dimensions,
 		"package":    c.packageName,
-		"rows":       []interface{}{},
+		"results":    allResults,
 		"dataFreshness": map[string]interface{}{
 			"note": "Vitals data may be delayed by 24-48 hours",
 		},

@@ -3,11 +3,13 @@ package cli
 
 import (
 	"context"
+	"strconv"
 
 	"github.com/spf13/cobra"
+	"google.golang.org/api/androidpublisher/v3"
 
-	"github.com/google-play-cli/gpd/internal/errors"
-	"github.com/google-play-cli/gpd/internal/output"
+	"github.com/dl-alexandre/gpd/internal/errors"
+	"github.com/dl-alexandre/gpd/internal/output"
 )
 
 func (c *CLI) addMonetizationCommands() {
@@ -228,13 +230,63 @@ func (c *CLI) monetizationProductsCreate(ctx context.Context, productID, product
 		return c.OutputError(err.(*errors.APIError))
 	}
 
-	// Implementation would create the product via API
+	if productID == "" {
+		return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
+			"product ID is required"))
+	}
+
+	// Get API client
+	client, err := c.getAPIClient(ctx)
+	if err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+
+	publisher, err := client.AndroidPublisher()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+
+	// Build product
+	product := &androidpublisher.InAppProduct{
+		PackageName:     c.packageName,
+		Sku:             productID,
+		Status:          status,
+		DefaultLanguage: "en-US",
+	}
+
+	// Set purchase type (managed or consumable -> managedUser or subscription)
+	if productType == "consumable" {
+		product.PurchaseType = "managedUser" // Consumable in Play Store API
+	} else {
+		product.PurchaseType = "managedUser" // Managed non-consumable
+	}
+
+	// Parse and set default price if provided
+	if defaultPrice != "" {
+		priceMicros, err := strconv.ParseInt(defaultPrice, 10, 64)
+		if err != nil {
+			return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
+				"invalid price format - use micros (e.g., 990000 for $0.99)"))
+		}
+		product.DefaultPrice = &androidpublisher.Price{
+			Currency:    "USD",
+			PriceMicros: strconv.FormatInt(priceMicros, 10),
+		}
+	}
+
+	// Create product
+	created, err := publisher.Inappproducts.Insert(c.packageName, product).Context(ctx).Do()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
+			err.Error()))
+	}
+
 	result := output.NewResult(map[string]interface{}{
 		"success":      true,
-		"productId":    productID,
-		"type":         productType,
-		"defaultPrice": defaultPrice,
-		"status":       status,
+		"productId":    created.Sku,
+		"status":       created.Status,
+		"purchaseType": created.PurchaseType,
+		"defaultPrice": created.DefaultPrice,
 		"package":      c.packageName,
 	})
 	return c.Output(result.WithServices("androidpublisher"))
@@ -245,12 +297,51 @@ func (c *CLI) monetizationProductsUpdate(ctx context.Context, productID, default
 		return c.OutputError(err.(*errors.APIError))
 	}
 
-	// Implementation would update the product via API
+	// Get API client
+	client, err := c.getAPIClient(ctx)
+	if err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+
+	publisher, err := client.AndroidPublisher()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+
+	// Get existing product
+	existing, err := publisher.Inappproducts.Get(c.packageName, productID).Context(ctx).Do()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeNotFound,
+			"product not found: "+productID))
+	}
+
+	// Update fields if provided
+	if status != "" {
+		existing.Status = status
+	}
+	if defaultPrice != "" {
+		priceMicros, err := strconv.ParseInt(defaultPrice, 10, 64)
+		if err != nil {
+			return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
+				"invalid price format - use micros (e.g., 990000 for $0.99)"))
+		}
+		existing.DefaultPrice = &androidpublisher.Price{
+			Currency:    "USD",
+			PriceMicros: strconv.FormatInt(priceMicros, 10),
+		}
+	}
+
+	// Update product
+	updated, err := publisher.Inappproducts.Update(c.packageName, productID, existing).Context(ctx).Do()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+
 	result := output.NewResult(map[string]interface{}{
 		"success":      true,
-		"productId":    productID,
-		"defaultPrice": defaultPrice,
-		"status":       status,
+		"productId":    updated.Sku,
+		"status":       updated.Status,
+		"defaultPrice": updated.DefaultPrice,
 		"package":      c.packageName,
 	})
 	return c.Output(result.WithServices("androidpublisher"))

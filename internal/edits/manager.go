@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google-play-cli/gpd/internal/config"
-	"github.com/google-play-cli/gpd/internal/errors"
+	"github.com/dl-alexandre/gpd/internal/config"
+	"github.com/dl-alexandre/gpd/internal/errors"
 )
 
 // Edit represents an edit transaction.

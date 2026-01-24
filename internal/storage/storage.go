@@ -89,16 +89,16 @@ func Platform() string {
 	return runtime.GOOS
 }
 
-// Errors for storage operations.
-type StorageError struct {
+// Error represents storage operation errors.
+type Error struct {
 	message string
 }
 
-func (e *StorageError) Error() string {
+func (e *Error) Error() string {
 	return e.message
 }
 
 var (
-	ErrStorageUnavailable = &StorageError{"secure storage not available on this platform"}
-	ErrKeyNotFound        = &StorageError{"key not found in secure storage"}
+	ErrStorageUnavailable = &Error{"secure storage not available on this platform"}
+	ErrKeyNotFound        = &Error{"key not found in secure storage"}
 )

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -105,6 +106,9 @@ for automating Android app publishing and management tasks.`,
 	c.addAnalyticsCommands()
 	c.addVitalsCommands()
 	c.addMonetizationCommands()
+	c.addPermissionsCommands()
+	c.addGamesCommands()
+	c.addRecoveryCommands()
 	c.addHelpCommands()
 }
 
@@ -128,8 +132,7 @@ func (c *CLI) setup(cmd *cobra.Command) error {
 	c.outputMgr.SetFormat(output.ParseFormat(c.outputFormat))
 	c.outputMgr.SetPretty(c.pretty)
 	if c.fields != "" {
-		// Split and set fields for projection
-		// Implementation would parse comma-separated paths
+		c.outputMgr.SetFields(strings.Split(c.fields, ","))
 	}
 
 	return nil

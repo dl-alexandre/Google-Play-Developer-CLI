@@ -2,14 +2,22 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
+	"net/mail"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
+	"google.golang.org/api/googleapi"
 	"google.golang.org/api/androidpublisher/v3"
 
 	"github.com/dl-alexandre/gpd/internal/api"
@@ -18,6 +26,85 @@ import (
 	"github.com/dl-alexandre/gpd/internal/errors"
 	"github.com/dl-alexandre/gpd/internal/output"
 )
+
+func (c *CLI) prepareEdit(ctx context.Context, publisher *androidpublisher.Service, editID string) (*edits.Manager, *edits.Edit, bool, error) {
+	editMgr := edits.NewManager()
+	if err := editMgr.AcquireLock(ctx, c.packageName); err != nil {
+		return nil, nil, false, err
+	}
+
+	var edit *edits.Edit
+	created := false
+	if editID != "" {
+		stored, err := editMgr.LoadEdit(c.packageName, editID)
+		if err != nil {
+			editMgr.ReleaseLock(c.packageName)
+			return nil, nil, false, err
+		}
+		if stored != nil {
+			if editMgr.IsEditExpired(stored, time.Now()) {
+				editMgr.ReleaseLock(c.packageName)
+				return nil, nil, false, errors.NewAPIError(errors.CodeConflict, "edit has expired")
+			}
+			edit = stored
+		} else {
+			edit = &edits.Edit{
+				Handle:      editID,
+				ServerID:    editID,
+				PackageName: c.packageName,
+				CreatedAt:   time.Now(),
+				LastUsedAt:  time.Now(),
+				State:       edits.StateDraft,
+			}
+			if err := editMgr.SaveEdit(edit); err != nil {
+				editMgr.ReleaseLock(c.packageName)
+				return nil, nil, false, err
+			}
+		}
+	} else {
+		apiEdit, err := publisher.Edits.Insert(c.packageName, nil).Context(ctx).Do()
+		if err != nil {
+			editMgr.ReleaseLock(c.packageName)
+			return nil, nil, false, errors.NewAPIError(errors.CodeGeneralError,
+				fmt.Sprintf("failed to create edit: %v", err))
+		}
+		edit = &edits.Edit{
+			Handle:      apiEdit.Id,
+			ServerID:    apiEdit.Id,
+			PackageName: c.packageName,
+			CreatedAt:   time.Now(),
+			LastUsedAt:  time.Now(),
+			State:       edits.StateDraft,
+		}
+		created = true
+		if err := editMgr.SaveEdit(edit); err != nil {
+			editMgr.ReleaseLock(c.packageName)
+			return nil, nil, false, err
+		}
+	}
+	return editMgr, edit, created, nil
+}
+
+func (c *CLI) finalizeEdit(ctx context.Context, publisher *androidpublisher.Service, editMgr *edits.Manager, edit *edits.Edit, commit bool) error {
+	if edit == nil {
+		return errors.NewAPIError(errors.CodeValidationError, "edit is required")
+	}
+	if !commit {
+		edit.LastUsedAt = time.Now()
+		if err := editMgr.SaveEdit(edit); err != nil {
+			return err
+		}
+		return nil
+	}
+	_, err := publisher.Edits.Commit(c.packageName, edit.ServerID).Context(ctx).Do()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError,
+			fmt.Sprintf("failed to commit edit: %v", err))
+	}
+	_, _ = editMgr.UpdateEditState(c.packageName, edit.Handle, edits.StateCommitted)
+	_ = editMgr.DeleteEdit(c.packageName, edit.Handle)
+	return nil
+}
 
 func (c *CLI) addPublishCommands() {
 	publishCmd := &cobra.Command{
@@ -36,6 +123,10 @@ func (c *CLI) addPublishCommands() {
 	var releaseNotesFile string
 	var confirm bool
 	var dryRun bool
+	var noAutoCommit bool
+	var deobfuscationType string
+	var deobfuscationVersionCode int64
+	var deobfuscationChunkSize int64
 
 	// publish upload
 	uploadCmd := &cobra.Command{
@@ -44,10 +135,11 @@ func (c *CLI) addPublishCommands() {
 		Long:  "Upload an Android App Bundle (AAB) or APK to an edit transaction.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return c.publishUpload(cmd.Context(), args[0], editID, dryRun)
+			return c.publishUpload(cmd.Context(), args[0], editID, noAutoCommit, dryRun)
 		},
 	}
 	uploadCmd.Flags().StringVar(&editID, "edit-id", "", "Explicit edit transaction ID")
+	uploadCmd.Flags().BoolVar(&noAutoCommit, "no-auto-commit", false, "Keep edit open for manual commit")
 	uploadCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show intended actions without executing")
 
 	// publish release
@@ -56,7 +148,7 @@ func (c *CLI) addPublishCommands() {
 		Short: "Create or update a release",
 		Long:  "Create a new release on a track with specified version codes.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return c.publishRelease(cmd.Context(), track, name, status, versionCodes, releaseNotesFile, editID, dryRun)
+			return c.publishRelease(cmd.Context(), track, name, status, versionCodes, releaseNotesFile, editID, noAutoCommit, dryRun)
 		},
 	}
 	releaseCmd.Flags().StringVar(&track, "track", "", "Release track (internal, alpha, beta, production)")
@@ -65,8 +157,9 @@ func (c *CLI) addPublishCommands() {
 	releaseCmd.Flags().StringSliceVar(&versionCodes, "version-code", nil, "Version codes to include (repeatable)")
 	releaseCmd.Flags().StringVar(&releaseNotesFile, "release-notes-file", "", "JSON file with localized release notes")
 	releaseCmd.Flags().StringVar(&editID, "edit-id", "", "Explicit edit transaction ID")
+	releaseCmd.Flags().BoolVar(&noAutoCommit, "no-auto-commit", false, "Keep edit open for manual commit")
 	releaseCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show intended actions without executing")
-	releaseCmd.MarkFlagRequired("track")
+	_ = releaseCmd.MarkFlagRequired("track")
 
 	// publish rollout
 	rolloutCmd := &cobra.Command{
@@ -74,14 +167,15 @@ func (c *CLI) addPublishCommands() {
 		Short: "Update rollout percentage",
 		Long:  "Update the staged rollout percentage for a production release.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return c.publishRollout(cmd.Context(), track, percentage, editID, dryRun)
+			return c.publishRollout(cmd.Context(), track, percentage, editID, noAutoCommit, dryRun)
 		},
 	}
 	rolloutCmd.Flags().StringVar(&track, "track", "production", "Release track")
 	rolloutCmd.Flags().Float64Var(&percentage, "percentage", 0, "Rollout percentage (0.01-100.00)")
 	rolloutCmd.Flags().StringVar(&editID, "edit-id", "", "Explicit edit transaction ID")
+	rolloutCmd.Flags().BoolVar(&noAutoCommit, "no-auto-commit", false, "Keep edit open for manual commit")
 	rolloutCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show intended actions without executing")
-	rolloutCmd.MarkFlagRequired("percentage")
+	_ = rolloutCmd.MarkFlagRequired("percentage")
 
 	// publish promote
 	var fromTrack, toTrack string
@@ -90,16 +184,17 @@ func (c *CLI) addPublishCommands() {
 		Short: "Promote a release between tracks",
 		Long:  "Copy a release from one track to another.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return c.publishPromote(cmd.Context(), fromTrack, toTrack, percentage, editID, dryRun)
+			return c.publishPromote(cmd.Context(), fromTrack, toTrack, percentage, editID, noAutoCommit, dryRun)
 		},
 	}
 	promoteCmd.Flags().StringVar(&fromTrack, "from-track", "", "Source track")
 	promoteCmd.Flags().StringVar(&toTrack, "to-track", "", "Destination track")
 	promoteCmd.Flags().Float64Var(&percentage, "percentage", 0, "Rollout percentage for destination")
 	promoteCmd.Flags().StringVar(&editID, "edit-id", "", "Explicit edit transaction ID")
+	promoteCmd.Flags().BoolVar(&noAutoCommit, "no-auto-commit", false, "Keep edit open for manual commit")
 	promoteCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show intended actions without executing")
-	promoteCmd.MarkFlagRequired("from-track")
-	promoteCmd.MarkFlagRequired("to-track")
+	_ = promoteCmd.MarkFlagRequired("from-track")
+	_ = promoteCmd.MarkFlagRequired("to-track")
 
 	// publish halt
 	haltCmd := &cobra.Command{
@@ -111,11 +206,12 @@ func (c *CLI) addPublishCommands() {
 				return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
 					"--confirm flag required for destructive operations"))
 			}
-			return c.publishHalt(cmd.Context(), track, editID, dryRun)
+			return c.publishHalt(cmd.Context(), track, editID, noAutoCommit, dryRun)
 		},
 	}
 	haltCmd.Flags().StringVar(&track, "track", "production", "Release track")
 	haltCmd.Flags().StringVar(&editID, "edit-id", "", "Explicit edit transaction ID")
+	haltCmd.Flags().BoolVar(&noAutoCommit, "no-auto-commit", false, "Keep edit open for manual commit")
 	haltCmd.Flags().BoolVar(&confirm, "confirm", false, "Confirm destructive operation")
 	haltCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show intended actions without executing")
 
@@ -130,15 +226,16 @@ func (c *CLI) addPublishCommands() {
 				return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
 					"--confirm flag required for destructive operations"))
 			}
-			return c.publishRollback(cmd.Context(), track, rollbackVersionCode, editID, dryRun)
+			return c.publishRollback(cmd.Context(), track, rollbackVersionCode, editID, noAutoCommit, dryRun)
 		},
 	}
 	rollbackCmd.Flags().StringVar(&track, "track", "", "Release track")
 	rollbackCmd.Flags().StringVar(&rollbackVersionCode, "version-code", "", "Specific version code to rollback to")
 	rollbackCmd.Flags().StringVar(&editID, "edit-id", "", "Explicit edit transaction ID")
+	rollbackCmd.Flags().BoolVar(&noAutoCommit, "no-auto-commit", false, "Keep edit open for manual commit")
 	rollbackCmd.Flags().BoolVar(&confirm, "confirm", false, "Confirm destructive operation")
 	rollbackCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show intended actions without executing")
-	rollbackCmd.MarkFlagRequired("track")
+	_ = rollbackCmd.MarkFlagRequired("track")
 
 	// publish status
 	statusCmd := &cobra.Command{
@@ -183,7 +280,7 @@ func (c *CLI) addPublishCommands() {
 		Use:   "update",
 		Short: "Update store listing",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return c.publishListingUpdate(cmd.Context(), locale, title, shortDesc, fullDesc, editID, dryRun)
+			return c.publishListingUpdate(cmd.Context(), locale, title, shortDesc, fullDesc, editID, noAutoCommit, dryRun)
 		},
 	}
 	listingUpdateCmd.Flags().StringVar(&locale, "locale", "en-US", "Locale code")
@@ -191,6 +288,7 @@ func (c *CLI) addPublishCommands() {
 	listingUpdateCmd.Flags().StringVar(&shortDesc, "short-description", "", "Short description")
 	listingUpdateCmd.Flags().StringVar(&fullDesc, "full-description", "", "Full description")
 	listingUpdateCmd.Flags().StringVar(&editID, "edit-id", "", "Explicit edit transaction ID")
+	listingUpdateCmd.Flags().BoolVar(&noAutoCommit, "no-auto-commit", false, "Keep edit open for manual commit")
 	listingUpdateCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show intended actions without executing")
 
 	listingGetCmd := &cobra.Command{
@@ -203,6 +301,55 @@ func (c *CLI) addPublishCommands() {
 	listingGetCmd.Flags().StringVar(&locale, "locale", "", "Locale code (leave empty for all)")
 
 	listingCmd.AddCommand(listingUpdateCmd, listingGetCmd)
+
+	// publish details
+	detailsCmd := &cobra.Command{
+		Use:   "details",
+		Short: "Manage app details",
+		Long:  "Get and update app contact information and settings.",
+	}
+
+	var contactEmail, contactPhone, contactWebsite, defaultLanguage, updateMask string
+	detailsGetCmd := &cobra.Command{
+		Use:   "get",
+		Short: "Get app details",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return c.publishDetailsGet(cmd.Context())
+		},
+	}
+
+	detailsUpdateCmd := &cobra.Command{
+		Use:   "update",
+		Short: "Update app details",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return c.publishDetailsUpdate(cmd.Context(), contactEmail, contactPhone, contactWebsite, defaultLanguage, editID, noAutoCommit, dryRun)
+		},
+	}
+	detailsUpdateCmd.Flags().StringVar(&contactEmail, "contact-email", "", "Contact email")
+	detailsUpdateCmd.Flags().StringVar(&contactPhone, "contact-phone", "", "Contact phone")
+	detailsUpdateCmd.Flags().StringVar(&contactWebsite, "contact-website", "", "Contact website")
+	detailsUpdateCmd.Flags().StringVar(&defaultLanguage, "default-language", "", "Default language")
+	detailsUpdateCmd.Flags().StringVar(&editID, "edit-id", "", "Explicit edit transaction ID")
+	detailsUpdateCmd.Flags().BoolVar(&noAutoCommit, "no-auto-commit", false, "Keep edit open for manual commit")
+	detailsUpdateCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show intended actions without executing")
+
+	detailsPatchCmd := &cobra.Command{
+		Use:   "patch",
+		Short: "Patch app details",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return c.publishDetailsPatch(cmd.Context(), contactEmail, contactPhone, contactWebsite, defaultLanguage, updateMask, editID, noAutoCommit, dryRun)
+		},
+	}
+	detailsPatchCmd.Flags().StringVar(&contactEmail, "contact-email", "", "Contact email")
+	detailsPatchCmd.Flags().StringVar(&contactPhone, "contact-phone", "", "Contact phone")
+	detailsPatchCmd.Flags().StringVar(&contactWebsite, "contact-website", "", "Contact website")
+	detailsPatchCmd.Flags().StringVar(&defaultLanguage, "default-language", "", "Default language")
+	detailsPatchCmd.Flags().StringVar(&updateMask, "update-mask", "", "Fields to update (comma-separated)")
+	detailsPatchCmd.Flags().StringVar(&editID, "edit-id", "", "Explicit edit transaction ID")
+	detailsPatchCmd.Flags().BoolVar(&noAutoCommit, "no-auto-commit", false, "Keep edit open for manual commit")
+	detailsPatchCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show intended actions without executing")
+
+	detailsCmd.AddCommand(detailsGetCmd, detailsUpdateCmd, detailsPatchCmd)
 
 	// publish assets
 	assetsCmd := &cobra.Command{
@@ -223,13 +370,14 @@ func (c *CLI) addPublishCommands() {
 			if len(args) > 0 {
 				dir = args[0]
 			}
-			return c.publishAssetsUpload(cmd.Context(), dir, category, replace, editID, dryRun)
+			return c.publishAssetsUpload(cmd.Context(), dir, category, replace, editID, noAutoCommit, dryRun)
 		},
 	}
 	assetsUploadCmd.Flags().StringVar(&assetsDir, "dir", "assets", "Assets directory")
 	assetsUploadCmd.Flags().StringVar(&category, "replace", "", "Category to replace (phone, tablet, tv, wear)")
 	assetsUploadCmd.Flags().BoolVar(&replace, "replace-all", false, "Replace all existing assets")
 	assetsUploadCmd.Flags().StringVar(&editID, "edit-id", "", "Explicit edit transaction ID")
+	assetsUploadCmd.Flags().BoolVar(&noAutoCommit, "no-auto-commit", false, "Keep edit open for manual commit")
 	assetsUploadCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show intended actions without executing")
 
 	assetsSpecCmd := &cobra.Command{
@@ -242,6 +390,110 @@ func (c *CLI) addPublishCommands() {
 	}
 
 	assetsCmd.AddCommand(assetsUploadCmd, assetsSpecCmd)
+
+	// publish images
+	imagesCmd := &cobra.Command{
+		Use:   "images",
+		Short: "Manage store images",
+		Long:  "Upload, list, and delete store images using edits.images.",
+	}
+
+	var imageLocale string
+	imagesUploadCmd := &cobra.Command{
+		Use:   "upload <type> <file>",
+		Short: "Upload an image",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return c.publishImagesUpload(cmd.Context(), args[0], args[1], imageLocale, editID, noAutoCommit, dryRun)
+		},
+	}
+	imagesUploadCmd.Flags().StringVar(&imageLocale, "locale", "en-US", "Locale code")
+	imagesUploadCmd.Flags().StringVar(&editID, "edit-id", "", "Explicit edit transaction ID")
+	imagesUploadCmd.Flags().BoolVar(&noAutoCommit, "no-auto-commit", false, "Keep edit open for manual commit")
+	imagesUploadCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show intended actions without executing")
+
+	imagesListCmd := &cobra.Command{
+		Use:   "list <type>",
+		Short: "List images",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return c.publishImagesList(cmd.Context(), args[0], imageLocale, editID)
+		},
+	}
+	imagesListCmd.Flags().StringVar(&imageLocale, "locale", "en-US", "Locale code")
+	imagesListCmd.Flags().StringVar(&editID, "edit-id", "", "Explicit edit transaction ID")
+
+	imagesDeleteCmd := &cobra.Command{
+		Use:   "delete <type> <id>",
+		Short: "Delete an image",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return c.publishImagesDelete(cmd.Context(), args[0], args[1], imageLocale, editID, noAutoCommit, dryRun)
+		},
+	}
+	imagesDeleteCmd.Flags().StringVar(&imageLocale, "locale", "en-US", "Locale code")
+	imagesDeleteCmd.Flags().StringVar(&editID, "edit-id", "", "Explicit edit transaction ID")
+	imagesDeleteCmd.Flags().BoolVar(&noAutoCommit, "no-auto-commit", false, "Keep edit open for manual commit")
+	imagesDeleteCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show intended actions without executing")
+
+	imagesDeleteAllCmd := &cobra.Command{
+		Use:   "deleteall <type>",
+		Short: "Delete all images for type",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return c.publishImagesDeleteAll(cmd.Context(), args[0], imageLocale, editID, noAutoCommit, dryRun)
+		},
+	}
+	imagesDeleteAllCmd.Flags().StringVar(&imageLocale, "locale", "en-US", "Locale code")
+	imagesDeleteAllCmd.Flags().StringVar(&editID, "edit-id", "", "Explicit edit transaction ID")
+	imagesDeleteAllCmd.Flags().BoolVar(&noAutoCommit, "no-auto-commit", false, "Keep edit open for manual commit")
+	imagesDeleteAllCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show intended actions without executing")
+
+	imagesCmd.AddCommand(imagesUploadCmd, imagesListCmd, imagesDeleteCmd, imagesDeleteAllCmd)
+
+	// publish deobfuscation
+	deobfuscationCmd := &cobra.Command{
+		Use:   "deobfuscation",
+		Short: "Manage deobfuscation files",
+		Long:  "Upload ProGuard/R8 mappings and native debug symbols.",
+	}
+
+	deobfuscationUploadCmd := &cobra.Command{
+		Use:   "upload <file>",
+		Short: "Upload deobfuscation file",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return c.publishDeobfuscationUpload(cmd.Context(), args[0], deobfuscationType, deobfuscationVersionCode, editID, deobfuscationChunkSize, noAutoCommit, dryRun)
+		},
+	}
+	deobfuscationUploadCmd.Flags().StringVar(&deobfuscationType, "type", "", "Deobfuscation file type: proguard or nativeCode")
+	deobfuscationUploadCmd.Flags().Int64Var(&deobfuscationVersionCode, "version-code", 0, "Version code to associate")
+	deobfuscationUploadCmd.Flags().StringVar(&editID, "edit-id", "", "Explicit edit transaction ID")
+	deobfuscationUploadCmd.Flags().Int64Var(&deobfuscationChunkSize, "chunk-size", 10*1024*1024, "Upload chunk size in bytes")
+	deobfuscationUploadCmd.Flags().BoolVar(&noAutoCommit, "no-auto-commit", false, "Keep edit open for manual commit")
+	deobfuscationUploadCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show intended actions without executing")
+	_ = deobfuscationUploadCmd.MarkFlagRequired("type")
+	_ = deobfuscationUploadCmd.MarkFlagRequired("version-code")
+
+	deobfuscationCmd.AddCommand(deobfuscationUploadCmd)
+
+	// publish internal-share
+	internalShareCmd := &cobra.Command{
+		Use:   "internal-share",
+		Short: "Upload artifacts for internal sharing",
+		Long:  "Upload APK/AAB for internal testing without edit workflow.",
+	}
+
+	internalShareUploadCmd := &cobra.Command{
+		Use:   "upload <file>",
+		Short: "Upload artifact for internal sharing",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return c.publishInternalShareUpload(cmd.Context(), args[0], dryRun)
+		},
+	}
+	internalShareUploadCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show intended actions without executing")
+	internalShareCmd.AddCommand(internalShareUploadCmd)
 
 	// publish testers
 	testersCmd := &cobra.Command{
@@ -256,22 +508,26 @@ func (c *CLI) addPublishCommands() {
 		Use:   "add",
 		Short: "Add tester groups",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return c.publishTestersAdd(cmd.Context(), testersTrack, groups, dryRun)
+			return c.publishTestersAdd(cmd.Context(), testersTrack, groups, editID, noAutoCommit, dryRun)
 		},
 	}
 	testersAddCmd.Flags().StringVar(&testersTrack, "track", "internal", "Track to add testers to")
 	testersAddCmd.Flags().StringSliceVar(&groups, "group", nil, "Google Group email addresses")
+	testersAddCmd.Flags().StringVar(&editID, "edit-id", "", "Explicit edit transaction ID")
+	testersAddCmd.Flags().BoolVar(&noAutoCommit, "no-auto-commit", false, "Keep edit open for manual commit")
 	testersAddCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show intended actions without executing")
 
 	testersRemoveCmd := &cobra.Command{
 		Use:   "remove",
 		Short: "Remove tester groups",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return c.publishTestersRemove(cmd.Context(), testersTrack, groups, dryRun)
+			return c.publishTestersRemove(cmd.Context(), testersTrack, groups, editID, noAutoCommit, dryRun)
 		},
 	}
 	testersRemoveCmd.Flags().StringVar(&testersTrack, "track", "internal", "Track to remove testers from")
 	testersRemoveCmd.Flags().StringSliceVar(&groups, "group", nil, "Google Group email addresses")
+	testersRemoveCmd.Flags().StringVar(&editID, "edit-id", "", "Explicit edit transaction ID")
+	testersRemoveCmd.Flags().BoolVar(&noAutoCommit, "no-auto-commit", false, "Keep edit open for manual commit")
 	testersRemoveCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show intended actions without executing")
 
 	testersListCmd := &cobra.Command{
@@ -285,12 +541,13 @@ func (c *CLI) addPublishCommands() {
 
 	testersCmd.AddCommand(testersAddCmd, testersRemoveCmd, testersListCmd)
 
+	c.addEditCommands(publishCmd)
 	publishCmd.AddCommand(uploadCmd, releaseCmd, rolloutCmd, promoteCmd, haltCmd, rollbackCmd,
-		statusCmd, tracksCmd, capabilitiesCmd, listingCmd, assetsCmd, testersCmd)
+		statusCmd, tracksCmd, capabilitiesCmd, listingCmd, detailsCmd, assetsCmd, imagesCmd, deobfuscationCmd, internalShareCmd, testersCmd)
 	c.rootCmd.AddCommand(publishCmd)
 }
 
-func (c *CLI) publishUpload(ctx context.Context, filePath, editID string, dryRun bool) error {
+func (c *CLI) publishUpload(ctx context.Context, filePath, editID string, noAutoCommit bool, dryRun bool) error {
 	if err := c.requirePackage(); err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
@@ -348,18 +605,11 @@ func (c *CLI) publishUpload(ctx context.Context, filePath, editID string, dryRun
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
 	}
 
-	// Acquire lock for package
-	if err := editMgr.AcquireLock(ctx, c.packageName); err != nil {
+	editMgr, edit, created, err := c.prepareEdit(ctx, publisher, editID)
+	if err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
 	defer editMgr.ReleaseLock(c.packageName)
-
-	// Create or get edit
-	edit, err := publisher.Edits.Insert(c.packageName, nil).Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
-			fmt.Sprintf("failed to create edit: %v", err)))
-	}
 
 	// Upload file
 	f, err := os.Open(filePath)
@@ -370,31 +620,31 @@ func (c *CLI) publishUpload(ctx context.Context, filePath, editID string, dryRun
 
 	var versionCode int64
 	if ext == ".aab" {
-		bundle, err := publisher.Edits.Bundles.Upload(c.packageName, edit.Id).
+		bundle, err := publisher.Edits.Bundles.Upload(c.packageName, edit.ServerID).
 			Media(f).Context(ctx).Do()
 		if err != nil {
-			// Abort edit on failure
-			publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+			if created {
+				publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+			}
 			return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
 				fmt.Sprintf("failed to upload bundle: %v", err)))
 		}
 		versionCode = bundle.VersionCode
 	} else {
-		apk, err := publisher.Edits.Apks.Upload(c.packageName, edit.Id).
+		apk, err := publisher.Edits.Apks.Upload(c.packageName, edit.ServerID).
 			Media(f).Context(ctx).Do()
 		if err != nil {
-			publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+			if created {
+				publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+			}
 			return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
 				fmt.Sprintf("failed to upload APK: %v", err)))
 		}
 		versionCode = int64(apk.VersionCode)
 	}
 
-	// Commit edit
-	_, err = publisher.Edits.Commit(c.packageName, edit.Id).Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
-			fmt.Sprintf("failed to commit edit: %v", err)))
+	if err := c.finalizeEdit(ctx, publisher, editMgr, edit, !noAutoCommit); err != nil {
+		return c.OutputError(err.(*errors.APIError))
 	}
 
 	// Cache the artifact
@@ -410,12 +660,13 @@ func (c *CLI) publishUpload(ctx context.Context, filePath, editID string, dryRun
 		"sizeHuman":   edits.FormatBytes(info.Size()),
 		"type":        ext[1:],
 		"package":     c.packageName,
-		"editId":      edit.Id,
+		"editId":      edit.ServerID,
+		"committed":   !noAutoCommit,
 	})
 	return c.Output(result.WithServices("androidpublisher"))
 }
 
-func (c *CLI) publishRelease(ctx context.Context, track, name, status string, versionCodes []string, releaseNotesFile, editID string, dryRun bool) error {
+func (c *CLI) publishRelease(ctx context.Context, track, name, status string, versionCodes []string, releaseNotesFile, editID string, noAutoCommit bool, dryRun bool) error {
 	if err := c.requirePackage(); err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
@@ -467,17 +718,18 @@ func (c *CLI) publishRelease(ctx context.Context, track, name, status string, ve
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
 	}
 
-	// Create edit
-	edit, err := publisher.Edits.Insert(c.packageName, nil).Context(ctx).Do()
+	editMgr, edit, created, err := c.prepareEdit(ctx, publisher, editID)
 	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
-			fmt.Sprintf("failed to create edit: %v", err)))
+		return c.OutputError(err.(*errors.APIError))
 	}
+	defer editMgr.ReleaseLock(c.packageName)
 
 	// Get track and update release
-	trackInfo, err := publisher.Edits.Tracks.Get(c.packageName, edit.Id, track).Context(ctx).Do()
+	trackInfo, err := publisher.Edits.Tracks.Get(c.packageName, edit.ServerID, track).Context(ctx).Do()
 	if err != nil {
-		publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+		if created {
+			publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+		}
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
 			fmt.Sprintf("failed to get track: %v", err)))
 	}
@@ -497,11 +749,8 @@ func (c *CLI) publishRelease(ctx context.Context, track, name, status string, ve
 	_ = trackInfo
 	_ = release
 
-	// Commit edit
-	_, err = publisher.Edits.Commit(c.packageName, edit.Id).Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
-			fmt.Sprintf("failed to commit edit: %v", err)))
+	if err := c.finalizeEdit(ctx, publisher, editMgr, edit, !noAutoCommit); err != nil {
+		return c.OutputError(err.(*errors.APIError))
 	}
 
 	result := output.NewResult(map[string]interface{}{
@@ -511,11 +760,13 @@ func (c *CLI) publishRelease(ctx context.Context, track, name, status string, ve
 		"status":       status,
 		"versionCodes": codes,
 		"package":      c.packageName,
+		"editId":       edit.ServerID,
+		"committed":    !noAutoCommit,
 	})
 	return c.Output(result.WithServices("androidpublisher"))
 }
 
-func (c *CLI) publishRollout(ctx context.Context, track string, percentage float64, editID string, dryRun bool) error {
+func (c *CLI) publishRollout(ctx context.Context, track string, percentage float64, editID string, noAutoCommit bool, dryRun bool) error {
 	if err := c.requirePackage(); err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
@@ -548,24 +799,18 @@ func (c *CLI) publishRollout(ctx context.Context, track string, percentage float
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
 	}
 
-	// Acquire lock for package
-	editMgr := edits.NewManager()
-	if err := editMgr.AcquireLock(ctx, c.packageName); err != nil {
+	editMgr, edit, created, err := c.prepareEdit(ctx, publisher, editID)
+	if err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
 	defer editMgr.ReleaseLock(c.packageName)
 
-	// Create edit
-	edit, err := publisher.Edits.Insert(c.packageName, nil).Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
-			fmt.Sprintf("failed to create edit: %v", err)))
-	}
-
 	// Get current track info
-	trackInfo, err := publisher.Edits.Tracks.Get(c.packageName, edit.Id, track).Context(ctx).Do()
+	trackInfo, err := publisher.Edits.Tracks.Get(c.packageName, edit.ServerID, track).Context(ctx).Do()
 	if err != nil {
-		publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+		if created {
+			publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+		}
 		return c.OutputError(errors.NewAPIError(errors.CodeNotFound,
 			fmt.Sprintf("track not found: %s", track)))
 	}
@@ -583,25 +828,24 @@ func (c *CLI) publishRollout(ctx context.Context, track string, percentage float
 	}
 
 	if updatedRelease == nil {
-		publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+		publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
 		return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
 			"no in-progress release found on track").
 			WithHint("Create a staged rollout release first with status 'inProgress'"))
 	}
 
-	// Update the track
-	_, err = publisher.Edits.Tracks.Update(c.packageName, edit.Id, track, trackInfo).Context(ctx).Do()
+		// Update the track
+		_, err = publisher.Edits.Tracks.Update(c.packageName, edit.ServerID, track, trackInfo).Context(ctx).Do()
 	if err != nil {
-		publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+		if created {
+			publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+		}
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
 			fmt.Sprintf("failed to update track: %v", err)))
 	}
 
-	// Commit edit
-	_, err = publisher.Edits.Commit(c.packageName, edit.Id).Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
-			fmt.Sprintf("failed to commit edit: %v", err)))
+	if err := c.finalizeEdit(ctx, publisher, editMgr, edit, !noAutoCommit); err != nil {
+		return c.OutputError(err.(*errors.APIError))
 	}
 
 	result := output.NewResult(map[string]interface{}{
@@ -611,12 +855,13 @@ func (c *CLI) publishRollout(ctx context.Context, track string, percentage float
 		"userFraction": percentage / 100.0,
 		"versionCodes": updatedRelease.VersionCodes,
 		"package":      c.packageName,
-		"editId":       edit.Id,
+		"editId":       edit.ServerID,
+		"committed":    !noAutoCommit,
 	})
 	return c.Output(result.WithServices("androidpublisher"))
 }
 
-func (c *CLI) publishPromote(ctx context.Context, fromTrack, toTrack string, percentage float64, editID string, dryRun bool) error {
+func (c *CLI) publishPromote(ctx context.Context, fromTrack, toTrack string, percentage float64, editID string, noAutoCommit bool, dryRun bool) error {
 	if err := c.requirePackage(); err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
@@ -653,24 +898,18 @@ func (c *CLI) publishPromote(ctx context.Context, fromTrack, toTrack string, per
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
 	}
 
-	// Acquire lock for package
-	editMgr := edits.NewManager()
-	if err := editMgr.AcquireLock(ctx, c.packageName); err != nil {
+	editMgr, edit, created, err := c.prepareEdit(ctx, publisher, editID)
+	if err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
 	defer editMgr.ReleaseLock(c.packageName)
 
-	// Create edit
-	edit, err := publisher.Edits.Insert(c.packageName, nil).Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
-			fmt.Sprintf("failed to create edit: %v", err)))
-	}
-
 	// Get source track info
-	sourceTrack, err := publisher.Edits.Tracks.Get(c.packageName, edit.Id, fromTrack).Context(ctx).Do()
+	sourceTrack, err := publisher.Edits.Tracks.Get(c.packageName, edit.ServerID, fromTrack).Context(ctx).Do()
 	if err != nil {
-		publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+		if created {
+			publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+		}
 		return c.OutputError(errors.NewAPIError(errors.CodeNotFound,
 			fmt.Sprintf("source track not found: %s", fromTrack)))
 	}
@@ -685,14 +924,14 @@ func (c *CLI) publishPromote(ctx context.Context, fromTrack, toTrack string, per
 	}
 
 	if sourceRelease == nil {
-		publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+		publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
 		return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
 			fmt.Sprintf("no active release found on track: %s", fromTrack)).
 			WithHint("Ensure the source track has a completed or in-progress release"))
 	}
 
 	// Get or create destination track
-	destTrack, err := publisher.Edits.Tracks.Get(c.packageName, edit.Id, toTrack).Context(ctx).Do()
+	destTrack, err := publisher.Edits.Tracks.Get(c.packageName, edit.ServerID, toTrack).Context(ctx).Do()
 	if err != nil {
 		// Track might not exist, create new track config
 		destTrack = &androidpublisher.Track{
@@ -718,18 +957,17 @@ func (c *CLI) publishPromote(ctx context.Context, fromTrack, toTrack string, per
 	destTrack.Releases = []*androidpublisher.TrackRelease{newRelease}
 
 	// Update destination track
-	_, err = publisher.Edits.Tracks.Update(c.packageName, edit.Id, toTrack, destTrack).Context(ctx).Do()
+	_, err = publisher.Edits.Tracks.Update(c.packageName, edit.ServerID, toTrack, destTrack).Context(ctx).Do()
 	if err != nil {
-		publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+		if created {
+			publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+		}
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
 			fmt.Sprintf("failed to update destination track: %v", err)))
 	}
 
-	// Commit edit
-	_, err = publisher.Edits.Commit(c.packageName, edit.Id).Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
-			fmt.Sprintf("failed to commit edit: %v", err)))
+	if err := c.finalizeEdit(ctx, publisher, editMgr, edit, !noAutoCommit); err != nil {
+		return c.OutputError(err.(*errors.APIError))
 	}
 
 	result := output.NewResult(map[string]interface{}{
@@ -740,12 +978,13 @@ func (c *CLI) publishPromote(ctx context.Context, fromTrack, toTrack string, per
 		"status":       newRelease.Status,
 		"percentage":   percentage,
 		"package":      c.packageName,
-		"editId":       edit.Id,
+		"editId":       edit.ServerID,
+		"committed":    !noAutoCommit,
 	})
 	return c.Output(result.WithServices("androidpublisher"))
 }
 
-func (c *CLI) publishHalt(ctx context.Context, track, editID string, dryRun bool) error {
+func (c *CLI) publishHalt(ctx context.Context, track, editID string, noAutoCommit bool, dryRun bool) error {
 	if err := c.requirePackage(); err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
@@ -771,24 +1010,18 @@ func (c *CLI) publishHalt(ctx context.Context, track, editID string, dryRun bool
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
 	}
 
-	// Acquire lock for package
-	editMgr := edits.NewManager()
-	if err := editMgr.AcquireLock(ctx, c.packageName); err != nil {
+	editMgr, edit, created, err := c.prepareEdit(ctx, publisher, editID)
+	if err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
 	defer editMgr.ReleaseLock(c.packageName)
 
-	// Create edit
-	edit, err := publisher.Edits.Insert(c.packageName, nil).Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
-			fmt.Sprintf("failed to create edit: %v", err)))
-	}
-
 	// Get current track info
-	trackInfo, err := publisher.Edits.Tracks.Get(c.packageName, edit.Id, track).Context(ctx).Do()
+	trackInfo, err := publisher.Edits.Tracks.Get(c.packageName, edit.ServerID, track).Context(ctx).Do()
 	if err != nil {
-		publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+		if created {
+			publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+		}
 		return c.OutputError(errors.NewAPIError(errors.CodeNotFound,
 			fmt.Sprintf("track not found: %s", track)))
 	}
@@ -804,25 +1037,24 @@ func (c *CLI) publishHalt(ctx context.Context, track, editID string, dryRun bool
 	}
 
 	if haltedRelease == nil {
-		publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+		publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
 		return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
 			"no in-progress release found on track").
 			WithHint("Only releases with status 'inProgress' can be halted"))
 	}
 
 	// Update the track
-	_, err = publisher.Edits.Tracks.Update(c.packageName, edit.Id, track, trackInfo).Context(ctx).Do()
+	_, err = publisher.Edits.Tracks.Update(c.packageName, edit.ServerID, track, trackInfo).Context(ctx).Do()
 	if err != nil {
-		publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+		if created {
+			publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+		}
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
 			fmt.Sprintf("failed to update track: %v", err)))
 	}
 
-	// Commit edit
-	_, err = publisher.Edits.Commit(c.packageName, edit.Id).Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
-			fmt.Sprintf("failed to commit edit: %v", err)))
+	if err := c.finalizeEdit(ctx, publisher, editMgr, edit, !noAutoCommit); err != nil {
+		return c.OutputError(err.(*errors.APIError))
 	}
 
 	result := output.NewResult(map[string]interface{}{
@@ -831,12 +1063,13 @@ func (c *CLI) publishHalt(ctx context.Context, track, editID string, dryRun bool
 		"status":       "halted",
 		"versionCodes": haltedRelease.VersionCodes,
 		"package":      c.packageName,
-		"editId":       edit.Id,
+		"editId":       edit.ServerID,
+		"committed":    !noAutoCommit,
 	})
 	return c.Output(result.WithServices("androidpublisher"))
 }
 
-func (c *CLI) publishRollback(ctx context.Context, track, versionCode, editID string, dryRun bool) error {
+func (c *CLI) publishRollback(ctx context.Context, track, versionCode, editID string, noAutoCommit bool, dryRun bool) error {
 	if err := c.requirePackage(); err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
@@ -878,24 +1111,18 @@ func (c *CLI) publishRollback(ctx context.Context, track, versionCode, editID st
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
 	}
 
-	// Acquire lock for package
-	editMgr := edits.NewManager()
-	if err := editMgr.AcquireLock(ctx, c.packageName); err != nil {
+	editMgr, edit, created, err := c.prepareEdit(ctx, publisher, editID)
+	if err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
 	defer editMgr.ReleaseLock(c.packageName)
 
-	// Create edit
-	edit, err := publisher.Edits.Insert(c.packageName, nil).Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
-			fmt.Sprintf("failed to create edit: %v", err)))
-	}
-
 	// Get current track info
-	trackInfo, err := publisher.Edits.Tracks.Get(c.packageName, edit.Id, track).Context(ctx).Do()
+	trackInfo, err := publisher.Edits.Tracks.Get(c.packageName, edit.ServerID, track).Context(ctx).Do()
 	if err != nil {
-		publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+		if created {
+			publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+		}
 		return c.OutputError(errors.NewAPIError(errors.CodeNotFound,
 			fmt.Sprintf("track not found: %s", track)))
 	}
@@ -919,7 +1146,9 @@ func (c *CLI) publishRollback(ctx context.Context, track, versionCode, editID st
 			}
 		}
 		if foundRelease == nil {
-			publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+			if created {
+				publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+			}
 			return c.OutputError(errors.NewAPIError(errors.CodeNotFound,
 				fmt.Sprintf("version code %d not found in track history", targetVersionCode)).
 				WithHint("Check available versions with 'gpd publish status --track " + track + "'"))
@@ -936,7 +1165,9 @@ func (c *CLI) publishRollback(ctx context.Context, track, versionCode, editID st
 			}
 		}
 		if previousRelease == nil {
-			publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+			if created {
+				publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+			}
 			return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
 				"no previous release found to rollback to").
 				WithHint("Specify a version code with --version-code flag"))
@@ -956,18 +1187,17 @@ func (c *CLI) publishRollback(ctx context.Context, track, versionCode, editID st
 	trackInfo.Releases = []*androidpublisher.TrackRelease{newRelease}
 
 	// Update the track
-	_, err = publisher.Edits.Tracks.Update(c.packageName, edit.Id, track, trackInfo).Context(ctx).Do()
+	_, err = publisher.Edits.Tracks.Update(c.packageName, edit.ServerID, track, trackInfo).Context(ctx).Do()
 	if err != nil {
-		publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+		if created {
+			publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+		}
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
 			fmt.Sprintf("failed to update track: %v", err)))
 	}
 
-	// Commit edit
-	_, err = publisher.Edits.Commit(c.packageName, edit.Id).Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
-			fmt.Sprintf("failed to commit edit: %v", err)))
+	if err := c.finalizeEdit(ctx, publisher, editMgr, edit, !noAutoCommit); err != nil {
+		return c.OutputError(err.(*errors.APIError))
 	}
 
 	result := output.NewResult(map[string]interface{}{
@@ -976,7 +1206,8 @@ func (c *CLI) publishRollback(ctx context.Context, track, versionCode, editID st
 		"versionCodes": rollbackVersionCodes,
 		"releaseName":  foundRelease.Name,
 		"package":      c.packageName,
-		"editId":       edit.Id,
+		"editId":       edit.ServerID,
+		"committed":    !noAutoCommit,
 	})
 	return c.Output(result.WithServices("androidpublisher"))
 }
@@ -1049,7 +1280,7 @@ func (c *CLI) publishCapabilities(ctx context.Context) error {
 	return c.Output(result.WithServices("androidpublisher"))
 }
 
-func (c *CLI) publishListingUpdate(ctx context.Context, locale, title, shortDesc, fullDesc, editID string, dryRun bool) error {
+func (c *CLI) publishListingUpdate(ctx context.Context, locale, title, shortDesc, fullDesc, editID string, noAutoCommit bool, dryRun bool) error {
 	if err := c.requirePackage(); err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
@@ -1080,19 +1311,11 @@ func (c *CLI) publishListingUpdate(ctx context.Context, locale, title, shortDesc
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
 	}
 
-	// Acquire lock for package
-	editMgr := edits.NewManager()
-	if err := editMgr.AcquireLock(ctx, c.packageName); err != nil {
+	editMgr, edit, created, err := c.prepareEdit(ctx, publisher, editID)
+	if err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
 	defer editMgr.ReleaseLock(c.packageName)
-
-	// Create edit
-	edit, err := publisher.Edits.Insert(c.packageName, nil).Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
-			fmt.Sprintf("failed to create edit: %v", err)))
-	}
 
 	// Build listing update
 	listing := &androidpublisher.Listing{
@@ -1109,18 +1332,17 @@ func (c *CLI) publishListingUpdate(ctx context.Context, locale, title, shortDesc
 	}
 
 	// Update the listing
-	updatedListing, err := publisher.Edits.Listings.Update(c.packageName, edit.Id, locale, listing).Context(ctx).Do()
+	updatedListing, err := publisher.Edits.Listings.Update(c.packageName, edit.ServerID, locale, listing).Context(ctx).Do()
 	if err != nil {
-		publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+		if created {
+			publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+		}
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
 			fmt.Sprintf("failed to update listing: %v", err)))
 	}
 
-	// Commit edit
-	_, err = publisher.Edits.Commit(c.packageName, edit.Id).Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
-			fmt.Sprintf("failed to commit edit: %v", err)))
+	if err := c.finalizeEdit(ctx, publisher, editMgr, edit, !noAutoCommit); err != nil {
+		return c.OutputError(err.(*errors.APIError))
 	}
 
 	result := output.NewResult(map[string]interface{}{
@@ -1130,7 +1352,8 @@ func (c *CLI) publishListingUpdate(ctx context.Context, locale, title, shortDesc
 		"shortDescription": updatedListing.ShortDescription,
 		"fullDescription":  updatedListing.FullDescription,
 		"package":          c.packageName,
-		"editId":           edit.Id,
+		"editId":           edit.ServerID,
+		"committed":        !noAutoCommit,
 	})
 	return c.Output(result.WithServices("androidpublisher"))
 }
@@ -1202,7 +1425,7 @@ func (c *CLI) publishListingGet(ctx context.Context, locale string) error {
 	return c.Output(result.WithServices("androidpublisher"))
 }
 
-func (c *CLI) publishAssetsUpload(ctx context.Context, dir, category string, replace bool, editID string, dryRun bool) error {
+func (c *CLI) publishAssetsUpload(ctx context.Context, dir, category string, replace bool, editID string, noAutoCommit bool, dryRun bool) error {
 	if err := c.requirePackage(); err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
@@ -1225,8 +1448,187 @@ func (c *CLI) publishAssetsUpload(ctx context.Context, dir, category string, rep
 		"category": category,
 		"replace":  replace,
 		"package":  c.packageName,
+		"editId":   editID,
+		"committed": !noAutoCommit,
 	})
 	return c.Output(result.WithServices("androidpublisher"))
+}
+
+func (c *CLI) publishDeobfuscationUpload(ctx context.Context, filePath, fileType string, versionCode int64, editID string, chunkSize int64, noAutoCommit bool, dryRun bool) error {
+	if err := c.requirePackage(); err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+
+	info, apiErr := validateDeobfuscationFile(filePath, fileType)
+	if apiErr != nil {
+		return c.OutputError(apiErr)
+	}
+
+	if dryRun {
+		result := output.NewResult(map[string]interface{}{
+			"dryRun":      true,
+			"action":      "deobfuscation_upload",
+			"path":        filePath,
+			"size":        info.Size(),
+			"sizeHuman":   edits.FormatBytes(info.Size()),
+			"type":        fileType,
+			"versionCode": versionCode,
+			"package":     c.packageName,
+		})
+		return c.Output(result.WithServices("androidpublisher"))
+	}
+
+	client, err := c.getAPIClient(ctx)
+	if err != nil {
+		if apiErr, ok := err.(*errors.APIError); ok {
+			return c.OutputError(apiErr)
+		}
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+
+	publisher, err := client.AndroidPublisher()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+
+	editMgr, edit, created, err := c.prepareEdit(ctx, publisher, editID)
+	if err != nil {
+		if apiErr, ok := err.(*errors.APIError); ok {
+			return c.OutputError(apiErr)
+		}
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+	defer editMgr.ReleaseLock(c.packageName)
+
+	if err := c.ensureVersionCodeExists(ctx, publisher, edit.ServerID, versionCode); err != nil {
+		if created {
+			publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+		}
+		return c.OutputError(err)
+	}
+
+	f, err := os.Open(filePath)
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+	defer f.Close()
+
+	call := publisher.Edits.Deobfuscationfiles.Upload(c.packageName, edit.ServerID, versionCode, fileType)
+	if chunkSize > 0 {
+		call.Media(f, googleapi.ChunkSize(int(chunkSize)))
+	} else {
+		call.Media(f)
+	}
+
+	resp, err := call.Context(ctx).Do()
+	if err != nil {
+		if created {
+			publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+		}
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
+			fmt.Sprintf("failed to upload deobfuscation file: %v", err)))
+	}
+
+	if err := c.finalizeEdit(ctx, publisher, editMgr, edit, !noAutoCommit); err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+
+	result := output.NewResult(map[string]interface{}{
+		"success":     true,
+		"type":        fileType,
+		"versionCode": versionCode,
+		"package":     c.packageName,
+		"size":        info.Size(),
+		"sizeHuman":   edits.FormatBytes(info.Size()),
+		"editId":      edit.ServerID,
+		"committed":   !noAutoCommit,
+		"response":    resp,
+	})
+	return c.Output(result.WithServices("androidpublisher"))
+}
+
+func validateDeobfuscationFile(filePath, fileType string) (os.FileInfo, *errors.APIError) {
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return nil, errors.NewAPIError(errors.CodeValidationError,
+			fmt.Sprintf("file not found: %s", filePath))
+	}
+
+	switch fileType {
+	case "proguard":
+		if info.Size() > 50*1024*1024 {
+			return nil, errors.NewAPIError(errors.CodeValidationError, "proguard mapping file exceeds 50MB")
+		}
+		if !looksLikeProguardMapping(filePath) {
+			return nil, errors.NewAPIError(errors.CodeValidationError, "proguard mapping file format invalid")
+		}
+	case "nativeCode":
+		if info.Size() > 100*1024*1024 {
+			return nil, errors.NewAPIError(errors.CodeValidationError, "native symbols file exceeds 100MB")
+		}
+		lower := strings.ToLower(filePath)
+		ext := strings.ToLower(filepath.Ext(filePath))
+		if ext != ".zip" && ext != ".sym" && !strings.HasSuffix(lower, ".so.sym") {
+			return nil, errors.NewAPIError(errors.CodeValidationError, "native symbols file must be .so.sym or .zip")
+		}
+	default:
+		return nil, errors.NewAPIError(errors.CodeValidationError, "type must be proguard or nativeCode")
+	}
+
+	return info, nil
+}
+
+func looksLikeProguardMapping(filePath string) bool {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	lines := 0
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		if strings.Contains(line, "->") && strings.HasSuffix(line, ":") {
+			return true
+		}
+		lines++
+		if lines > 50 {
+			break
+		}
+	}
+	return false
+}
+
+func (c *CLI) ensureVersionCodeExists(ctx context.Context, publisher *androidpublisher.Service, editID string, versionCode int64) *errors.APIError {
+	if versionCode <= 0 {
+		return errors.NewAPIError(errors.CodeValidationError, "version code must be greater than zero")
+	}
+
+	bundles, err := publisher.Edits.Bundles.List(c.packageName, editID).Context(ctx).Do()
+	if err == nil {
+		for _, bundle := range bundles.Bundles {
+			if bundle.VersionCode == versionCode {
+				return nil
+			}
+		}
+	}
+
+	apks, err := publisher.Edits.Apks.List(c.packageName, editID).Context(ctx).Do()
+	if err == nil {
+		for _, apk := range apks.Apks {
+			if int64(apk.VersionCode) == versionCode {
+				return nil
+			}
+		}
+	}
+
+	return errors.NewAPIError(errors.CodeValidationError,
+		fmt.Sprintf("version code %d not found in edit", versionCode)).
+		WithHint("Upload an APK/AAB in this edit before uploading deobfuscation files")
 }
 
 func (c *CLI) publishAssetsSpec(ctx context.Context) error {
@@ -1269,7 +1671,556 @@ func (c *CLI) publishAssetsSpec(ctx context.Context) error {
 	return c.Output(result.WithServices("androidpublisher"))
 }
 
-func (c *CLI) publishTestersAdd(ctx context.Context, track string, groups []string, dryRun bool) error {
+func (c *CLI) publishDetailsGet(ctx context.Context) error {
+	if err := c.requirePackage(); err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+
+	client, err := c.getAPIClient(ctx)
+	if err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+
+	publisher, err := client.AndroidPublisher()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+
+	edit, err := publisher.Edits.Insert(c.packageName, nil).Context(ctx).Do()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
+			fmt.Sprintf("failed to create edit: %v", err)))
+	}
+	defer publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+
+	details, err := publisher.Edits.Details.Get(c.packageName, edit.Id).Context(ctx).Do()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+
+	return c.Output(output.NewResult(details).WithServices("androidpublisher"))
+}
+
+func (c *CLI) publishDetailsUpdate(ctx context.Context, email, phone, website, defaultLanguage, editID string, noAutoCommit bool, dryRun bool) error {
+	if err := c.requirePackage(); err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+	if email == "" && phone == "" && website == "" && defaultLanguage == "" {
+		return c.OutputError(errors.NewAPIError(errors.CodeValidationError, "at least one field is required"))
+	}
+	if email != "" && !isValidEmail(email) {
+		return c.OutputError(errors.NewAPIError(errors.CodeValidationError, "invalid contact email"))
+	}
+	if website != "" && !isValidURL(website) {
+		return c.OutputError(errors.NewAPIError(errors.CodeValidationError, "invalid contact website"))
+	}
+
+	if dryRun {
+		result := output.NewResult(map[string]interface{}{
+			"dryRun":          true,
+			"action":          "details_update",
+			"contactEmail":    email,
+			"contactPhone":    phone,
+			"contactWebsite":  website,
+			"defaultLanguage": defaultLanguage,
+			"package":         c.packageName,
+		})
+		return c.Output(result.WithServices("androidpublisher"))
+	}
+
+	client, err := c.getAPIClient(ctx)
+	if err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+
+	publisher, err := client.AndroidPublisher()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+
+	editMgr, edit, created, err := c.prepareEdit(ctx, publisher, editID)
+	if err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+	defer editMgr.ReleaseLock(c.packageName)
+
+	details := &androidpublisher.AppDetails{
+		ContactEmail:   email,
+		ContactPhone:   phone,
+		ContactWebsite: website,
+		DefaultLanguage: defaultLanguage,
+	}
+
+	updated, err := publisher.Edits.Details.Update(c.packageName, edit.ServerID, details).Context(ctx).Do()
+	if err != nil {
+		if created {
+			publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+		}
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+
+	if err := c.finalizeEdit(ctx, publisher, editMgr, edit, !noAutoCommit); err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+
+	result := output.NewResult(map[string]interface{}{
+		"success":    true,
+		"details":    updated,
+		"package":    c.packageName,
+		"editId":     edit.ServerID,
+		"committed":  !noAutoCommit,
+	})
+	return c.Output(result.WithServices("androidpublisher"))
+}
+
+func (c *CLI) publishDetailsPatch(ctx context.Context, email, phone, website, defaultLanguage, updateMask, editID string, noAutoCommit bool, dryRun bool) error {
+	if err := c.requirePackage(); err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+	if email == "" && phone == "" && website == "" && defaultLanguage == "" {
+		return c.OutputError(errors.NewAPIError(errors.CodeValidationError, "at least one field is required"))
+	}
+	if email != "" && !isValidEmail(email) {
+		return c.OutputError(errors.NewAPIError(errors.CodeValidationError, "invalid contact email"))
+	}
+	if website != "" && !isValidURL(website) {
+		return c.OutputError(errors.NewAPIError(errors.CodeValidationError, "invalid contact website"))
+	}
+
+	if dryRun {
+		result := output.NewResult(map[string]interface{}{
+			"dryRun":          true,
+			"action":          "details_patch",
+			"contactEmail":    email,
+			"contactPhone":    phone,
+			"contactWebsite":  website,
+			"defaultLanguage": defaultLanguage,
+			"updateMask":      updateMask,
+			"package":         c.packageName,
+		})
+		return c.Output(result.WithServices("androidpublisher"))
+	}
+
+	client, err := c.getAPIClient(ctx)
+	if err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+
+	publisher, err := client.AndroidPublisher()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+
+	editMgr, edit, created, err := c.prepareEdit(ctx, publisher, editID)
+	if err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+	defer editMgr.ReleaseLock(c.packageName)
+
+	details := &androidpublisher.AppDetails{
+		ContactEmail:   email,
+		ContactPhone:   phone,
+		ContactWebsite: website,
+		DefaultLanguage: defaultLanguage,
+	}
+
+	if updateMask == "" {
+		var fields []string
+		if email != "" {
+			fields = append(fields, "contactEmail")
+		}
+		if phone != "" {
+			fields = append(fields, "contactPhone")
+		}
+		if website != "" {
+			fields = append(fields, "contactWebsite")
+		}
+		if defaultLanguage != "" {
+			fields = append(fields, "defaultLanguage")
+		}
+		updateMask = strings.Join(fields, ",")
+	}
+
+	call := publisher.Edits.Details.Patch(c.packageName, edit.ServerID, details)
+	// Note: UpdateMask is not available on EditsDetailsPatchCall
+	// The update mask functionality may need to be handled differently
+	// or may not be supported in the Patch method
+	updated, err := call.Context(ctx).Do()
+	if err != nil {
+		if created {
+			publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+		}
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+
+	if err := c.finalizeEdit(ctx, publisher, editMgr, edit, !noAutoCommit); err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+
+	result := output.NewResult(map[string]interface{}{
+		"success":    true,
+		"details":    updated,
+		"package":    c.packageName,
+		"editId":     edit.ServerID,
+		"committed":  !noAutoCommit,
+	})
+	return c.Output(result.WithServices("androidpublisher"))
+}
+
+func (c *CLI) publishImagesUpload(ctx context.Context, imageType, filePath, locale, editID string, noAutoCommit bool, dryRun bool) error {
+	if err := c.requirePackage(); err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+	info, cfg, format, apiErr := validateImageFile(filePath, imageType)
+	if apiErr != nil {
+		return c.OutputError(apiErr)
+	}
+	if dryRun {
+		result := output.NewResult(map[string]interface{}{
+			"dryRun":    true,
+			"action":    "images_upload",
+			"type":      imageType,
+			"locale":    locale,
+			"path":      filePath,
+			"width":     cfg.Width,
+			"height":    cfg.Height,
+			"format":    format,
+			"size":      info.Size(),
+			"sizeHuman": edits.FormatBytes(info.Size()),
+			"package":   c.packageName,
+		})
+		return c.Output(result.WithServices("androidpublisher"))
+	}
+
+	client, err := c.getAPIClient(ctx)
+	if err != nil {
+		if apiErr, ok := err.(*errors.APIError); ok {
+			return c.OutputError(apiErr)
+		}
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+
+	publisher, err := client.AndroidPublisher()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+
+	editMgr, edit, created, err := c.prepareEdit(ctx, publisher, editID)
+	if err != nil {
+		if apiErr, ok := err.(*errors.APIError); ok {
+			return c.OutputError(apiErr)
+		}
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+	defer editMgr.ReleaseLock(c.packageName)
+
+	f, err := os.Open(filePath)
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+	defer f.Close()
+
+	resp, err := publisher.Edits.Images.Upload(c.packageName, edit.ServerID, locale, imageType).
+		Media(f).Context(ctx).Do()
+	if err != nil {
+		if created {
+			publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+		}
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+
+	if err := c.finalizeEdit(ctx, publisher, editMgr, edit, !noAutoCommit); err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+
+	result := output.NewResult(map[string]interface{}{
+		"success":   true,
+		"type":      imageType,
+		"locale":    locale,
+		"image":     resp,
+		"package":   c.packageName,
+		"editId":    edit.ServerID,
+		"committed": !noAutoCommit,
+	})
+	return c.Output(result.WithServices("androidpublisher"))
+}
+
+func (c *CLI) publishImagesList(ctx context.Context, imageType, locale, editID string) error {
+	if err := c.requirePackage(); err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+	client, err := c.getAPIClient(ctx)
+	if err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+	publisher, err := client.AndroidPublisher()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+	var edit *androidpublisher.AppEdit
+	var created bool
+	if editID == "" {
+		edit, err = publisher.Edits.Insert(c.packageName, nil).Context(ctx).Do()
+		if err != nil {
+			return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+		}
+		created = true
+	} else {
+		edit = &androidpublisher.AppEdit{Id: editID}
+	}
+	if created {
+		defer publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+	}
+	images, err := publisher.Edits.Images.List(c.packageName, edit.Id, locale, imageType).Context(ctx).Do()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+	return c.Output(output.NewResult(images).WithServices("androidpublisher"))
+}
+
+func (c *CLI) publishImagesDelete(ctx context.Context, imageType, imageID, locale, editID string, noAutoCommit bool, dryRun bool) error {
+	if err := c.requirePackage(); err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+	if dryRun {
+		result := output.NewResult(map[string]interface{}{
+			"dryRun":  true,
+			"action":  "images_delete",
+			"type":    imageType,
+			"locale":  locale,
+			"id":      imageID,
+			"package": c.packageName,
+		})
+		return c.Output(result.WithServices("androidpublisher"))
+	}
+	client, err := c.getAPIClient(ctx)
+	if err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+	publisher, err := client.AndroidPublisher()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+	editMgr, edit, created, err := c.prepareEdit(ctx, publisher, editID)
+	if err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+	defer editMgr.ReleaseLock(c.packageName)
+
+	if err := publisher.Edits.Images.Delete(c.packageName, edit.ServerID, locale, imageType, imageID).Context(ctx).Do(); err != nil {
+		if created {
+			publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+		}
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+	if err := c.finalizeEdit(ctx, publisher, editMgr, edit, !noAutoCommit); err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+	result := output.NewResult(map[string]interface{}{
+		"success":   true,
+		"type":      imageType,
+		"locale":    locale,
+		"id":        imageID,
+		"package":   c.packageName,
+		"editId":    edit.ServerID,
+		"committed": !noAutoCommit,
+	})
+	return c.Output(result.WithServices("androidpublisher"))
+}
+
+func (c *CLI) publishImagesDeleteAll(ctx context.Context, imageType, locale, editID string, noAutoCommit bool, dryRun bool) error {
+	if err := c.requirePackage(); err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+	if dryRun {
+		result := output.NewResult(map[string]interface{}{
+			"dryRun":  true,
+			"action":  "images_deleteall",
+			"type":    imageType,
+			"locale":  locale,
+			"package": c.packageName,
+		})
+		return c.Output(result.WithServices("androidpublisher"))
+	}
+	client, err := c.getAPIClient(ctx)
+	if err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+	publisher, err := client.AndroidPublisher()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+	editMgr, edit, created, err := c.prepareEdit(ctx, publisher, editID)
+	if err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+	defer editMgr.ReleaseLock(c.packageName)
+
+	if _, err := publisher.Edits.Images.Deleteall(c.packageName, edit.ServerID, locale, imageType).Context(ctx).Do(); err != nil {
+		if created {
+			publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+		}
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+	if err := c.finalizeEdit(ctx, publisher, editMgr, edit, !noAutoCommit); err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+	result := output.NewResult(map[string]interface{}{
+		"success":   true,
+		"type":      imageType,
+		"locale":    locale,
+		"package":   c.packageName,
+		"editId":    edit.ServerID,
+		"committed": !noAutoCommit,
+	})
+	return c.Output(result.WithServices("androidpublisher"))
+}
+
+func (c *CLI) publishInternalShareUpload(ctx context.Context, filePath string, dryRun bool) error {
+	if err := c.requirePackage(); err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
+			fmt.Sprintf("file not found: %s", filePath)))
+	}
+	ext := strings.ToLower(filepath.Ext(filePath))
+	if ext != ".apk" && ext != ".aab" {
+		return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
+			"file must be an APK or AAB"))
+	}
+	if dryRun {
+		result := output.NewResult(map[string]interface{}{
+			"dryRun":    true,
+			"action":    "internal_share_upload",
+			"path":      filePath,
+			"size":      info.Size(),
+			"sizeHuman": edits.FormatBytes(info.Size()),
+			"type":      ext[1:],
+			"package":   c.packageName,
+		})
+		return c.Output(result.WithServices("androidpublisher"))
+	}
+	client, err := c.getAPIClient(ctx)
+	if err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+	publisher, err := client.AndroidPublisher()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+	f, err := os.Open(filePath)
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+	defer f.Close()
+	var resp *androidpublisher.InternalAppSharingArtifact
+	if ext == ".apk" {
+		resp, err = publisher.Internalappsharingartifacts.Uploadapk(c.packageName).Media(f).Context(ctx).Do()
+	} else {
+		resp, err = publisher.Internalappsharingartifacts.Uploadbundle(c.packageName).Media(f).Context(ctx).Do()
+	}
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+	result := output.NewResult(map[string]interface{}{
+		"success":  true,
+		"artifact": resp,
+		"package":  c.packageName,
+	})
+	return c.Output(result.WithServices("androidpublisher"))
+}
+
+type imageSpec struct {
+	minWidth  int
+	maxWidth  int
+	minHeight int
+	maxHeight int
+	maxSize   int64
+	formats   []string
+}
+
+func validateImageFile(filePath, imageType string) (os.FileInfo, image.Config, string, *errors.APIError) {
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return nil, image.Config{}, "", errors.NewAPIError(errors.CodeValidationError,
+			fmt.Sprintf("file not found: %s", filePath))
+	}
+	f, err := os.Open(filePath)
+	if err != nil {
+		return nil, image.Config{}, "", errors.NewAPIError(errors.CodeGeneralError, err.Error())
+	}
+	defer f.Close()
+
+	cfg, format, err := image.DecodeConfig(f)
+	if err != nil {
+		return nil, image.Config{}, "", errors.NewAPIError(errors.CodeValidationError, "invalid image file")
+	}
+
+	spec, ok := imageSpecs()[imageType]
+	if !ok {
+		return nil, image.Config{}, "", errors.NewAPIError(errors.CodeValidationError, "invalid image type")
+	}
+	if spec.maxSize > 0 && info.Size() > spec.maxSize {
+		return nil, image.Config{}, "", errors.NewAPIError(errors.CodeValidationError, "image exceeds size limit")
+	}
+	if spec.minWidth > 0 && cfg.Width < spec.minWidth {
+		return nil, image.Config{}, "", errors.NewAPIError(errors.CodeValidationError, "image width too small")
+	}
+	if spec.maxWidth > 0 && cfg.Width > spec.maxWidth {
+		return nil, image.Config{}, "", errors.NewAPIError(errors.CodeValidationError, "image width too large")
+	}
+	if spec.minHeight > 0 && cfg.Height < spec.minHeight {
+		return nil, image.Config{}, "", errors.NewAPIError(errors.CodeValidationError, "image height too small")
+	}
+	if spec.maxHeight > 0 && cfg.Height > spec.maxHeight {
+		return nil, image.Config{}, "", errors.NewAPIError(errors.CodeValidationError, "image height too large")
+	}
+	if len(spec.formats) > 0 && !containsString(spec.formats, format) {
+		return nil, image.Config{}, "", errors.NewAPIError(errors.CodeValidationError, "invalid image format")
+	}
+	return info, cfg, format, nil
+}
+
+func imageSpecs() map[string]imageSpec {
+	return map[string]imageSpec{
+		"icon":               {minWidth: 512, maxWidth: 512, minHeight: 512, maxHeight: 512, maxSize: 1 * 1024 * 1024, formats: []string{"png"}},
+		"featureGraphic":     {minWidth: 1024, maxWidth: 1024, minHeight: 500, maxHeight: 500, maxSize: 15 * 1024 * 1024, formats: []string{"png", "jpeg"}},
+		"promoGraphic":       {maxSize: 15 * 1024 * 1024, formats: []string{"png", "jpeg"}},
+		"tvBanner":           {minWidth: 1280, maxWidth: 1280, minHeight: 720, maxHeight: 720, maxSize: 15 * 1024 * 1024, formats: []string{"png", "jpeg"}},
+		"phoneScreenshots":   {minWidth: 320, maxWidth: 3840, minHeight: 320, maxHeight: 3840, maxSize: 8 * 1024 * 1024, formats: []string{"png", "jpeg"}},
+		"tabletScreenshots":  {minWidth: 320, maxWidth: 3840, minHeight: 320, maxHeight: 3840, maxSize: 8 * 1024 * 1024, formats: []string{"png", "jpeg"}},
+		"sevenInchScreenshots": {minWidth: 320, maxWidth: 3840, minHeight: 320, maxHeight: 3840, maxSize: 8 * 1024 * 1024, formats: []string{"png", "jpeg"}},
+		"tenInchScreenshots": {minWidth: 320, maxWidth: 3840, minHeight: 320, maxHeight: 3840, maxSize: 8 * 1024 * 1024, formats: []string{"png", "jpeg"}},
+		"tvScreenshots":      {minWidth: 320, maxWidth: 3840, minHeight: 320, maxHeight: 3840, maxSize: 8 * 1024 * 1024, formats: []string{"png", "jpeg"}},
+		"wearScreenshots":    {minWidth: 320, maxWidth: 3840, minHeight: 320, maxHeight: 3840, maxSize: 8 * 1024 * 1024, formats: []string{"png", "jpeg"}},
+	}
+}
+
+func isValidEmail(value string) bool {
+	_, err := mail.ParseAddress(value)
+	return err == nil
+}
+
+func isValidURL(value string) bool {
+	parsed, err := url.ParseRequestURI(value)
+	if err != nil {
+		return false
+	}
+	return parsed.Scheme != "" && parsed.Host != ""
+}
+
+func containsString(items []string, value string) bool {
+	for _, item := range items {
+		if item == value {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *CLI) publishTestersAdd(ctx context.Context, track string, groups []string, editID string, noAutoCommit bool, dryRun bool) error {
 	if err := c.requirePackage(); err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
@@ -1301,22 +2252,14 @@ func (c *CLI) publishTestersAdd(ctx context.Context, track string, groups []stri
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
 	}
 
-	// Acquire lock for package
-	editMgr := edits.NewManager()
-	if err := editMgr.AcquireLock(ctx, c.packageName); err != nil {
+	editMgr, edit, created, err := c.prepareEdit(ctx, publisher, editID)
+	if err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
 	defer editMgr.ReleaseLock(c.packageName)
 
-	// Create edit
-	edit, err := publisher.Edits.Insert(c.packageName, nil).Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
-			fmt.Sprintf("failed to create edit: %v", err)))
-	}
-
 	// Get current testers
-	testers, err := publisher.Edits.Testers.Get(c.packageName, edit.Id, track).Context(ctx).Do()
+	testers, err := publisher.Edits.Testers.Get(c.packageName, edit.ServerID, track).Context(ctx).Do()
 	if err != nil {
 		// Might not exist, create new
 		testers = &androidpublisher.Testers{}
@@ -1334,18 +2277,17 @@ func (c *CLI) publishTestersAdd(ctx context.Context, track string, groups []stri
 	}
 
 	// Update testers
-	_, err = publisher.Edits.Testers.Update(c.packageName, edit.Id, track, testers).Context(ctx).Do()
+	_, err = publisher.Edits.Testers.Update(c.packageName, edit.ServerID, track, testers).Context(ctx).Do()
 	if err != nil {
-		publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+		if created {
+			publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+		}
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
 			fmt.Sprintf("failed to update testers: %v", err)))
 	}
 
-	// Commit edit
-	_, err = publisher.Edits.Commit(c.packageName, edit.Id).Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
-			fmt.Sprintf("failed to commit edit: %v", err)))
+	if err := c.finalizeEdit(ctx, publisher, editMgr, edit, !noAutoCommit); err != nil {
+		return c.OutputError(err.(*errors.APIError))
 	}
 
 	result := output.NewResult(map[string]interface{}{
@@ -1354,12 +2296,13 @@ func (c *CLI) publishTestersAdd(ctx context.Context, track string, groups []stri
 		"groupsAdded": groups,
 		"totalGroups": testers.GoogleGroups,
 		"package":     c.packageName,
-		"editId":      edit.Id,
+		"editId":      edit.ServerID,
+		"committed":   !noAutoCommit,
 	})
 	return c.Output(result.WithServices("androidpublisher"))
 }
 
-func (c *CLI) publishTestersRemove(ctx context.Context, track string, groups []string, dryRun bool) error {
+func (c *CLI) publishTestersRemove(ctx context.Context, track string, groups []string, editID string, noAutoCommit bool, dryRun bool) error {
 	if err := c.requirePackage(); err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
@@ -1391,24 +2334,18 @@ func (c *CLI) publishTestersRemove(ctx context.Context, track string, groups []s
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
 	}
 
-	// Acquire lock for package
-	editMgr := edits.NewManager()
-	if err := editMgr.AcquireLock(ctx, c.packageName); err != nil {
+	editMgr, edit, created, err := c.prepareEdit(ctx, publisher, editID)
+	if err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
 	defer editMgr.ReleaseLock(c.packageName)
 
-	// Create edit
-	edit, err := publisher.Edits.Insert(c.packageName, nil).Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
-			fmt.Sprintf("failed to create edit: %v", err)))
-	}
-
 	// Get current testers
-	testers, err := publisher.Edits.Testers.Get(c.packageName, edit.Id, track).Context(ctx).Do()
+	testers, err := publisher.Edits.Testers.Get(c.packageName, edit.ServerID, track).Context(ctx).Do()
 	if err != nil {
-		publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+		if created {
+			publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+		}
 		return c.OutputError(errors.NewAPIError(errors.CodeNotFound,
 			fmt.Sprintf("no testers found for track: %s", track)))
 	}
@@ -1427,18 +2364,17 @@ func (c *CLI) publishTestersRemove(ctx context.Context, track string, groups []s
 	testers.GoogleGroups = remaining
 
 	// Update testers
-	_, err = publisher.Edits.Testers.Update(c.packageName, edit.Id, track, testers).Context(ctx).Do()
+	_, err = publisher.Edits.Testers.Update(c.packageName, edit.ServerID, track, testers).Context(ctx).Do()
 	if err != nil {
-		publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+		if created {
+			publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+		}
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
 			fmt.Sprintf("failed to update testers: %v", err)))
 	}
 
-	// Commit edit
-	_, err = publisher.Edits.Commit(c.packageName, edit.Id).Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
-			fmt.Sprintf("failed to commit edit: %v", err)))
+	if err := c.finalizeEdit(ctx, publisher, editMgr, edit, !noAutoCommit); err != nil {
+		return c.OutputError(err.(*errors.APIError))
 	}
 
 	result := output.NewResult(map[string]interface{}{
@@ -1447,7 +2383,8 @@ func (c *CLI) publishTestersRemove(ctx context.Context, track string, groups []s
 		"groupsRemoved":   groups,
 		"remainingGroups": remaining,
 		"package":         c.packageName,
-		"editId":          edit.Id,
+		"editId":          edit.ServerID,
+		"committed":       !noAutoCommit,
 	})
 	return c.Output(result.WithServices("androidpublisher"))
 }

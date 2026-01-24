@@ -104,7 +104,7 @@ func (c *CLI) authCheck(ctx context.Context) error {
 		} else {
 			check.HasAccess = true
 			// Clean up test edit
-			publisherSvc.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+			_ = publisherSvc.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
 		}
 		checks = append(checks, check)
 	}
@@ -151,7 +151,7 @@ func (c *CLI) authCheck(ctx context.Context) error {
 		}
 	}
 
-	checkResult := &auth.AuthCheckResult{
+	checkResult := &auth.CheckResult{
 		Valid:       valid,
 		Origin:      creds.Origin.String(),
 		Email:       creds.Email,

@@ -9,6 +9,7 @@ import (
 
 	"golang.org/x/oauth2"
 	"google.golang.org/api/androidpublisher/v3"
+	"google.golang.org/api/gamesmanagement/v1management"
 	"google.golang.org/api/option"
 	"google.golang.org/api/playdeveloperreporting/v1beta1"
 )
@@ -26,6 +27,10 @@ type Client struct {
 	reportingOnce sync.Once
 	reportingSvc  *playdeveloperreporting.Service
 	reportingErr  error
+
+	gamesManagementOnce sync.Once
+	gamesManagementSvc  *gamesmanagement.Service
+	gamesManagementErr  error
 
 	// Concurrency control
 	semaphore chan struct{}
@@ -88,6 +93,17 @@ func (c *Client) PlayReporting() (*playdeveloperreporting.Service, error) {
 		)
 	})
 	return c.reportingSvc, c.reportingErr
+}
+
+// GamesManagement returns the Games Management API service.
+func (c *Client) GamesManagement() (*gamesmanagement.Service, error) {
+	c.gamesManagementOnce.Do(func() {
+		c.gamesManagementSvc, c.gamesManagementErr = gamesmanagement.NewService(
+			context.Background(),
+			option.WithHTTPClient(c.httpClient),
+		)
+	})
+	return c.gamesManagementSvc, c.gamesManagementErr
 }
 
 // Acquire acquires a semaphore slot for concurrent API calls.

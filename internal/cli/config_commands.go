@@ -258,7 +258,9 @@ func (c *CLI) configGet(cmd *cobra.Command, key string) error {
 	// Convert config to map for key lookup
 	data, _ := json.Marshal(cfg)
 	var cfgMap map[string]interface{}
-	json.Unmarshal(data, &cfgMap)
+	if err := json.Unmarshal(data, &cfgMap); err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
 
 	value, ok := cfgMap[key]
 	if !ok {
@@ -281,13 +283,17 @@ func (c *CLI) configSet(cmd *cobra.Command, key, value string) error {
 	// Convert config to map for key setting
 	data, _ := json.Marshal(cfg)
 	var cfgMap map[string]interface{}
-	json.Unmarshal(data, &cfgMap)
+	if err := json.Unmarshal(data, &cfgMap); err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
 
 	cfgMap[key] = value
 
 	// Convert back to config
 	newData, _ := json.Marshal(cfgMap)
-	json.Unmarshal(newData, cfg)
+	if err := json.Unmarshal(newData, cfg); err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
 
 	if err := cfg.Save(); err != nil {
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))

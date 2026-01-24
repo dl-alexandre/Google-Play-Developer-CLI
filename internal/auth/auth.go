@@ -272,16 +272,16 @@ type PermissionCheck struct {
 	TestCall  string `json:"testCall"`
 }
 
-// AuthCheckResult contains the results of permission validation.
-type AuthCheckResult struct {
+// CheckResult contains the results of permission validation.
+type CheckResult struct {
 	Valid       bool               `json:"valid"`
 	Origin      string             `json:"origin"`
 	Email       string             `json:"email,omitempty"`
 	Permissions []*PermissionCheck `json:"permissions"`
 }
 
-// AuthStatus represents the current authentication status.
-type AuthStatus struct {
+// Status represents the current authentication status.
+type Status struct {
 	Authenticated bool   `json:"authenticated"`
 	Origin        string `json:"origin,omitempty"`
 	Email         string `json:"email,omitempty"`
@@ -291,17 +291,17 @@ type AuthStatus struct {
 }
 
 // GetStatus returns the current authentication status.
-func (m *Manager) GetStatus(ctx context.Context) (*AuthStatus, error) {
+func (m *Manager) GetStatus(ctx context.Context) (*Status, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	if m.creds == nil {
-		return &AuthStatus{
+		return &Status{
 			Authenticated: false,
 		}, nil
 	}
 
-	status := &AuthStatus{
+	status := &Status{
 		Authenticated: true,
 		Origin:        m.creds.Origin.String(),
 		Email:         m.creds.Email,

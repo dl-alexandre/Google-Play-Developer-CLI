@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -31,9 +32,10 @@ type Edit struct {
 type EditState string
 
 const (
-	StateOpen      EditState = "open"
-	StateCommitted EditState = "committed"
-	StateAborted   EditState = "aborted"
+	StateDraft      EditState = "draft"
+	StateValidating EditState = "validating"
+	StateCommitted  EditState = "committed"
+	StateAborted    EditState = "aborted"
 )
 
 // Manager handles edit transactions.
@@ -67,6 +69,8 @@ const (
 	lockTimeout      = 30 * time.Second
 	staleLockAge     = 4 * time.Hour
 	lockPollInterval = 100 * time.Millisecond
+	editTTL          = 7 * 24 * time.Hour
+	editIdleTTL      = 1 * time.Hour
 )
 
 // AcquireLock acquires a lock for the given package.
@@ -171,13 +175,12 @@ func (m *Manager) ReleaseLock(packageName string) error {
 	return os.Remove(lockPath)
 }
 
-// SaveEdit persists an edit mapping to disk.
 func (m *Manager) SaveEdit(edit *Edit) error {
 	if err := os.MkdirAll(m.editsDir, 0700); err != nil {
 		return err
 	}
 
-	path := filepath.Join(m.editsDir, edit.PackageName+".json")
+	path := m.editPath(edit.PackageName, edit.Handle)
 	data, err := json.MarshalIndent(edit, "", "  ")
 	if err != nil {
 		return err
@@ -186,9 +189,8 @@ func (m *Manager) SaveEdit(edit *Edit) error {
 	return os.WriteFile(path, data, 0600)
 }
 
-// LoadEdit loads an edit mapping from disk.
-func (m *Manager) LoadEdit(packageName string) (*Edit, error) {
-	path := filepath.Join(m.editsDir, packageName+".json")
+func (m *Manager) LoadEdit(packageName, handle string) (*Edit, error) {
+	path := m.editPath(packageName, handle)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -205,10 +207,95 @@ func (m *Manager) LoadEdit(packageName string) (*Edit, error) {
 	return &edit, nil
 }
 
-// DeleteEdit removes an edit mapping from disk.
-func (m *Manager) DeleteEdit(packageName string) error {
-	path := filepath.Join(m.editsDir, packageName+".json")
+func (m *Manager) DeleteEdit(packageName, handle string) error {
+	path := m.editPath(packageName, handle)
 	return os.Remove(path)
+}
+
+func (m *Manager) ListEdits(packageName string) ([]*Edit, error) {
+	if err := os.MkdirAll(m.editsDir, 0700); err != nil {
+		return nil, err
+	}
+
+	pattern := filepath.Join(m.editsDir, m.editPrefix(packageName)+"*.json")
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return nil, err
+	}
+
+	var editsList []*Edit
+	for _, path := range matches {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var edit Edit
+		if json.Unmarshal(data, &edit) != nil {
+			continue
+		}
+		editsList = append(editsList, &edit)
+	}
+	return editsList, nil
+}
+
+func (m *Manager) UpdateEditState(packageName, handle string, state EditState) (*Edit, error) {
+	edit, err := m.LoadEdit(packageName, handle)
+	if err != nil {
+		return nil, err
+	}
+	if edit == nil {
+		return nil, errors.NewAPIError(errors.CodeNotFound, "edit not found")
+	}
+	edit.State = state
+	edit.LastUsedAt = time.Now()
+	if err := m.SaveEdit(edit); err != nil {
+		return nil, err
+	}
+	return edit, nil
+}
+
+func (m *Manager) TouchEdit(packageName, handle string) (*Edit, error) {
+	edit, err := m.LoadEdit(packageName, handle)
+	if err != nil {
+		return nil, err
+	}
+	if edit == nil {
+		return nil, errors.NewAPIError(errors.CodeNotFound, "edit not found")
+	}
+	edit.LastUsedAt = time.Now()
+	if err := m.SaveEdit(edit); err != nil {
+		return nil, err
+	}
+	return edit, nil
+}
+
+func (m *Manager) IsEditExpired(edit *Edit, now time.Time) bool {
+	if edit == nil {
+		return true
+	}
+	if now.Sub(edit.CreatedAt) > editTTL {
+		return true
+	}
+	if now.Sub(edit.LastUsedAt) > editIdleTTL {
+		return true
+	}
+	return false
+}
+
+func (m *Manager) editPath(packageName, handle string) string {
+	return filepath.Join(m.editsDir, m.editPrefix(packageName)+m.sanitizeHandle(handle)+".json")
+}
+
+func (m *Manager) editPrefix(packageName string) string {
+	return m.sanitizeHandle(packageName) + "_"
+}
+
+func (m *Manager) sanitizeHandle(handle string) string {
+	if handle == "" {
+		handle = "default"
+	}
+	replacer := strings.NewReplacer("/", "_", "\\", "_", ":", "_")
+	return replacer.Replace(handle)
 }
 
 // CacheEntry represents a cached artifact entry.

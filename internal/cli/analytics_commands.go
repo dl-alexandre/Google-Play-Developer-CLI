@@ -45,8 +45,8 @@ func (c *CLI) addAnalyticsCommands() {
 	queryCmd.Flags().Int64Var(&pageSize, "page-size", 100, "Results per page")
 	queryCmd.Flags().StringVar(&pageToken, "page-token", "", "Pagination token")
 	queryCmd.Flags().BoolVar(&all, "all", false, "Fetch all pages")
-	queryCmd.MarkFlagRequired("start-date")
-	queryCmd.MarkFlagRequired("end-date")
+	_ = queryCmd.MarkFlagRequired("start-date")
+	_ = queryCmd.MarkFlagRequired("end-date")
 
 	// analytics capabilities
 	capabilitiesCmd := &cobra.Command{

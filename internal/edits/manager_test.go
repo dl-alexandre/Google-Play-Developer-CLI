@@ -141,9 +141,8 @@ func TestIdempotencyStore(t *testing.T) {
 }
 
 func TestEditState(t *testing.T) {
-	// Test edit states
-	states := []EditState{StateOpen, StateCommitted, StateAborted}
-	expected := []string{"open", "committed", "aborted"}
+	states := []EditState{StateDraft, StateValidating, StateCommitted, StateAborted}
+	expected := []string{"draft", "validating", "committed", "aborted"}
 
 	for i, state := range states {
 		if string(state) != expected[i] {

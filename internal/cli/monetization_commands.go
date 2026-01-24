@@ -306,7 +306,7 @@ func (c *CLI) addMonetizationCommands() {
 	}
 	var offerID string
 	var offerFile string
-	var offerIds []string
+	var offerIDs []string
 
 	offersCreateCmd := &cobra.Command{
 		Use:   "create [subscription-id] [plan-id]",
@@ -379,10 +379,10 @@ func (c *CLI) addMonetizationCommands() {
 		Short: "Batch get offers",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return c.monetizationOffersBatchGet(cmd.Context(), args[0], args[1], offerIds)
+			return c.monetizationOffersBatchGet(cmd.Context(), args[0], args[1], offerIDs)
 		},
 	}
-	offersBatchGetCmd.Flags().StringSliceVar(&offerIds, "offer-ids", nil, "Offer IDs")
+	offersBatchGetCmd.Flags().StringSliceVar(&offerIDs, "offer-ids", nil, "Offer IDs")
 	_ = offersBatchGetCmd.MarkFlagRequired("offer-ids")
 
 	offersBatchUpdateCmd := &cobra.Command{

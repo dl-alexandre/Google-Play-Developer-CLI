@@ -94,7 +94,7 @@ func (c *CLI) publishEditCreate(ctx context.Context) error {
 	if err := editMgr.AcquireLock(ctx, c.packageName); err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
-	defer editMgr.ReleaseLock(c.packageName)
+	defer func() { _ = editMgr.ReleaseLock(c.packageName) }()
 
 	apiEdit, err := publisher.Edits.Insert(c.packageName, nil).Context(ctx).Do()
 	if err != nil {

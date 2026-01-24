@@ -6,8 +6,8 @@ import (
 	"context"
 	"fmt"
 	"image"
-	_ "image/jpeg"
-	_ "image/png"
+	_ "image/jpeg" // Register JPEG decoder for image validation
+	_ "image/png"  // Register PNG decoder for image validation
 	"net/mail"
 	"net/url"
 	"os"
@@ -38,12 +38,12 @@ func (c *CLI) prepareEdit(ctx context.Context, publisher *androidpublisher.Servi
 	if editID != "" {
 		stored, err := editMgr.LoadEdit(c.packageName, editID)
 		if err != nil {
-			editMgr.ReleaseLock(c.packageName)
+			_ = editMgr.ReleaseLock(c.packageName)
 			return nil, nil, false, err
 		}
 		if stored != nil {
 			if editMgr.IsEditExpired(stored, time.Now()) {
-				editMgr.ReleaseLock(c.packageName)
+				_ = editMgr.ReleaseLock(c.packageName)
 				return nil, nil, false, errors.NewAPIError(errors.CodeConflict, "edit has expired")
 			}
 			edit = stored
@@ -57,14 +57,14 @@ func (c *CLI) prepareEdit(ctx context.Context, publisher *androidpublisher.Servi
 				State:       edits.StateDraft,
 			}
 			if err := editMgr.SaveEdit(edit); err != nil {
-				editMgr.ReleaseLock(c.packageName)
+				_ = editMgr.ReleaseLock(c.packageName)
 				return nil, nil, false, err
 			}
 		}
 	} else {
 		apiEdit, err := publisher.Edits.Insert(c.packageName, nil).Context(ctx).Do()
 		if err != nil {
-			editMgr.ReleaseLock(c.packageName)
+			_ = editMgr.ReleaseLock(c.packageName)
 			return nil, nil, false, errors.NewAPIError(errors.CodeGeneralError,
 				fmt.Sprintf("failed to create edit: %v", err))
 		}
@@ -78,7 +78,7 @@ func (c *CLI) prepareEdit(ctx context.Context, publisher *androidpublisher.Servi
 		}
 		created = true
 		if err := editMgr.SaveEdit(edit); err != nil {
-			editMgr.ReleaseLock(c.packageName)
+			_ = editMgr.ReleaseLock(c.packageName)
 			return nil, nil, false, err
 		}
 	}
@@ -609,7 +609,7 @@ func (c *CLI) publishUpload(ctx context.Context, filePath, editID string, noAuto
 	if err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
-	defer editMgr.ReleaseLock(c.packageName)
+	defer func() { _ = editMgr.ReleaseLock(c.packageName) }()
 
 	// Upload file
 	f, err := os.Open(filePath)
@@ -624,7 +624,7 @@ func (c *CLI) publishUpload(ctx context.Context, filePath, editID string, noAuto
 			Media(f).Context(ctx).Do()
 		if err != nil {
 			if created {
-				publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+				_ = publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
 			}
 			return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
 				fmt.Sprintf("failed to upload bundle: %v", err)))
@@ -635,7 +635,7 @@ func (c *CLI) publishUpload(ctx context.Context, filePath, editID string, noAuto
 			Media(f).Context(ctx).Do()
 		if err != nil {
 			if created {
-				publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+				_ = publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
 			}
 			return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
 				fmt.Sprintf("failed to upload APK: %v", err)))
@@ -648,7 +648,7 @@ func (c *CLI) publishUpload(ctx context.Context, filePath, editID string, noAuto
 	}
 
 	// Cache the artifact
-	editMgr.CacheArtifact(c.packageName, filePath, versionCode)
+	_ = editMgr.CacheArtifact(c.packageName, filePath, versionCode)
 
 	hash, _ := edits.HashFile(filePath)
 	result := output.NewResult(map[string]interface{}{

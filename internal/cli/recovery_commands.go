@@ -265,19 +265,19 @@ func (c *CLI) recoveryDeploy(ctx context.Context, recoveryID string) error {
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
 	}
 
-	appRecoveryId, err := parseRecoveryID(recoveryID)
+	appRecoveryID, err := parseRecoveryID(recoveryID)
 	if err != nil {
 		return c.OutputError(errors.NewAPIError(errors.CodeValidationError, err.Error()))
 	}
 
-	_, err = publisher.Apprecovery.Deploy(c.packageName, appRecoveryId, &androidpublisher.DeployAppRecoveryRequest{}).Context(ctx).Do()
+	_, err = publisher.Apprecovery.Deploy(c.packageName, appRecoveryID, &androidpublisher.DeployAppRecoveryRequest{}).Context(ctx).Do()
 	if err != nil {
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
 	}
 
 	result := output.NewResult(map[string]interface{}{
 		"success":       true,
-		"appRecoveryId": appRecoveryId,
+		"appRecoveryId": appRecoveryID,
 		"deployed":      true,
 		"package":       c.packageName,
 	})
@@ -295,19 +295,19 @@ func (c *CLI) recoveryCancel(ctx context.Context, recoveryID string) error {
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
 	}
 
-	appRecoveryId, err := parseRecoveryID(recoveryID)
+	appRecoveryID, err := parseRecoveryID(recoveryID)
 	if err != nil {
 		return c.OutputError(errors.NewAPIError(errors.CodeValidationError, err.Error()))
 	}
 
-	_, err = publisher.Apprecovery.Cancel(c.packageName, appRecoveryId, &androidpublisher.CancelAppRecoveryRequest{}).Context(ctx).Do()
+	_, err = publisher.Apprecovery.Cancel(c.packageName, appRecoveryID, &androidpublisher.CancelAppRecoveryRequest{}).Context(ctx).Do()
 	if err != nil {
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
 	}
 
 	result := output.NewResult(map[string]interface{}{
 		"success":       true,
-		"appRecoveryId": appRecoveryId,
+		"appRecoveryId": appRecoveryID,
 		"cancelled":     true,
 		"package":       c.packageName,
 	})
@@ -325,7 +325,7 @@ func (c *CLI) recoveryAddTargeting(ctx context.Context, recoveryID, targetingFil
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
 	}
 
-	appRecoveryId, err := parseRecoveryID(recoveryID)
+	appRecoveryID, err := parseRecoveryID(recoveryID)
 	if err != nil {
 		return c.OutputError(errors.NewAPIError(errors.CodeValidationError, err.Error()))
 	}
@@ -365,14 +365,14 @@ func (c *CLI) recoveryAddTargeting(ctx context.Context, recoveryID, targetingFil
 		req.TargetingUpdate = targetingUpdate
 	}
 
-	_, err = publisher.Apprecovery.AddTargeting(c.packageName, appRecoveryId, &req).Context(ctx).Do()
+	_, err = publisher.Apprecovery.AddTargeting(c.packageName, appRecoveryID, &req).Context(ctx).Do()
 	if err != nil {
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
 	}
 
 	result := output.NewResult(map[string]interface{}{
 		"success":         true,
-		"appRecoveryId":   appRecoveryId,
+		"appRecoveryId":   appRecoveryID,
 		"targetingAdded":  true,
 		"package":         c.packageName,
 	})

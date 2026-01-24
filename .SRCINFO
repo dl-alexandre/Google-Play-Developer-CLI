@@ -1,0 +1,17 @@
+pkgbase = gpd-git
+	pkgdesc = Google Play Developer CLI
+	pkgver = 0.1.0.2.gd2f8b0d
+	pkgrel = 1
+	url = https://github.com/dl-alexandre/gpd
+	arch = x86_64
+	arch = aarch64
+	license = Apache-2.0
+	makedepends = git
+	makedepends = go
+	depends = libsecret
+	provides = gpd
+	conflicts = gpd
+	source = git+https://github.com/dl-alexandre/gpd.git
+	sha256sums = SKIP
+
+pkgname = gpd-git

@@ -38,21 +38,21 @@ const (
 	StateAborted    EditState = "aborted"
 )
 
-// Manager handles edit transactions.
 type Manager struct {
-	editsDir  string
-	cacheDir  string
-	mu        sync.Mutex
-	lockFiles map[string]*LockFile
+	editsDir   string
+	cacheDir   string
+	mu         sync.Mutex
+	lockFiles  map[string]*LockFile
+	Idempotent *IdempotencyStore
 }
 
-// NewManager creates a new edit manager.
 func NewManager() *Manager {
 	paths := config.GetPaths()
 	return &Manager{
-		editsDir:  filepath.Join(paths.ConfigDir, "edits"),
-		cacheDir:  filepath.Join(paths.CacheDir, "artifacts"),
-		lockFiles: make(map[string]*LockFile),
+		editsDir:   filepath.Join(paths.ConfigDir, "edits"),
+		cacheDir:   filepath.Join(paths.CacheDir, "artifacts"),
+		lockFiles:  make(map[string]*LockFile),
+		Idempotent: NewIdempotencyStore(),
 	}
 }
 
@@ -309,13 +309,14 @@ type CacheEntry struct {
 
 const cacheTTL = 24 * time.Hour
 
-// GetCachedArtifact checks if an artifact is cached.
-func (m *Manager) GetCachedArtifact(packageName, artifactPath string) (*CacheEntry, error) {
-	hash, err := m.hashFile(artifactPath)
-	if err != nil {
-		return nil, err
-	}
+const (
+	largeFileThreshold = 100 * 1024 * 1024
+	hashBufferSize     = 64 * 1024
+)
 
+type ProgressCallback func(bytesProcessed, totalBytes int64)
+
+func (m *Manager) GetCachedArtifactByHash(packageName, hash string) (*CacheEntry, error) {
 	cachePath := filepath.Join(m.cacheDir, packageName, hash+".json")
 	data, err := os.ReadFile(cachePath)
 	if err != nil {
@@ -330,7 +331,6 @@ func (m *Manager) GetCachedArtifact(packageName, artifactPath string) (*CacheEnt
 		return nil, err
 	}
 
-	// Check if expired
 	if time.Now().After(entry.ExpiresAt) {
 		os.Remove(cachePath)
 		return nil, nil
@@ -339,13 +339,7 @@ func (m *Manager) GetCachedArtifact(packageName, artifactPath string) (*CacheEnt
 	return &entry, nil
 }
 
-// CacheArtifact caches an artifact.
-func (m *Manager) CacheArtifact(packageName, artifactPath string, versionCode int64) error {
-	hash, err := m.hashFile(artifactPath)
-	if err != nil {
-		return err
-	}
-
+func (m *Manager) CacheArtifactWithHash(packageName, artifactPath, hash string, versionCode int64) error {
 	cacheDir := filepath.Join(m.cacheDir, packageName)
 	if err := os.MkdirAll(cacheDir, 0700); err != nil {
 		return err
@@ -371,21 +365,6 @@ func (m *Manager) CacheArtifact(packageName, artifactPath string, versionCode in
 
 	cachePath := filepath.Join(cacheDir, hash+".json")
 	return os.WriteFile(cachePath, data, 0600)
-}
-
-func (m *Manager) hashFile(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-
-	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // CleanExpiredCache removes expired cache entries.
@@ -417,17 +396,50 @@ func (m *Manager) CleanExpiredCache() error {
 	})
 }
 
-// HashFile calculates SHA256 hash of a file.
 func HashFile(path string) (string, error) {
+	return HashFileWithProgress(path, nil)
+}
+
+func HashFileWithProgress(path string, progress ProgressCallback) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return "", err
 	}
 	defer f.Close()
 
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
+	info, err := f.Stat()
+	if err != nil {
 		return "", err
+	}
+
+	h := sha256.New()
+	totalBytes := info.Size()
+
+	if totalBytes <= largeFileThreshold && progress == nil {
+		if _, err := io.Copy(h, f); err != nil {
+			return "", err
+		}
+		return hex.EncodeToString(h.Sum(nil)), nil
+	}
+
+	buf := make([]byte, hashBufferSize)
+	var bytesProcessed int64
+
+	for {
+		n, err := f.Read(buf)
+		if n > 0 {
+			h.Write(buf[:n])
+			bytesProcessed += int64(n)
+			if progress != nil {
+				progress(bytesProcessed, totalBytes)
+			}
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return "", err
+		}
 	}
 
 	return hex.EncodeToString(h.Sum(nil)), nil
@@ -453,46 +465,64 @@ type CheckIdempotency struct {
 	Action      string      `json:"action"` // "skip", "update", "create"
 }
 
-// IdempotencyStore stores idempotency keys.
-type IdempotencyStore struct {
-	dir string
+const idempotencyTTL = 24 * time.Hour
+
+type IdempotencyEntry struct {
+	Key         string      `json:"key"`
+	Operation   string      `json:"operation"`
+	PackageName string      `json:"packageName"`
+	ContentHash string      `json:"contentHash,omitempty"`
+	Data        interface{} `json:"data"`
+	Timestamp   time.Time   `json:"timestamp"`
+	ExpiresAt   time.Time   `json:"expiresAt"`
 }
 
-// NewIdempotencyStore creates a new idempotency store.
+type IdempotencyStore struct {
+	dir string
+	ttl time.Duration
+}
+
 func NewIdempotencyStore() *IdempotencyStore {
 	paths := config.GetPaths()
 	return &IdempotencyStore{
 		dir: filepath.Join(paths.CacheDir, "idempotency"),
+		ttl: idempotencyTTL,
 	}
 }
 
-// Check checks if an operation was already performed.
+func (s *IdempotencyStore) generateKey(operation, packageName, contentHash string) string {
+	h := sha256.New()
+	h.Write([]byte(operation))
+	h.Write([]byte(packageName))
+	h.Write([]byte(contentHash))
+	return hex.EncodeToString(h.Sum(nil))[:32]
+}
+
 func (s *IdempotencyStore) Check(key string) (bool, error) {
-	path := filepath.Join(s.dir, key+".json")
-	_, err := os.Stat(path)
-	if os.IsNotExist(err) {
-		return false, nil
-	}
+	result, err := s.Get(key)
 	if err != nil {
 		return false, err
 	}
-	return true, nil
+	return result.Found, nil
 }
 
-// Record records that an operation was performed.
 func (s *IdempotencyStore) Record(key string, data interface{}) error {
+	return s.RecordWithMeta(key, "", "", "", data)
+}
+
+func (s *IdempotencyStore) RecordWithMeta(key, operation, packageName, contentHash string, data interface{}) error {
 	if err := os.MkdirAll(s.dir, 0700); err != nil {
 		return err
 	}
 
-	entry := struct {
-		Key       string      `json:"key"`
-		Data      interface{} `json:"data"`
-		Timestamp time.Time   `json:"timestamp"`
-	}{
-		Key:       key,
-		Data:      data,
-		Timestamp: time.Now(),
+	entry := &IdempotencyEntry{
+		Key:         key,
+		Operation:   operation,
+		PackageName: packageName,
+		ContentHash: contentHash,
+		Data:        data,
+		Timestamp:   time.Now(),
+		ExpiresAt:   time.Now().Add(s.ttl),
 	}
 
 	jsonData, err := json.MarshalIndent(entry, "", "  ")
@@ -504,7 +534,6 @@ func (s *IdempotencyStore) Record(key string, data interface{}) error {
 	return os.WriteFile(path, jsonData, 0600)
 }
 
-// Clear removes an idempotency record.
 func (s *IdempotencyStore) Clear(key string) error {
 	path := filepath.Join(s.dir, key+".json")
 	err := os.Remove(path)
@@ -514,15 +543,14 @@ func (s *IdempotencyStore) Clear(key string) error {
 	return err
 }
 
-// CheckResult holds the result of an idempotency check.
 type CheckResult struct {
 	Found     bool        `json:"found"`
 	Key       string      `json:"key"`
 	Data      interface{} `json:"data,omitempty"`
 	Timestamp time.Time   `json:"timestamp,omitempty"`
+	Expired   bool        `json:"expired,omitempty"`
 }
 
-// Get retrieves an idempotency record.
 func (s *IdempotencyStore) Get(key string) (*CheckResult, error) {
 	path := filepath.Join(s.dir, key+".json")
 	data, err := os.ReadFile(path)
@@ -533,13 +561,14 @@ func (s *IdempotencyStore) Get(key string) (*CheckResult, error) {
 		return nil, err
 	}
 
-	var entry struct {
-		Key       string      `json:"key"`
-		Data      interface{} `json:"data"`
-		Timestamp time.Time   `json:"timestamp"`
-	}
+	var entry IdempotencyEntry
 	if err := json.Unmarshal(data, &entry); err != nil {
 		return nil, err
+	}
+
+	if time.Now().After(entry.ExpiresAt) {
+		os.Remove(path)
+		return &CheckResult{Found: false, Key: key, Expired: true}, nil
 	}
 
 	return &CheckResult{
@@ -548,6 +577,80 @@ func (s *IdempotencyStore) Get(key string) (*CheckResult, error) {
 		Data:      entry.Data,
 		Timestamp: entry.Timestamp,
 	}, nil
+}
+
+func (s *IdempotencyStore) CleanExpired() error {
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		path := filepath.Join(s.dir, entry.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var e IdempotencyEntry
+		if json.Unmarshal(data, &e) != nil {
+			continue
+		}
+		if time.Now().After(e.ExpiresAt) {
+			os.Remove(path)
+		}
+	}
+	return nil
+}
+
+type UploadResult struct {
+	VersionCode int64  `json:"versionCode"`
+	SHA256      string `json:"sha256"`
+	Path        string `json:"path"`
+	Size        int64  `json:"size"`
+	Type        string `json:"type"`
+	EditID      string `json:"editId"`
+}
+
+func (s *IdempotencyStore) CheckUploadByHash(packageName, hash string) (*CheckResult, string, error) {
+	key := s.generateKey("upload", packageName, hash)
+	result, err := s.Get(key)
+	if err != nil {
+		return nil, key, err
+	}
+
+	return result, key, nil
+}
+
+func (s *IdempotencyStore) RecordUpload(key, packageName, hash string, result *UploadResult) error {
+	return s.RecordWithMeta(key, "upload", packageName, hash, result)
+}
+
+type CommitResult struct {
+	EditID    string `json:"editId"`
+	Committed bool   `json:"committed"`
+}
+
+func (s *IdempotencyStore) CheckCommit(packageName, editID, contentIdentifier string) (*CheckResult, string, error) {
+	key := s.generateKey("commit", packageName, editID+":"+contentIdentifier)
+	result, err := s.Get(key)
+	if err != nil {
+		return nil, key, err
+	}
+	return result, key, nil
+}
+
+func (s *IdempotencyStore) RecordCommit(key, packageName, editID string) error {
+	result := &CommitResult{
+		EditID:    editID,
+		Committed: true,
+	}
+	return s.RecordWithMeta(key, "commit", packageName, editID, result)
 }
 
 // FormatBytes formats bytes as a human-readable string.

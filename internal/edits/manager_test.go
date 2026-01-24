@@ -89,7 +89,7 @@ func TestHashFile(t *testing.T) {
 
 func TestIdempotencyStore(t *testing.T) {
 	tmpDir := t.TempDir()
-	store := &IdempotencyStore{dir: tmpDir}
+	store := &IdempotencyStore{dir: tmpDir, ttl: idempotencyTTL}
 
 	key := "test-key-123"
 

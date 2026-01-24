@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/spf13/cobra"
-	"google.golang.org/api/gamesmanagement/v1management"
+	gamesmanagement "google.golang.org/api/gamesmanagement/v1management"
 
 	"github.com/dl-alexandre/gpd/internal/errors"
 	"github.com/dl-alexandre/gpd/internal/output"
@@ -641,7 +641,7 @@ func (c *CLI) gamesApplicationsListHidden(ctx context.Context, applicationID str
 	return c.Output(result.WithServices("gamesmanagement"))
 }
 
-func (c *CLI) gamesCapabilities(ctx context.Context) error {
+func (c *CLI) gamesCapabilities(_ context.Context) error {
 	result := output.NewResult(map[string]interface{}{
 		"achievements": map[string]interface{}{
 			"operations": []string{

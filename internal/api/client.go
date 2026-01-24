@@ -3,23 +3,42 @@ package api
 
 import (
 	"context"
+	crand "crypto/rand"
+	"encoding/binary"
+	"fmt"
 	"net/http"
+	"os"
+	"strconv"
 	"sync"
 	"time"
 
 	"golang.org/x/oauth2"
 	"google.golang.org/api/androidpublisher/v3"
-	"google.golang.org/api/gamesmanagement/v1management"
+	gamesmanagement "google.golang.org/api/gamesmanagement/v1management"
+	"google.golang.org/api/googleapi"
 	"google.golang.org/api/option"
-	"google.golang.org/api/playdeveloperreporting/v1beta1"
+	playdeveloperreporting "google.golang.org/api/playdeveloperreporting/v1beta1"
 )
 
-// Client provides access to Google Play APIs.
-type Client struct {
-	httpClient *http.Client
-	timeout    time.Duration
+type RetryConfig struct {
+	MaxAttempts  int
+	InitialDelay time.Duration
+	MaxDelay     time.Duration
+}
 
-	// Lazy-initialized services
+func DefaultRetryConfig() RetryConfig {
+	return RetryConfig{
+		MaxAttempts:  3,
+		InitialDelay: 1 * time.Second,
+		MaxDelay:     30 * time.Second,
+	}
+}
+
+type Client struct {
+	httpClient  *http.Client
+	timeout     time.Duration
+	retryConfig RetryConfig
+
 	publisherOnce sync.Once
 	publisherSvc  *androidpublisher.Service
 	publisherErr  error
@@ -32,7 +51,6 @@ type Client struct {
 	gamesManagementSvc  *gamesmanagement.Service
 	gamesManagementErr  error
 
-	// Concurrency control
 	semaphore chan struct{}
 }
 
@@ -49,26 +67,48 @@ func WithTimeout(d time.Duration) Option {
 	}
 }
 
-// WithConcurrentCalls sets the maximum concurrent API calls.
 func WithConcurrentCalls(n int) Option {
 	return func(c *Client) {
 		c.semaphore = make(chan struct{}, n)
 	}
 }
 
-// NewClient creates a new API client with the given token source.
+func WithRetryConfig(cfg RetryConfig) Option {
+	return func(c *Client) {
+		c.retryConfig = cfg
+	}
+}
+
+func WithMaxRetryAttempts(n int) Option {
+	return func(c *Client) {
+		c.retryConfig.MaxAttempts = n
+	}
+}
+
 func NewClient(ctx context.Context, tokenSource oauth2.TokenSource, opts ...Option) (*Client, error) {
 	c := &Client{
-		timeout:   30 * time.Second,
-		semaphore: make(chan struct{}, DefaultConcurrentCalls),
+		timeout:     30 * time.Second,
+		semaphore:   make(chan struct{}, DefaultConcurrentCalls),
+		retryConfig: DefaultRetryConfig(),
 	}
 
 	for _, opt := range opts {
 		opt(c)
 	}
 
-	c.httpClient = oauth2.NewClient(ctx, tokenSource)
-	c.httpClient.Timeout = c.timeout
+	transport := &http.Transport{
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 10,
+		IdleConnTimeout:     90 * time.Second,
+	}
+
+	c.httpClient = &http.Client{
+		Transport: &oauth2.Transport{
+			Base:   transport,
+			Source: tokenSource,
+		},
+		Timeout: c.timeout,
+	}
 
 	return c, nil
 }
@@ -139,14 +179,117 @@ func (c *Client) AcquireForUpload(ctx context.Context) error {
 	return nil
 }
 
-// ReleaseForUpload releases exclusive upload access.
 func (c *Client) ReleaseForUpload() {
 	for i := 0; i < cap(c.semaphore); i++ {
 		<-c.semaphore
 	}
 }
 
-// ValidTracks returns the list of valid track names.
+func (c *Client) DoWithRetry(ctx context.Context, fn func() error) error {
+	var lastErr error
+
+	for attempt := 0; attempt < c.retryConfig.MaxAttempts; attempt++ {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		lastErr = fn()
+		if lastErr == nil {
+			return nil
+		}
+
+		if !isRetryableError(lastErr) {
+			return lastErr
+		}
+
+		if attempt == c.retryConfig.MaxAttempts-1 {
+			break
+		}
+
+		delay := c.calculateDelay(attempt, lastErr)
+		fmt.Fprintf(os.Stderr, "Retrying request (attempt %d/%d) after %v due to: %v\n", attempt+2, c.retryConfig.MaxAttempts, delay, lastErr)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(delay):
+		}
+	}
+
+	return lastErr
+}
+
+func isRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	if apiErr, ok := err.(*googleapi.Error); ok {
+		if apiErr.Code == http.StatusTooManyRequests {
+			return true
+		}
+		if apiErr.Code >= 500 && apiErr.Code < 600 {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (c *Client) calculateDelay(attempt int, err error) time.Duration {
+	return calculateDelayWithConfig(c.retryConfig, attempt, err)
+}
+
+func cryptoRandFloat64() float64 {
+	var buf [8]byte
+	_, err := crand.Read(buf[:])
+	if err != nil {
+		return 0.5
+	}
+	return float64(binary.BigEndian.Uint64(buf[:])&(1<<53-1)) / float64(1<<53)
+}
+
+func calculateDelayWithConfig(cfg RetryConfig, attempt int, err error) time.Duration {
+	if retryAfter := extractRetryAfter(err); retryAfter > 0 {
+		if retryAfter > cfg.MaxDelay {
+			return cfg.MaxDelay
+		}
+		return retryAfter
+	}
+
+	delay := cfg.InitialDelay * time.Duration(1<<uint(attempt))
+	if delay > cfg.MaxDelay {
+		delay = cfg.MaxDelay
+	}
+
+	jitter := time.Duration(cryptoRandFloat64() * float64(delay) * 0.3)
+	return delay + jitter
+}
+
+func extractRetryAfter(err error) time.Duration {
+	apiErr, ok := err.(*googleapi.Error)
+	if !ok {
+		return 0
+	}
+
+	for key, values := range apiErr.Header {
+		if http.CanonicalHeaderKey(key) == "Retry-After" && len(values) > 0 {
+			if seconds, parseErr := strconv.Atoi(values[0]); parseErr == nil {
+				return time.Duration(seconds) * time.Second
+			}
+			if t, parseErr := http.ParseTime(values[0]); parseErr == nil {
+				return time.Until(t)
+			}
+		}
+	}
+	return 0
+}
+
+func (c *Client) RetryConfig() RetryConfig {
+	return c.retryConfig
+}
+
 var ValidTracks = []string{"internal", "alpha", "beta", "production"}
 
 // IsValidTrack checks if a track name is valid.

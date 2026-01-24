@@ -125,120 +125,26 @@ func TestGamesCommandsExist(t *testing.T) {
 	cli := New()
 	rootCmd := cli.rootCmd
 
-	gamesCmd := findCommand(rootCmd, "games")
-	if gamesCmd == nil {
-		t.Fatal("games command not found")
-	}
+	gamesCmd := requireCommand(t, rootCmd, "games")
 
-	subcommands := make(map[string]bool)
-	for _, cmd := range gamesCmd.Commands() {
-		subcommands[cmd.Use] = true
-	}
-
+	subcommands := getSubcommandNames(gamesCmd)
 	requiredSubcommands := []string{"achievements", "scores", "events", "players", "applications", "capabilities"}
-	for _, subcmdName := range requiredSubcommands {
-		if !subcommands[subcmdName] {
-			t.Errorf("Games subcommand %q not found", subcmdName)
-		}
-	}
+	checkRequiredSubcommands(t, subcommands, requiredSubcommands, "Games")
 
-	achievementsCmd := findCommand(gamesCmd, "achievements")
-	if achievementsCmd == nil {
-		t.Fatal("games achievements command not found")
-	}
+	achievementsCmd := requireCommand(t, gamesCmd, "achievements")
+	checkSubcommandExists(t, getSubcommandNames(achievementsCmd), "reset", "Achievements")
 
-	achievementsSubcommands := make(map[string]bool)
-	for _, cmd := range achievementsCmd.Commands() {
-		cmdName := cmd.Name()
-		achievementsSubcommands[cmdName] = true
-		parts := strings.Fields(cmd.Use)
-		if len(parts) > 0 {
-			achievementsSubcommands[parts[0]] = true
-		}
-	}
+	scoresCmd := requireCommand(t, gamesCmd, "scores")
+	checkSubcommandExists(t, getSubcommandNames(scoresCmd), "reset", "Scores")
 
-	if !achievementsSubcommands["reset"] {
-		t.Error("Achievements reset subcommand not found")
-	}
+	eventsCmd := requireCommand(t, gamesCmd, "events")
+	checkSubcommandExists(t, getSubcommandNames(eventsCmd), "reset", "Events")
 
-	scoresCmd := findCommand(gamesCmd, "scores")
-	if scoresCmd == nil {
-		t.Fatal("games scores command not found")
-	}
+	playersCmd := requireCommand(t, gamesCmd, "players")
+	checkRequiredSubcommands(t, getSubcommandNames(playersCmd), []string{"hide", "unhide"}, "Players")
 
-	scoresSubcommands := make(map[string]bool)
-	for _, cmd := range scoresCmd.Commands() {
-		cmdName := cmd.Name()
-		scoresSubcommands[cmdName] = true
-		parts := strings.Fields(cmd.Use)
-		if len(parts) > 0 {
-			scoresSubcommands[parts[0]] = true
-		}
-	}
-
-	if !scoresSubcommands["reset"] {
-		t.Error("Scores reset subcommand not found")
-	}
-
-	eventsCmd := findCommand(gamesCmd, "events")
-	if eventsCmd == nil {
-		t.Fatal("games events command not found")
-	}
-
-	eventsSubcommands := make(map[string]bool)
-	for _, cmd := range eventsCmd.Commands() {
-		cmdName := cmd.Name()
-		eventsSubcommands[cmdName] = true
-		parts := strings.Fields(cmd.Use)
-		if len(parts) > 0 {
-			eventsSubcommands[parts[0]] = true
-		}
-	}
-
-	if !eventsSubcommands["reset"] {
-		t.Error("Events reset subcommand not found")
-	}
-
-	playersCmd := findCommand(gamesCmd, "players")
-	if playersCmd == nil {
-		t.Fatal("games players command not found")
-	}
-
-	playersSubcommands := make(map[string]bool)
-	for _, cmd := range playersCmd.Commands() {
-		cmdName := cmd.Name()
-		playersSubcommands[cmdName] = true
-		parts := strings.Fields(cmd.Use)
-		if len(parts) > 0 {
-			playersSubcommands[parts[0]] = true
-		}
-	}
-
-	requiredPlayersSubcommands := []string{"hide", "unhide"}
-	for _, subcmdName := range requiredPlayersSubcommands {
-		if !playersSubcommands[subcmdName] {
-			t.Errorf("Players subcommand %q not found", subcmdName)
-		}
-	}
-
-	applicationsCmd := findCommand(gamesCmd, "applications")
-	if applicationsCmd == nil {
-		t.Fatal("games applications command not found")
-	}
-
-	applicationsSubcommands := make(map[string]bool)
-	for _, cmd := range applicationsCmd.Commands() {
-		cmdName := cmd.Name()
-		applicationsSubcommands[cmdName] = true
-		parts := strings.Fields(cmd.Use)
-		if len(parts) > 0 {
-			applicationsSubcommands[parts[0]] = true
-		}
-	}
-
-	if !applicationsSubcommands["list-hidden"] {
-		t.Error("Applications list-hidden subcommand not found")
-	}
+	applicationsCmd := requireCommand(t, gamesCmd, "applications")
+	checkSubcommandExists(t, getSubcommandNames(applicationsCmd), "list-hidden", "Applications")
 }
 
 func TestPermissionsFlags(t *testing.T) {
@@ -423,6 +329,49 @@ func TestCapabilitiesCommandsExist(t *testing.T) {
 	gamesCapabilitiesCmd := findCommand(gamesCmd, "capabilities")
 	if gamesCapabilitiesCmd == nil {
 		t.Error("games capabilities command not found")
+	}
+}
+
+// getSubcommandNames extracts all subcommand names from a command.
+// It includes both the command name and the first word of the Use field.
+func getSubcommandNames(cmd *cobra.Command) map[string]bool {
+	subcommands := make(map[string]bool)
+	for _, c := range cmd.Commands() {
+		subcommands[c.Name()] = true
+		subcommands[c.Use] = true
+		parts := strings.Fields(c.Use)
+		if len(parts) > 0 {
+			subcommands[parts[0]] = true
+		}
+	}
+	return subcommands
+}
+
+// requireCommand finds a subcommand by name or fails the test.
+func requireCommand(t *testing.T, parent *cobra.Command, name string) *cobra.Command {
+	t.Helper()
+	cmd := findCommand(parent, name)
+	if cmd == nil {
+		t.Fatalf("%s %s command not found", parent.Name(), name)
+	}
+	return cmd
+}
+
+// checkRequiredSubcommands verifies that all required subcommands exist.
+func checkRequiredSubcommands(t *testing.T, subcommands map[string]bool, required []string, parentName string) {
+	t.Helper()
+	for _, name := range required {
+		if !subcommands[name] {
+			t.Errorf("%s subcommand %q not found", parentName, name)
+		}
+	}
+}
+
+// checkSubcommandExists verifies that a single subcommand exists.
+func checkSubcommandExists(t *testing.T, subcommands map[string]bool, name, parentName string) {
+	t.Helper()
+	if !subcommands[name] {
+		t.Errorf("%s %s subcommand not found", parentName, name)
 	}
 }
 

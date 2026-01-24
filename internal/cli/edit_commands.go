@@ -124,7 +124,7 @@ func (c *CLI) publishEditCreate(ctx context.Context) error {
 	return c.Output(result.WithServices("androidpublisher"))
 }
 
-func (c *CLI) publishEditList(ctx context.Context) error {
+func (c *CLI) publishEditList(_ context.Context) error {
 	if err := c.requirePackage(); err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
@@ -198,6 +198,27 @@ func (c *CLI) publishEditCommit(ctx context.Context, editID string) error {
 		return c.OutputError(err.(*errors.APIError))
 	}
 
+	editMgr := edits.NewManager()
+	serverID, local, err := c.resolveEdit(editMgr, editID)
+	if err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+
+	contentID := serverID
+	if local != nil {
+		contentID = fmt.Sprintf("%s:%d", serverID, local.CreatedAt.Unix())
+	}
+	idempotencyResult, idempotencyKey, _ := editMgr.Idempotent.CheckCommit(c.packageName, serverID, contentID)
+	if idempotencyResult != nil && idempotencyResult.Found {
+		result := output.NewResult(map[string]interface{}{
+			"idempotent": true,
+			"editId":     serverID,
+			"package":    c.packageName,
+			"recordedAt": idempotencyResult.Timestamp,
+		})
+		return c.Output(result.WithNoOp("commit already completed").WithServices("androidpublisher"))
+	}
+
 	client, err := c.getAPIClient(ctx)
 	if err != nil {
 		return c.OutputError(err.(*errors.APIError))
@@ -208,17 +229,13 @@ func (c *CLI) publishEditCommit(ctx context.Context, editID string) error {
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
 	}
 
-	editMgr := edits.NewManager()
-	serverID, local, err := c.resolveEdit(editMgr, editID)
-	if err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-
 	_, err = publisher.Edits.Commit(c.packageName, serverID).Context(ctx).Do()
 	if err != nil {
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
 			fmt.Sprintf("failed to commit edit: %v", err)))
 	}
+
+	_ = editMgr.Idempotent.RecordCommit(idempotencyKey, c.packageName, serverID)
 
 	if local != nil {
 		_, _ = editMgr.UpdateEditState(c.packageName, local.Handle, edits.StateCommitted)

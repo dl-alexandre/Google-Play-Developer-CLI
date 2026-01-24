@@ -1,19 +1,9 @@
-// Package cli provides monetization commands for gpd.
 package cli
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"os"
-	"strconv"
-	"strings"
-
 	"github.com/spf13/cobra"
-	"google.golang.org/api/androidpublisher/v3"
 
 	"github.com/dl-alexandre/gpd/internal/errors"
-	"github.com/dl-alexandre/gpd/internal/output"
 )
 
 func (c *CLI) addMonetizationCommands() {
@@ -23,7 +13,17 @@ func (c *CLI) addMonetizationCommands() {
 		Long:  "Manage in-app products and subscriptions.",
 	}
 
-	// monetization products
+	c.addMonetizationProductsCommands(monetizationCmd)
+	c.addMonetizationSubscriptionsCommands(monetizationCmd)
+	c.addMonetizationBasePlansCommands(monetizationCmd)
+	c.addMonetizationOffersCommands(monetizationCmd)
+	c.addMonetizationOnetimeProductsCommands(monetizationCmd)
+	c.addMonetizationUtilityCommands(monetizationCmd)
+
+	c.rootCmd.AddCommand(monetizationCmd)
+}
+
+func (c *CLI) addMonetizationProductsCommands(monetizationCmd *cobra.Command) {
 	productsCmd := &cobra.Command{
 		Use:   "products",
 		Short: "Manage in-app products",
@@ -40,7 +40,6 @@ func (c *CLI) addMonetizationCommands() {
 		all          bool
 	)
 
-	// products list
 	productsListCmd := &cobra.Command{
 		Use:   "list",
 		Short: "List in-app products",
@@ -52,7 +51,6 @@ func (c *CLI) addMonetizationCommands() {
 	productsListCmd.Flags().StringVar(&pageToken, "page-token", "", "Pagination token")
 	productsListCmd.Flags().BoolVar(&all, "all", false, "Fetch all pages")
 
-	// products get
 	productsGetCmd := &cobra.Command{
 		Use:   "get [product-id]",
 		Short: "Get an in-app product",
@@ -62,7 +60,6 @@ func (c *CLI) addMonetizationCommands() {
 		},
 	}
 
-	// products create
 	productsCreateCmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create an in-app product",
@@ -76,7 +73,6 @@ func (c *CLI) addMonetizationCommands() {
 	productsCreateCmd.Flags().StringVar(&status, "status", "active", "Product status: active, inactive")
 	_ = productsCreateCmd.MarkFlagRequired("product-id")
 
-	// products update
 	productsUpdateCmd := &cobra.Command{
 		Use:   "update [product-id]",
 		Short: "Update an in-app product",
@@ -88,7 +84,6 @@ func (c *CLI) addMonetizationCommands() {
 	productsUpdateCmd.Flags().StringVar(&defaultPrice, "default-price", "", "Default price in micros")
 	productsUpdateCmd.Flags().StringVar(&status, "status", "", "Product status: active, inactive")
 
-	// products delete
 	productsDeleteCmd := &cobra.Command{
 		Use:   "delete [product-id]",
 		Short: "Delete an in-app product",
@@ -99,8 +94,10 @@ func (c *CLI) addMonetizationCommands() {
 	}
 
 	productsCmd.AddCommand(productsListCmd, productsGetCmd, productsCreateCmd, productsUpdateCmd, productsDeleteCmd)
+	monetizationCmd.AddCommand(productsCmd)
+}
 
-	// monetization subscriptions (read-only)
+func (c *CLI) addMonetizationSubscriptionsCommands(monetizationCmd *cobra.Command) {
 	subscriptionsCmd := &cobra.Command{
 		Use:   "subscriptions",
 		Short: "Manage subscriptions",
@@ -115,9 +112,11 @@ func (c *CLI) addMonetizationCommands() {
 		batchFile        string
 		confirm          bool
 		showArchived     bool
+		pageSize         int64
+		pageToken        string
+		all              bool
 	)
 
-	// subscriptions list
 	subscriptionsListCmd := &cobra.Command{
 		Use:   "list",
 		Short: "List subscription products",
@@ -130,7 +129,6 @@ func (c *CLI) addMonetizationCommands() {
 	subscriptionsListCmd.Flags().BoolVar(&all, "all", false, "Fetch all pages")
 	subscriptionsListCmd.Flags().BoolVar(&showArchived, "show-archived", false, "Include archived subscriptions")
 
-	// subscriptions get
 	subscriptionsGetCmd := &cobra.Command{
 		Use:   "get [subscription-id]",
 		Short: "Get a subscription product",
@@ -221,15 +219,20 @@ func (c *CLI) addMonetizationCommands() {
 
 	subscriptionsCmd.AddCommand(subscriptionsListCmd, subscriptionsGetCmd, subscriptionsCreateCmd, subscriptionsUpdateCmd,
 		subscriptionsPatchCmd, subscriptionsDeleteCmd, subscriptionsArchiveCmd, subscriptionsBatchGetCmd, subscriptionsBatchUpdateCmd)
+	monetizationCmd.AddCommand(subscriptionsCmd)
+}
 
-	// monetization base plans
+func (c *CLI) addMonetizationBasePlansCommands(monetizationCmd *cobra.Command) {
 	basePlansCmd := &cobra.Command{
 		Use:   "baseplans",
 		Short: "Manage subscription base plans",
 	}
-	var basePlanFile string
-	var basePlanRegion string
-	var basePlanPriceMicros int64
+	var (
+		basePlanFile        string
+		basePlanRegion      string
+		basePlanPriceMicros int64
+		confirm             bool
+	)
 
 	basePlansActivateCmd := &cobra.Command{
 		Use:   "activate [subscription-id] [plan-id]",
@@ -298,15 +301,23 @@ func (c *CLI) addMonetizationCommands() {
 
 	basePlansCmd.AddCommand(basePlansActivateCmd, basePlansDeactivateCmd, basePlansDeleteCmd, basePlansMigratePricesCmd,
 		basePlansBatchMigrateCmd, basePlansBatchUpdateStatesCmd)
+	monetizationCmd.AddCommand(basePlansCmd)
+}
 
-	// monetization offers
+func (c *CLI) addMonetizationOffersCommands(monetizationCmd *cobra.Command) {
 	offersCmd := &cobra.Command{
 		Use:   "offers",
 		Short: "Manage subscription offers",
 	}
-	var offerID string
-	var offerFile string
-	var offerIDs []string
+	var (
+		offerID   string
+		offerFile string
+		offerIDs  []string
+		confirm   bool
+		pageSize  int64
+		pageToken string
+		all       bool
+	)
 
 	offersCreateCmd := &cobra.Command{
 		Use:   "create [subscription-id] [plan-id]",
@@ -409,13 +420,25 @@ func (c *CLI) addMonetizationCommands() {
 
 	offersCmd.AddCommand(offersCreateCmd, offersGetCmd, offersListCmd, offersDeleteCmd, offersActivateCmd, offersDeactivateCmd,
 		offersBatchGetCmd, offersBatchUpdateCmd, offersBatchUpdateStatesCmd)
+	monetizationCmd.AddCommand(offersCmd)
+}
 
-	// monetization onetime products (alias to legacy products)
+func (c *CLI) addMonetizationOnetimeProductsCommands(monetizationCmd *cobra.Command) {
 	onetimeProductsCmd := &cobra.Command{
 		Use:   "onetimeproducts",
 		Short: "Manage one-time products",
 		Long:  "Alias of legacy in-app products for managed/consumable items.",
 	}
+	var (
+		productID    string
+		productType  string
+		defaultPrice string
+		status       string
+		pageSize     int64
+		pageToken    string
+		all          bool
+	)
+
 	onetimeProductsListCmd := &cobra.Command{
 		Use:   "list",
 		Short: "List one-time products",
@@ -470,11 +493,16 @@ func (c *CLI) addMonetizationCommands() {
 	}
 
 	onetimeProductsCmd.AddCommand(onetimeProductsListCmd, onetimeProductsGetCmd, onetimeProductsCreateCmd, onetimeProductsUpdateCmd, onetimeProductsDeleteCmd)
+	monetizationCmd.AddCommand(onetimeProductsCmd)
+}
 
-	// monetization convert-region-prices
-	var priceMicros int64
-	var currencyCode string
-	var regionFilter []string
+func (c *CLI) addMonetizationUtilityCommands(monetizationCmd *cobra.Command) {
+	var (
+		priceMicros  int64
+		currencyCode string
+		regionFilter []string
+	)
+
 	convertCmd := &cobra.Command{
 		Use:   "convert-region-prices",
 		Short: "Convert region prices",
@@ -487,7 +515,6 @@ func (c *CLI) addMonetizationCommands() {
 	convertCmd.Flags().StringSliceVar(&regionFilter, "to-regions", nil, "Region codes to include")
 	_ = convertCmd.MarkFlagRequired("price-micros")
 
-	// monetization capabilities
 	capabilitiesCmd := &cobra.Command{
 		Use:   "capabilities",
 		Short: "List monetization capabilities",
@@ -496,986 +523,5 @@ func (c *CLI) addMonetizationCommands() {
 		},
 	}
 
-	monetizationCmd.AddCommand(productsCmd, subscriptionsCmd, basePlansCmd, offersCmd, onetimeProductsCmd, convertCmd, capabilitiesCmd)
-	c.rootCmd.AddCommand(monetizationCmd)
-}
-
-func (c *CLI) monetizationProductsList(ctx context.Context, pageSize int64, pageToken string, all bool) error {
-	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-
-	client, err := c.getAPIClient(ctx)
-	if err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-
-	publisher, err := client.AndroidPublisher()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-
-	req := publisher.Inappproducts.List(c.packageName)
-	if pageToken != "" {
-		req = req.Token(pageToken)
-	}
-
-	var allProducts []interface{}
-	for {
-		resp, err := req.Context(ctx).Do()
-		if err != nil {
-			return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-		}
-
-		for _, product := range resp.Inappproduct {
-			allProducts = append(allProducts, map[string]interface{}{
-				"sku":             product.Sku,
-				"status":          product.Status,
-				"purchaseType":    product.PurchaseType,
-				"defaultPrice":    product.DefaultPrice,
-				"defaultLanguage": product.DefaultLanguage,
-			})
-		}
-
-		if resp.TokenPagination == nil || resp.TokenPagination.NextPageToken == "" || !all {
-			if resp.TokenPagination != nil {
-				pageToken = resp.TokenPagination.NextPageToken
-			}
-			break
-		}
-		req = req.Token(resp.TokenPagination.NextPageToken)
-	}
-
-	result := output.NewResult(allProducts)
-	if pageToken != "" {
-		result.WithPagination("", pageToken)
-	}
-	return c.Output(result.WithServices("androidpublisher"))
-}
-
-func (c *CLI) monetizationProductsGet(ctx context.Context, productID string) error {
-	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-
-	client, err := c.getAPIClient(ctx)
-	if err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-
-	publisher, err := client.AndroidPublisher()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-
-	product, err := publisher.Inappproducts.Get(c.packageName, productID).Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeNotFound, err.Error()))
-	}
-
-	result := output.NewResult(map[string]interface{}{
-		"sku":             product.Sku,
-		"status":          product.Status,
-		"purchaseType":    product.PurchaseType,
-		"defaultPrice":    product.DefaultPrice,
-		"defaultLanguage": product.DefaultLanguage,
-		"listings":        product.Listings,
-		"prices":          product.Prices,
-	})
-	return c.Output(result.WithServices("androidpublisher"))
-}
-
-func (c *CLI) monetizationProductsCreate(ctx context.Context, productID, productType, defaultPrice, status string) error {
-	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-
-	if productID == "" {
-		return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
-			"product ID is required"))
-	}
-
-	// Get API client
-	client, err := c.getAPIClient(ctx)
-	if err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-
-	publisher, err := client.AndroidPublisher()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-
-	// Build product
-	product := &androidpublisher.InAppProduct{
-		PackageName:     c.packageName,
-		Sku:             productID,
-		Status:          status,
-		DefaultLanguage: "en-US",
-	}
-
-	// Set purchase type (managed or consumable -> managedUser or subscription)
-	if productType == "consumable" {
-		product.PurchaseType = "managedUser" // Consumable in Play Store API
-	} else {
-		product.PurchaseType = "managedUser" // Managed non-consumable
-	}
-
-	// Parse and set default price if provided
-	if defaultPrice != "" {
-		priceMicros, err := strconv.ParseInt(defaultPrice, 10, 64)
-		if err != nil {
-			return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
-				"invalid price format - use micros (e.g., 990000 for $0.99)"))
-		}
-		product.DefaultPrice = &androidpublisher.Price{
-			Currency:    "USD",
-			PriceMicros: strconv.FormatInt(priceMicros, 10),
-		}
-	}
-
-	// Create product
-	created, err := publisher.Inappproducts.Insert(c.packageName, product).Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
-			err.Error()))
-	}
-
-	result := output.NewResult(map[string]interface{}{
-		"success":      true,
-		"productId":    created.Sku,
-		"status":       created.Status,
-		"purchaseType": created.PurchaseType,
-		"defaultPrice": created.DefaultPrice,
-		"package":      c.packageName,
-	})
-	return c.Output(result.WithServices("androidpublisher"))
-}
-
-func (c *CLI) monetizationProductsUpdate(ctx context.Context, productID, defaultPrice, status string) error {
-	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-
-	// Get API client
-	client, err := c.getAPIClient(ctx)
-	if err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-
-	publisher, err := client.AndroidPublisher()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-
-	// Get existing product
-	existing, err := publisher.Inappproducts.Get(c.packageName, productID).Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeNotFound,
-			"product not found: "+productID))
-	}
-
-	// Update fields if provided
-	if status != "" {
-		existing.Status = status
-	}
-	if defaultPrice != "" {
-		priceMicros, err := strconv.ParseInt(defaultPrice, 10, 64)
-		if err != nil {
-			return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
-				"invalid price format - use micros (e.g., 990000 for $0.99)"))
-		}
-		existing.DefaultPrice = &androidpublisher.Price{
-			Currency:    "USD",
-			PriceMicros: strconv.FormatInt(priceMicros, 10),
-		}
-	}
-
-	// Update product
-	updated, err := publisher.Inappproducts.Update(c.packageName, productID, existing).Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-
-	result := output.NewResult(map[string]interface{}{
-		"success":      true,
-		"productId":    updated.Sku,
-		"status":       updated.Status,
-		"defaultPrice": updated.DefaultPrice,
-		"package":      c.packageName,
-	})
-	return c.Output(result.WithServices("androidpublisher"))
-}
-
-func (c *CLI) monetizationProductsDelete(ctx context.Context, productID string) error {
-	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-
-	client, err := c.getAPIClient(ctx)
-	if err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-
-	publisher, err := client.AndroidPublisher()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-
-	err = publisher.Inappproducts.Delete(c.packageName, productID).Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-
-	result := output.NewResult(map[string]interface{}{
-		"success":   true,
-		"productId": productID,
-		"deleted":   true,
-		"package":   c.packageName,
-	})
-	return c.Output(result.WithServices("androidpublisher"))
-}
-
-func (c *CLI) monetizationSubscriptionsList(ctx context.Context, pageSize int64, pageToken string, all bool, showArchived bool) error {
-	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-
-	client, err := c.getAPIClient(ctx)
-	if err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-
-	publisher, err := client.AndroidPublisher()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-
-	req := publisher.Monetization.Subscriptions.List(c.packageName)
-	req = req.ShowArchived(showArchived)
-	if pageSize > 0 {
-		req = req.PageSize(int64(pageSize))
-	}
-	if pageToken != "" {
-		req = req.PageToken(pageToken)
-	}
-
-	var allSubscriptions []interface{}
-	for {
-		resp, err := req.Context(ctx).Do()
-		if err != nil {
-			return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-		}
-
-		for _, sub := range resp.Subscriptions {
-			allSubscriptions = append(allSubscriptions, map[string]interface{}{
-				"productId":   sub.ProductId,
-				"packageName": sub.PackageName,
-				"archived":    sub.Archived,
-			})
-		}
-
-		if resp.NextPageToken == "" || !all {
-			pageToken = resp.NextPageToken
-			break
-		}
-		req = req.PageToken(resp.NextPageToken)
-	}
-
-	result := output.NewResult(allSubscriptions)
-	if pageToken != "" {
-		result.WithPagination("", pageToken)
-	}
-	return c.Output(result.WithServices("androidpublisher"))
-}
-
-func (c *CLI) monetizationSubscriptionsCreate(ctx context.Context, subscriptionID, filePath string) error {
-	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-
-	var sub androidpublisher.Subscription
-	if err := loadJSONFile(filePath, &sub); err != nil {
-		return c.OutputError(err)
-	}
-
-	client, err := c.getAPIClient(ctx)
-	if err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-
-	publisher, err := client.AndroidPublisher()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-
-	created, err := publisher.Monetization.Subscriptions.Create(c.packageName, &sub).
-		ProductId(subscriptionID).Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-
-	result := output.NewResult(created)
-	return c.Output(result.WithServices("androidpublisher"))
-}
-
-func (c *CLI) monetizationSubscriptionsUpdate(ctx context.Context, subscriptionID, filePath string) error {
-	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-
-	var sub androidpublisher.Subscription
-	if err := loadJSONFile(filePath, &sub); err != nil {
-		return c.OutputError(err)
-	}
-
-	client, err := c.getAPIClient(ctx)
-	if err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-
-	publisher, err := client.AndroidPublisher()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-
-	updated, err := publisher.Monetization.Subscriptions.Patch(c.packageName, subscriptionID, &sub).Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-
-	result := output.NewResult(updated)
-	return c.Output(result.WithServices("androidpublisher"))
-}
-
-func (c *CLI) monetizationSubscriptionsPatch(ctx context.Context, subscriptionID, filePath, updateMask string, allowMissing bool) error {
-	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-
-	var sub androidpublisher.Subscription
-	if err := loadJSONFile(filePath, &sub); err != nil {
-		return c.OutputError(err)
-	}
-
-	client, err := c.getAPIClient(ctx)
-	if err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-
-	publisher, err := client.AndroidPublisher()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-
-	call := publisher.Monetization.Subscriptions.Patch(c.packageName, subscriptionID, &sub).
-		AllowMissing(allowMissing)
-	if updateMask != "" {
-		call = call.UpdateMask(updateMask)
-	}
-
-	updated, err := call.Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-
-	result := output.NewResult(updated)
-	return c.Output(result.WithServices("androidpublisher"))
-}
-
-func (c *CLI) monetizationSubscriptionsDelete(ctx context.Context, subscriptionID string) error {
-	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-
-	client, err := c.getAPIClient(ctx)
-	if err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-
-	publisher, err := client.AndroidPublisher()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-
-	if err := publisher.Monetization.Subscriptions.Delete(c.packageName, subscriptionID).Context(ctx).Do(); err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-
-	result := output.NewResult(map[string]interface{}{
-		"success":      true,
-		"productId":    subscriptionID,
-		"package":      c.packageName,
-	})
-	return c.Output(result.WithServices("androidpublisher"))
-}
-
-func (c *CLI) monetizationSubscriptionsArchive(ctx context.Context, subscriptionID string) error {
-	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-
-	client, err := c.getAPIClient(ctx)
-	if err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-
-	publisher, err := client.AndroidPublisher()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-
-	resp, err := publisher.Monetization.Subscriptions.Archive(c.packageName, subscriptionID, &androidpublisher.ArchiveSubscriptionRequest{}).
-		Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-
-	result := output.NewResult(resp)
-	return c.Output(result.WithServices("androidpublisher"))
-}
-
-func (c *CLI) monetizationSubscriptionsBatchGet(ctx context.Context, ids []string) error {
-	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-	if len(ids) == 0 {
-		return c.OutputError(errors.NewAPIError(errors.CodeValidationError, "ids are required"))
-	}
-
-	client, err := c.getAPIClient(ctx)
-	if err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-
-	publisher, err := client.AndroidPublisher()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-
-	resp, err := publisher.Monetization.Subscriptions.BatchGet(c.packageName).ProductIds(ids...).Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-
-	result := output.NewResult(resp)
-	return c.Output(result.WithServices("androidpublisher"))
-}
-
-func (c *CLI) monetizationSubscriptionsBatchUpdate(ctx context.Context, filePath string) error {
-	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-
-	var req androidpublisher.BatchUpdateSubscriptionsRequest
-	if err := loadJSONFile(filePath, &req); err != nil {
-		return c.OutputError(err)
-	}
-
-	client, err := c.getAPIClient(ctx)
-	if err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-
-	publisher, err := client.AndroidPublisher()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-
-	resp, err := publisher.Monetization.Subscriptions.BatchUpdate(c.packageName, &req).Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-
-	result := output.NewResult(resp)
-	return c.Output(result.WithServices("androidpublisher"))
-}
-
-func (c *CLI) monetizationBasePlansActivate(ctx context.Context, subscriptionID, basePlanID string) error {
-	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-	client, err := c.getAPIClient(ctx)
-	if err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-	publisher, err := client.AndroidPublisher()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-	resp, err := publisher.Monetization.Subscriptions.BasePlans.Activate(c.packageName, subscriptionID, basePlanID, &androidpublisher.ActivateBasePlanRequest{}).
-		Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-	return c.Output(output.NewResult(resp).WithServices("androidpublisher"))
-}
-
-func (c *CLI) monetizationBasePlansDeactivate(ctx context.Context, subscriptionID, basePlanID string) error {
-	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-	client, err := c.getAPIClient(ctx)
-	if err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-	publisher, err := client.AndroidPublisher()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-	resp, err := publisher.Monetization.Subscriptions.BasePlans.Deactivate(c.packageName, subscriptionID, basePlanID, &androidpublisher.DeactivateBasePlanRequest{}).
-		Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-	return c.Output(output.NewResult(resp).WithServices("androidpublisher"))
-}
-
-func (c *CLI) monetizationBasePlansDelete(ctx context.Context, subscriptionID, basePlanID string) error {
-	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-	client, err := c.getAPIClient(ctx)
-	if err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-	publisher, err := client.AndroidPublisher()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-	if err := publisher.Monetization.Subscriptions.BasePlans.Delete(c.packageName, subscriptionID, basePlanID).Context(ctx).Do(); err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-	result := output.NewResult(map[string]interface{}{
-		"success":    true,
-		"basePlanId": basePlanID,
-		"productId":  subscriptionID,
-		"package":    c.packageName,
-	})
-	return c.Output(result.WithServices("androidpublisher"))
-}
-
-func (c *CLI) monetizationBasePlansMigratePrices(ctx context.Context, subscriptionID, basePlanID, regionCode string, priceMicros int64) error {
-	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-	if priceMicros <= 0 {
-		return c.OutputError(errors.NewAPIError(errors.CodeValidationError, "price-micros must be greater than zero"))
-	}
-	client, err := c.getAPIClient(ctx)
-	if err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-	publisher, err := client.AndroidPublisher()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-	// Note: The migration API migrates existing prices, not sets new ones directly.
-	// This requires OldestAllowedPriceVersionTime to specify which price cohorts to migrate.
-	// Using current time as a reasonable default - all existing price cohorts will be migrated.
-	req := &androidpublisher.MigrateBasePlanPricesRequest{
-		RegionalPriceMigrations: []*androidpublisher.RegionalPriceMigrationConfig{
-			{
-				RegionCode:                regionCode,
-				OldestAllowedPriceVersionTime: "1970-01-01T00:00:00Z", // Migrate all existing price cohorts
-			},
-		},
-		RegionsVersion: &androidpublisher.RegionsVersion{
-			Version: "2022/02", // Latest regions version
-		},
-	}
-	resp, err := publisher.Monetization.Subscriptions.BasePlans.MigratePrices(c.packageName, subscriptionID, basePlanID, req).
-		Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-	return c.Output(output.NewResult(resp).WithServices("androidpublisher"))
-}
-
-func (c *CLI) monetizationBasePlansBatchMigratePrices(ctx context.Context, subscriptionID, filePath string) error {
-	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-	var req androidpublisher.BatchMigrateBasePlanPricesRequest
-	if err := loadJSONFile(filePath, &req); err != nil {
-		return c.OutputError(err)
-	}
-	client, err := c.getAPIClient(ctx)
-	if err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-	publisher, err := client.AndroidPublisher()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-	resp, err := publisher.Monetization.Subscriptions.BasePlans.BatchMigratePrices(c.packageName, subscriptionID, &req).
-		Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-	return c.Output(output.NewResult(resp).WithServices("androidpublisher"))
-}
-
-func (c *CLI) monetizationBasePlansBatchUpdateStates(ctx context.Context, subscriptionID, filePath string) error {
-	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-	var req androidpublisher.BatchUpdateBasePlanStatesRequest
-	if err := loadJSONFile(filePath, &req); err != nil {
-		return c.OutputError(err)
-	}
-	client, err := c.getAPIClient(ctx)
-	if err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-	publisher, err := client.AndroidPublisher()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-	resp, err := publisher.Monetization.Subscriptions.BasePlans.BatchUpdateStates(c.packageName, subscriptionID, &req).
-		Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-	return c.Output(output.NewResult(resp).WithServices("androidpublisher"))
-}
-
-func (c *CLI) monetizationOffersCreate(ctx context.Context, subscriptionID, basePlanID, offerID, filePath string) error {
-	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-	var offer androidpublisher.SubscriptionOffer
-	if err := loadJSONFile(filePath, &offer); err != nil {
-		return c.OutputError(err)
-	}
-	client, err := c.getAPIClient(ctx)
-	if err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-	publisher, err := client.AndroidPublisher()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-	resp, err := publisher.Monetization.Subscriptions.BasePlans.Offers.Create(c.packageName, subscriptionID, basePlanID, &offer).
-		OfferId(offerID).Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-	return c.Output(output.NewResult(resp).WithServices("androidpublisher"))
-}
-
-func (c *CLI) monetizationOffersGet(ctx context.Context, subscriptionID, basePlanID, offerID string) error {
-	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-	client, err := c.getAPIClient(ctx)
-	if err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-	publisher, err := client.AndroidPublisher()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-	resp, err := publisher.Monetization.Subscriptions.BasePlans.Offers.Get(c.packageName, subscriptionID, basePlanID, offerID).
-		Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-	return c.Output(output.NewResult(resp).WithServices("androidpublisher"))
-}
-
-func (c *CLI) monetizationOffersList(ctx context.Context, subscriptionID, basePlanID string, pageSize int64, pageToken string, all bool) error {
-	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-	client, err := c.getAPIClient(ctx)
-	if err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-	publisher, err := client.AndroidPublisher()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-	req := publisher.Monetization.Subscriptions.BasePlans.Offers.List(c.packageName, subscriptionID, basePlanID)
-	if pageSize > 0 {
-		req = req.PageSize(pageSize)
-	}
-	if pageToken != "" {
-		req = req.PageToken(pageToken)
-	}
-	var offers []interface{}
-	for {
-		resp, err := req.Context(ctx).Do()
-		if err != nil {
-			return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-		}
-		for _, offer := range resp.SubscriptionOffers {
-			offers = append(offers, offer)
-		}
-		if resp.NextPageToken == "" || !all {
-			pageToken = resp.NextPageToken
-			break
-		}
-		req = req.PageToken(resp.NextPageToken)
-	}
-	result := output.NewResult(offers)
-	if pageToken != "" {
-		result.WithPagination("", pageToken)
-	}
-	return c.Output(result.WithServices("androidpublisher"))
-}
-
-func (c *CLI) monetizationOffersDelete(ctx context.Context, subscriptionID, basePlanID, offerID string) error {
-	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-	client, err := c.getAPIClient(ctx)
-	if err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-	publisher, err := client.AndroidPublisher()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-	if err := publisher.Monetization.Subscriptions.BasePlans.Offers.Delete(c.packageName, subscriptionID, basePlanID, offerID).
-		Context(ctx).Do(); err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-	result := output.NewResult(map[string]interface{}{
-		"success": true,
-		"offerId": offerID,
-		"package": c.packageName,
-	})
-	return c.Output(result.WithServices("androidpublisher"))
-}
-
-func (c *CLI) monetizationOffersActivate(ctx context.Context, subscriptionID, basePlanID, offerID string) error {
-	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-	client, err := c.getAPIClient(ctx)
-	if err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-	publisher, err := client.AndroidPublisher()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-	resp, err := publisher.Monetization.Subscriptions.BasePlans.Offers.Activate(c.packageName, subscriptionID, basePlanID, offerID, &androidpublisher.ActivateSubscriptionOfferRequest{}).
-		Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-	return c.Output(output.NewResult(resp).WithServices("androidpublisher"))
-}
-
-func (c *CLI) monetizationOffersDeactivate(ctx context.Context, subscriptionID, basePlanID, offerID string) error {
-	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-	client, err := c.getAPIClient(ctx)
-	if err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-	publisher, err := client.AndroidPublisher()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-	resp, err := publisher.Monetization.Subscriptions.BasePlans.Offers.Deactivate(c.packageName, subscriptionID, basePlanID, offerID, &androidpublisher.DeactivateSubscriptionOfferRequest{}).
-		Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-	return c.Output(output.NewResult(resp).WithServices("androidpublisher"))
-}
-
-func (c *CLI) monetizationOffersBatchGet(ctx context.Context, subscriptionID, basePlanID string, offerIDs []string) error {
-	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-	if len(offerIDs) == 0 {
-		return c.OutputError(errors.NewAPIError(errors.CodeValidationError, "offer-ids are required"))
-	}
-	client, err := c.getAPIClient(ctx)
-	if err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-	publisher, err := client.AndroidPublisher()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-	requests := make([]*androidpublisher.GetSubscriptionOfferRequest, 0, len(offerIDs))
-	for _, offerID := range offerIDs {
-		requests = append(requests, &androidpublisher.GetSubscriptionOfferRequest{
-			PackageName: c.packageName,
-			ProductId:  subscriptionID,
-			BasePlanId:  basePlanID,
-			OfferId:     offerID,
-		})
-	}
-	req := &androidpublisher.BatchGetSubscriptionOffersRequest{
-		Requests: requests,
-	}
-	resp, err := publisher.Monetization.Subscriptions.BasePlans.Offers.BatchGet(c.packageName, subscriptionID, basePlanID, req).
-		Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-	return c.Output(output.NewResult(resp).WithServices("androidpublisher"))
-}
-
-func (c *CLI) monetizationOffersBatchUpdate(ctx context.Context, subscriptionID, basePlanID, filePath string) error {
-	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-	var req androidpublisher.BatchUpdateSubscriptionOffersRequest
-	if err := loadJSONFile(filePath, &req); err != nil {
-		return c.OutputError(err)
-	}
-	client, err := c.getAPIClient(ctx)
-	if err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-	publisher, err := client.AndroidPublisher()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-	resp, err := publisher.Monetization.Subscriptions.BasePlans.Offers.BatchUpdate(c.packageName, subscriptionID, basePlanID, &req).
-		Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-	return c.Output(output.NewResult(resp).WithServices("androidpublisher"))
-}
-
-func (c *CLI) monetizationOffersBatchUpdateStates(ctx context.Context, subscriptionID, basePlanID, filePath string) error {
-	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-	var req androidpublisher.BatchUpdateSubscriptionOfferStatesRequest
-	if err := loadJSONFile(filePath, &req); err != nil {
-		return c.OutputError(err)
-	}
-	client, err := c.getAPIClient(ctx)
-	if err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-	publisher, err := client.AndroidPublisher()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-	resp, err := publisher.Monetization.Subscriptions.BasePlans.Offers.BatchUpdateStates(c.packageName, subscriptionID, basePlanID, &req).
-		Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-	return c.Output(output.NewResult(resp).WithServices("androidpublisher"))
-}
-
-func (c *CLI) monetizationConvertRegionPrices(ctx context.Context, priceMicros int64, currencyCode string, regionFilter []string) error {
-	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-	if priceMicros <= 0 {
-		return c.OutputError(errors.NewAPIError(errors.CodeValidationError, "price-micros must be greater than zero"))
-	}
-	client, err := c.getAPIClient(ctx)
-	if err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-	publisher, err := client.AndroidPublisher()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-	units := priceMicros / 1_000_000
-	nanos := (priceMicros % 1_000_000) * 1000
-	req := &androidpublisher.ConvertRegionPricesRequest{
-		Price: &androidpublisher.Money{
-			CurrencyCode: strings.ToUpper(currencyCode),
-			Units:        units,
-			Nanos:        nanos,
-		},
-	}
-	resp, err := publisher.Monetization.ConvertRegionPrices(c.packageName, req).Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-
-	if len(regionFilter) > 0 && resp.ConvertedRegionPrices != nil {
-		filtered := make(map[string]androidpublisher.ConvertedRegionPrice)
-		for _, code := range regionFilter {
-			if val, ok := resp.ConvertedRegionPrices[strings.ToUpper(code)]; ok {
-				filtered[strings.ToUpper(code)] = val
-			}
-		}
-		resp.ConvertedRegionPrices = filtered
-	}
-
-	return c.Output(output.NewResult(resp).WithServices("androidpublisher"))
-}
-
-func (c *CLI) monetizationSubscriptionsGet(ctx context.Context, subscriptionID string) error {
-	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-
-	client, err := c.getAPIClient(ctx)
-	if err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-
-	publisher, err := client.AndroidPublisher()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-
-	sub, err := publisher.Monetization.Subscriptions.Get(c.packageName, subscriptionID).Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeNotFound, err.Error()))
-	}
-
-	result := output.NewResult(map[string]interface{}{
-		"productId":   sub.ProductId,
-		"packageName": sub.PackageName,
-		"archived":    sub.Archived,
-		"basePlans":   sub.BasePlans,
-		"listings":    sub.Listings,
-	})
-	return c.Output(result.WithServices("androidpublisher"))
-}
-
-func (c *CLI) monetizationCapabilities(ctx context.Context) error {
-	result := output.NewResult(map[string]interface{}{
-		"products": map[string]interface{}{
-			"supportedTypes": []string{"managed", "consumable"},
-			"operations":     []string{"list", "get", "create", "update", "delete"},
-		},
-		"subscriptions": map[string]interface{}{
-			"operations": []string{"list", "get", "create", "update", "patch", "delete", "archive", "batchGet", "batchUpdate"},
-		},
-		"basePlans": map[string]interface{}{
-			"operations": []string{"activate", "deactivate", "delete", "migrate-prices", "batch-migrate-prices", "batch-update-states"},
-		},
-		"offers": map[string]interface{}{
-			"operations": []string{"create", "get", "list", "delete", "activate", "deactivate", "batchGet", "batchUpdate", "batchUpdateStates"},
-		},
-		"regionalPricing": map[string]interface{}{
-			"operations": []string{"convert-region-prices"},
-		},
-		"apiLimitations": []string{
-			"Offer updates use batch update endpoint",
-		},
-	})
-	return c.Output(result.WithServices("androidpublisher"))
-}
-
-func loadJSONFile(path string, out interface{}) *errors.APIError {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return errors.NewAPIError(errors.CodeValidationError, fmt.Sprintf("failed to read file: %s", path))
-	}
-	if err := json.Unmarshal(data, out); err != nil {
-		return errors.NewAPIError(errors.CodeValidationError, "invalid JSON file")
-	}
-	return nil
+	monetizationCmd.AddCommand(convertCmd, capabilitiesCmd)
 }

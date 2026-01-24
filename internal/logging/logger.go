@@ -263,7 +263,7 @@ func (r *PIIRedactor) Redact(key string, value interface{}) interface{} {
 	return "[REDACTED]"
 }
 
-func (r *PIIRedactor) redactString(key string, value string) string {
+func (r *PIIRedactor) redactString(key, value string) string {
 	if value == "" {
 		return ""
 	}
@@ -307,10 +307,16 @@ func (r *PIIRedactor) RedactMap(data map[string]interface{}) map[string]interfac
 }
 
 // Global logger instance
-var defaultLogger *Logger
+var (
+	defaultLogger     *Logger
+	defaultLoggerOnce sync.Once
+)
 
-func init() {
-	defaultLogger = NewLogger(os.Stderr, false)
+func getDefaultLogger() *Logger {
+	defaultLoggerOnce.Do(func() {
+		defaultLogger = NewLogger(os.Stderr, false)
+	})
+	return defaultLogger
 }
 
 // SetDefault sets the default logger.
@@ -320,26 +326,26 @@ func SetDefault(l *Logger) {
 
 // Debug logs a debug message using the default logger.
 func Debug(msg string, fields ...Field) {
-	defaultLogger.Debug(msg, fields...)
+	getDefaultLogger().Debug(msg, fields...)
 }
 
 // Info logs an info message using the default logger.
 func Info(msg string, fields ...Field) {
-	defaultLogger.Info(msg, fields...)
+	getDefaultLogger().Info(msg, fields...)
 }
 
 // Warn logs a warning message using the default logger.
 func Warn(msg string, fields ...Field) {
-	defaultLogger.Warn(msg, fields...)
+	getDefaultLogger().Warn(msg, fields...)
 }
 
 // Error logs an error message using the default logger.
 func Error(msg string, fields ...Field) {
-	defaultLogger.Error(msg, fields...)
+	getDefaultLogger().Error(msg, fields...)
 }
 
 // String creates a string field.
-func String(key string, value string) Field {
+func String(key, value string) Field {
 	return Field{Key: key, Value: value}
 }
 

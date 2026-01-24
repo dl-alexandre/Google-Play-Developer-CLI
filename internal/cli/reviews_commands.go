@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"os"
 	"regexp"
@@ -102,14 +101,95 @@ func (c *CLI) addReviewsCommands() {
 	c.rootCmd.AddCommand(reviewsCmd)
 }
 
-func (c *CLI) reviewsList(ctx context.Context, minRating, maxRating int, language, startDate, endDate string,
-	scanLimit int, includeText bool, translationLang string, pageSize int64, pageToken string, all bool) error {
+// reviewsListParams holds parameters for listing reviews.
+type reviewsListParams struct {
+	minRating       int
+	maxRating       int
+	scanLimit       int
+	includeText     bool
+	translationLang string
+	pageSize        int64
+	pageToken       string
+	all             bool
+}
 
+// passesRatingFilter checks if a review passes the rating filter criteria.
+func passesRatingFilter(review *androidpublisher.Review, minRating, maxRating int) bool {
+	if minRating == 0 && maxRating == 0 {
+		return true
+	}
+	if len(review.Comments) == 0 {
+		return true
+	}
+	rating := int(review.Comments[0].UserComment.StarRating)
+	if minRating > 0 && rating < minRating {
+		return false
+	}
+	if maxRating > 0 && rating > maxRating {
+		return false
+	}
+	return true
+}
+
+// buildReviewOutput creates the output map for a single review.
+func buildReviewOutput(review *androidpublisher.Review, includeText bool) map[string]interface{} {
+	reviewOutput := map[string]interface{}{
+		"reviewId": review.ReviewId,
+	}
+
+	if len(review.Comments) == 0 {
+		return reviewOutput
+	}
+
+	userComment := review.Comments[0].UserComment
+	reviewOutput["rating"] = userComment.StarRating
+	reviewOutput["language"] = userComment.ReviewerLanguage
+	reviewOutput["lastModified"] = userComment.LastModified.Seconds
+
+	if includeText {
+		reviewOutput["text"] = userComment.Text
+	}
+
+	// Check for developer reply
+	if len(review.Comments) > 1 && review.Comments[1].DeveloperComment != nil {
+		reviewOutput["developerComment"] = map[string]interface{}{
+			"text":         review.Comments[1].DeveloperComment.Text,
+			"lastModified": review.Comments[1].DeveloperComment.LastModified.Seconds,
+		}
+	}
+
+	return reviewOutput
+}
+
+// getNextPageToken extracts the next page token from a reviews response.
+func getNextPageToken(resp *androidpublisher.ReviewsListResponse) string {
+	if resp.TokenPagination != nil {
+		return resp.TokenPagination.NextPageToken
+	}
+	return ""
+}
+
+func (c *CLI) reviewsList(ctx context.Context, minRating, maxRating int, _, _, _ string,
+	scanLimit int, includeText bool, translationLang string, pageSize int64, pageToken string, all bool) error {
 	if err := c.requirePackage(); err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
 
-	// Get API client
+	params := reviewsListParams{
+		minRating:       minRating,
+		maxRating:       maxRating,
+		scanLimit:       scanLimit,
+		includeText:     includeText,
+		translationLang: translationLang,
+		pageSize:        pageSize,
+		pageToken:       pageToken,
+		all:             all,
+	}
+
+	return c.fetchAndOutputReviews(ctx, &params)
+}
+
+func (c *CLI) fetchAndOutputReviews(ctx context.Context, params *reviewsListParams) error {
 	client, err := c.getAPIClient(ctx)
 	if err != nil {
 		return c.OutputError(err.(*errors.APIError))
@@ -120,98 +200,67 @@ func (c *CLI) reviewsList(ctx context.Context, minRating, maxRating int, languag
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
 	}
 
-	// Build list request
-	req := publisher.Reviews.List(c.packageName).MaxResults(pageSize)
-	if pageToken != "" {
-		req = req.Token(pageToken)
-	}
-	if translationLang != "" {
-		req = req.TranslationLanguage(translationLang)
+	req := c.buildReviewsRequest(publisher, params)
+	allReviews, scannedCount, filteredCount, nextToken, err := c.collectReviews(ctx, req, params)
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
 	}
 
-	// Fetch reviews
+	return c.outputReviewsResult(allReviews, scannedCount, filteredCount, nextToken)
+}
+
+func (c *CLI) buildReviewsRequest(publisher *androidpublisher.Service, params *reviewsListParams) *androidpublisher.ReviewsListCall {
+	req := publisher.Reviews.List(c.packageName).MaxResults(params.pageSize)
+	if params.pageToken != "" {
+		req = req.Token(params.pageToken)
+	}
+	if params.translationLang != "" {
+		req = req.TranslationLanguage(params.translationLang)
+	}
+	return req
+}
+
+func (c *CLI) collectReviews(ctx context.Context, req *androidpublisher.ReviewsListCall, params *reviewsListParams) (reviews []map[string]interface{}, scanned, filtered int, nextToken string, err error) {
 	var allReviews []map[string]interface{}
 	scannedCount := 0
 	filteredCount := 0
 
-	for {
-		if scannedCount >= scanLimit {
-			break
-		}
-
+	for scannedCount < params.scanLimit {
 		resp, err := req.Context(ctx).Do()
 		if err != nil {
-			return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+			return nil, 0, 0, "", err
 		}
 
 		for _, review := range resp.Reviews {
 			scannedCount++
-
-			// Client-side filtering
-			if minRating > 0 || maxRating > 0 {
-				// Get star rating from the first user comment
-				if len(review.Comments) > 0 {
-					rating := int(review.Comments[0].UserComment.StarRating)
-					if minRating > 0 && rating < minRating {
-						filteredCount++
-						continue
-					}
-					if maxRating > 0 && rating > maxRating {
-						filteredCount++
-						continue
-					}
-				}
+			if !passesRatingFilter(review, params.minRating, params.maxRating) {
+				filteredCount++
+				continue
 			}
-
-			// Build review output
-			reviewOutput := map[string]interface{}{
-				"reviewId": review.ReviewId,
-			}
-
-			if len(review.Comments) > 0 {
-				userComment := review.Comments[0].UserComment
-				reviewOutput["rating"] = userComment.StarRating
-				reviewOutput["language"] = userComment.ReviewerLanguage
-				reviewOutput["lastModified"] = userComment.LastModified.Seconds
-
-				if includeText {
-					reviewOutput["text"] = userComment.Text
-				}
-
-				// Check for developer reply
-				if len(review.Comments) > 1 && review.Comments[1].DeveloperComment != nil {
-					reviewOutput["developerComment"] = map[string]interface{}{
-						"text":         review.Comments[1].DeveloperComment.Text,
-						"lastModified": review.Comments[1].DeveloperComment.LastModified.Seconds,
-					}
-				}
-			}
-
-			allReviews = append(allReviews, reviewOutput)
+			allReviews = append(allReviews, buildReviewOutput(review, params.includeText))
 		}
 
-		// Check for more pages
-		if resp.TokenPagination == nil || resp.TokenPagination.NextPageToken == "" || !all {
-			pageToken = ""
-			if resp.TokenPagination != nil {
-				pageToken = resp.TokenPagination.NextPageToken
-			}
+		nextToken = getNextPageToken(resp)
+		if nextToken == "" || !params.all {
 			break
 		}
-
-		req = req.Token(resp.TokenPagination.NextPageToken)
+		req = req.Token(nextToken)
 	}
 
-	result := output.NewResult(allReviews)
+	return allReviews, scannedCount, filteredCount, nextToken, nil
+}
+
+func (c *CLI) outputReviewsResult(reviews []map[string]interface{}, scanned, filtered int, nextToken string) error {
+	result := output.NewResult(reviews)
 	result.WithServices("androidpublisher")
-	result.WithPartial(scannedCount, filteredCount, 0)
-	if pageToken != "" {
-		result.WithPagination("", pageToken)
+	result.WithPartial(scanned, filtered, 0)
+	if nextToken != "" {
+		result.WithPagination("", nextToken)
 	}
 	return c.Output(result)
 }
 
-func (c *CLI) reviewsReply(ctx context.Context, reviewID, replyText, templateFile string, maxActions int, rateLimit string, dryRun bool) error {
+func (c *CLI) reviewsReply(ctx context.Context, reviewID, replyText, templateFile string, _ int, rateLimit string, dryRun bool) error {
 	if err := c.requirePackage(); err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
@@ -302,7 +351,7 @@ func (c *CLI) reviewsReply(ctx context.Context, reviewID, replyText, templateFil
 	return c.Output(result.WithServices("androidpublisher"))
 }
 
-func (c *CLI) reviewsCapabilities(ctx context.Context) error {
+func (c *CLI) reviewsCapabilities(_ context.Context) error {
 	result := output.NewResult(map[string]interface{}{
 		"reviewWindowDays": 90,
 		"maxReplyLength":   350,
@@ -345,9 +394,4 @@ func hashReply(reviewID, text string) string {
 	h.Write([]byte(reviewID))
 	h.Write([]byte(text))
 	return hex.EncodeToString(h.Sum(nil))[:16]
-}
-
-func init() {
-	// Suppress unused import warning
-	_ = json.Marshal
 }

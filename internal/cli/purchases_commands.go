@@ -14,6 +14,12 @@ import (
 	"github.com/dl-alexandre/gpd/internal/output"
 )
 
+// Purchase type constants
+const (
+	purchaseTypeProduct      = "product"
+	purchaseTypeSubscription = "subscription"
+)
+
 func (c *CLI) addPurchasesCommands() {
 	purchasesCmd := &cobra.Command{
 		Use:   "purchases",
@@ -21,24 +27,22 @@ func (c *CLI) addPurchasesCommands() {
 		Long:  "Verify purchase tokens and subscription states.",
 	}
 
+	c.addPurchasesVerifyCommands(purchasesCmd)
+	c.addPurchasesVoidedCommands(purchasesCmd)
+	c.addPurchasesProductsCommands(purchasesCmd)
+	c.addPurchasesSubscriptionsCommands(purchasesCmd)
+
+	c.rootCmd.AddCommand(purchasesCmd)
+}
+
+func (c *CLI) addPurchasesVerifyCommands(purchasesCmd *cobra.Command) {
 	var (
 		productID   string
 		token       string
 		environment string
 		productType string
-		developerPayload string
-		subscriptionID string
-		startTime string
-		endTime string
-		kind string
-		maxResults int64
-		pageToken string
-		expectedExpiry string
-		desiredExpiry string
-		revokeType string
 	)
 
-	// purchases verify
 	verifyCmd := &cobra.Command{
 		Use:   "verify",
 		Short: "Verify a purchase token",
@@ -53,7 +57,6 @@ func (c *CLI) addPurchasesCommands() {
 	verifyCmd.Flags().StringVar(&productType, "type", "auto", "Product type: product, subscription, auto")
 	_ = verifyCmd.MarkFlagRequired("token")
 
-	// purchases capabilities
 	capabilitiesCmd := &cobra.Command{
 		Use:   "capabilities",
 		Short: "List purchase verification capabilities",
@@ -62,10 +65,22 @@ func (c *CLI) addPurchasesCommands() {
 		},
 	}
 
+	purchasesCmd.AddCommand(verifyCmd, capabilitiesCmd)
+}
+
+func (c *CLI) addPurchasesVoidedCommands(purchasesCmd *cobra.Command) {
 	voidedCmd := &cobra.Command{
 		Use:   "voided",
 		Short: "Voided purchases",
 	}
+
+	var (
+		startTime  string
+		endTime    string
+		kind       string
+		maxResults int64
+		pageToken  string
+	)
 
 	voidedListCmd := &cobra.Command{
 		Use:   "list",
@@ -79,12 +94,22 @@ func (c *CLI) addPurchasesCommands() {
 	voidedListCmd.Flags().StringVar(&kind, "type", "", "Type: product or subscription")
 	voidedListCmd.Flags().Int64Var(&maxResults, "max-results", 0, "Max results per page")
 	voidedListCmd.Flags().StringVar(&pageToken, "page-token", "", "Pagination token")
-	voidedCmd.AddCommand(voidedListCmd)
 
+	voidedCmd.AddCommand(voidedListCmd)
+	purchasesCmd.AddCommand(voidedCmd)
+}
+
+func (c *CLI) addPurchasesProductsCommands(purchasesCmd *cobra.Command) {
 	productsCmd := &cobra.Command{
 		Use:   "products",
 		Short: "Product purchase actions",
 	}
+
+	var (
+		productID        string
+		token            string
+		developerPayload string
+	)
 
 	productsAcknowledgeCmd := &cobra.Command{
 		Use:   "acknowledge",
@@ -112,11 +137,23 @@ func (c *CLI) addPurchasesCommands() {
 	_ = productsConsumeCmd.MarkFlagRequired("token")
 
 	productsCmd.AddCommand(productsAcknowledgeCmd, productsConsumeCmd)
+	purchasesCmd.AddCommand(productsCmd)
+}
 
+func (c *CLI) addPurchasesSubscriptionsCommands(purchasesCmd *cobra.Command) {
 	subscriptionsCmd := &cobra.Command{
 		Use:   "subscriptions",
 		Short: "Subscription purchase actions",
 	}
+
+	var (
+		subscriptionID   string
+		token            string
+		developerPayload string
+		expectedExpiry   string
+		desiredExpiry    string
+		revokeType       string
+	)
 
 	subscriptionsAcknowledgeCmd := &cobra.Command{
 		Use:   "acknowledge",
@@ -184,9 +221,7 @@ func (c *CLI) addPurchasesCommands() {
 	_ = subscriptionsRevokeCmd.MarkFlagRequired("token")
 
 	subscriptionsCmd.AddCommand(subscriptionsAcknowledgeCmd, subscriptionsCancelCmd, subscriptionsDeferCmd, subscriptionsRefundCmd, subscriptionsRevokeCmd)
-
-	purchasesCmd.AddCommand(verifyCmd, voidedCmd, productsCmd, subscriptionsCmd, capabilitiesCmd)
-	c.rootCmd.AddCommand(purchasesCmd)
+	purchasesCmd.AddCommand(subscriptionsCmd)
 }
 
 func (c *CLI) purchasesVerify(ctx context.Context, productID, token, environment, productType string) error {
@@ -213,7 +248,7 @@ func (c *CLI) purchasesVerify(ctx context.Context, productID, token, environment
 	var purchaseType string
 
 	// Determine product type
-	if productType == "auto" || productType == "product" {
+	if productType == "auto" || productType == purchaseTypeProduct {
 		// Try product purchase first
 		if productID != "" {
 			productPurchase, err := publisher.Purchases.Products.Get(c.packageName, productID, token).Context(ctx).Do()
@@ -231,13 +266,13 @@ func (c *CLI) purchasesVerify(ctx context.Context, productID, token, environment
 					"obfuscatedExternalAccountId": productPurchase.ObfuscatedExternalAccountId,
 					"obfuscatedExternalProfileId": productPurchase.ObfuscatedExternalProfileId,
 				}
-				purchaseType = "product"
+				purchaseType = purchaseTypeProduct
 			}
 		}
 	}
 
 	// Try subscription if product failed or type is subscription
-	if purchaseData == nil && (productType == "auto" || productType == "subscription") {
+	if purchaseData == nil && (productType == "auto" || productType == purchaseTypeSubscription) {
 		if productID != "" {
 			// Use subscriptions v2 API
 			subPurchase, err := publisher.Purchases.Subscriptionsv2.Get(c.packageName, token).Context(ctx).Do()
@@ -250,8 +285,8 @@ func (c *CLI) purchasesVerify(ctx context.Context, productID, token, environment
 					"linkedPurchaseToken":        subPurchase.LinkedPurchaseToken,
 					"latestOrderId":              subPurchase.LatestOrderId,
 				}
-				purchaseType = "subscription"
-			} else if productType == "subscription" {
+				purchaseType = purchaseTypeSubscription
+			} else if productType == purchaseTypeSubscription {
 				return c.OutputError(errors.NewAPIError(errors.CodeNotFound,
 					fmt.Sprintf("subscription not found: %v", err)))
 			}
@@ -274,22 +309,22 @@ func (c *CLI) purchasesVerify(ctx context.Context, productID, token, environment
 	return c.Output(result.WithServices("androidpublisher"))
 }
 
-func (c *CLI) purchasesCapabilities(ctx context.Context) error {
+func (c *CLI) purchasesCapabilities(_ context.Context) error {
 	result := output.NewResult(map[string]interface{}{
 		"supportedProductTypes": []string{"product", "subscription"},
 		"supportedEnvironments": []string{"sandbox", "production", "auto"},
 		"apis": map[string]interface{}{
 			"products": map[string]interface{}{
 				"endpoints": []string{"purchases.products.get", "purchases.products.acknowledge", "purchases.products.consume"},
-				"purpose":  "One-time product verification",
+				"purpose":   "One-time product verification",
 			},
 			"subscriptionsV2": map[string]interface{}{
-				"endpoints":   []string{"purchases.subscriptionsv2.get", "purchases.subscriptionsv2.cancel", "purchases.subscriptionsv2.revoke"},
+				"endpoints":  []string{"purchases.subscriptionsv2.get", "purchases.subscriptionsv2.cancel", "purchases.subscriptionsv2.revoke"},
 				"purpose":    "Subscription state verification (v2 API)",
 				"deprecated": false,
 			},
 			"subscriptions": map[string]interface{}{
-				"endpoints":   []string{"purchases.subscriptions.acknowledge", "purchases.subscriptions.cancel", "purchases.subscriptions.defer", "purchases.subscriptions.refund", "purchases.subscriptions.revoke"},
+				"endpoints":  []string{"purchases.subscriptions.acknowledge", "purchases.subscriptions.cancel", "purchases.subscriptions.defer", "purchases.subscriptions.refund", "purchases.subscriptions.revoke"},
 				"purpose":    "Legacy subscription actions",
 				"deprecated": true,
 			},
@@ -337,9 +372,9 @@ func (c *CLI) purchasesVoidedList(ctx context.Context, startTime, endTime, kind 
 	}
 	if kind != "" {
 		switch kind {
-		case "product":
+		case purchaseTypeProduct:
 			req = req.Type(0)
-		case "subscription":
+		case purchaseTypeSubscription:
 			req = req.Type(1)
 		default:
 			return c.OutputError(errors.NewAPIError(errors.CodeValidationError, "type must be product or subscription"))
@@ -532,7 +567,7 @@ func (c *CLI) purchasesSubscriptionsRevoke(ctx context.Context, subscriptionID, 
 	}
 	client, err := c.getAPIClient(ctx)
 	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+		return c.OutputError(err.(*errors.APIError))
 	}
 	publisher, err := client.AndroidPublisher()
 	if err != nil {
@@ -559,10 +594,10 @@ func (c *CLI) purchasesSubscriptionsRevoke(ctx context.Context, subscriptionID, 
 			return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
 		}
 		result := output.NewResult(map[string]interface{}{
-			"success":   true,
-			"token":     token,
-			"package":   c.packageName,
-			"api":       "subscriptionsv2",
+			"success":    true,
+			"token":      token,
+			"package":    c.packageName,
+			"api":        "subscriptionsv2",
 			"revokeType": revokeType,
 		})
 		return c.Output(result.WithServices("androidpublisher"))

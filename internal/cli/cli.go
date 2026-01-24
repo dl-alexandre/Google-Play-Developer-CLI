@@ -112,7 +112,7 @@ for automating Android app publishing and management tasks.`,
 	c.addHelpCommands()
 }
 
-func (c *CLI) setup(cmd *cobra.Command) error {
+func (c *CLI) setup(_ *cobra.Command) error {
 	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {

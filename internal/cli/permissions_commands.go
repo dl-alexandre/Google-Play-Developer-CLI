@@ -586,7 +586,7 @@ var validAppLevelPermissions = []string{
 	"CAN_MANAGE_DEEPLINKS",
 }
 
-func (c *CLI) permissionsListAvailable(ctx context.Context) error {
+func (c *CLI) permissionsListAvailable(_ context.Context) error {
 	appPermDescriptions := map[string]string{
 		"CAN_VIEW_FINANCIAL_DATA":     "View financial data and reports",
 		"CAN_MANAGE_PERMISSIONS":      "Admin - manage all permissions",
@@ -646,7 +646,7 @@ func (c *CLI) permissionsListAvailable(ctx context.Context) error {
 	return c.Output(result.WithServices("androidpublisher"))
 }
 
-func (c *CLI) permissionsCapabilities(ctx context.Context) error {
+func (c *CLI) permissionsCapabilities(_ context.Context) error {
 	result := output.NewResult(map[string]interface{}{
 		"users": map[string]interface{}{
 			"operations":           []string{"create", "list", "get", "patch", "delete"},

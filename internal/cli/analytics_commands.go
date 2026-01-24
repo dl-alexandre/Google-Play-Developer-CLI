@@ -63,8 +63,7 @@ func (c *CLI) addAnalyticsCommands() {
 }
 
 func (c *CLI) analyticsQuery(ctx context.Context, startDate, endDate string, metrics, dimensions []string,
-	outputFmt string, pageSize int64, pageToken string, all bool) error {
-
+	_ string, _ int64, _ string, _ bool) error {
 	if err := c.requirePackage(); err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
@@ -98,7 +97,7 @@ func (c *CLI) analyticsQuery(ctx context.Context, startDate, endDate string, met
 	return c.Output(result.WithServices("playdeveloperreporting"))
 }
 
-func (c *CLI) analyticsCapabilities(ctx context.Context) error {
+func (c *CLI) analyticsCapabilities(_ context.Context) error {
 	result := output.NewResult(map[string]interface{}{
 		"metrics": []map[string]interface{}{
 			{"name": "installs", "description": "Total installs"},

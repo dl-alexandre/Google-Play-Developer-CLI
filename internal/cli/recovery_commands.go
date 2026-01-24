@@ -22,14 +22,14 @@ func (c *CLI) addRecoveryCommands() {
 	}
 
 	var (
-		versionCode     int64
-		targetingFile   string
-		allUsers        bool
-		regions         []string
+		versionCode      int64
+		targetingFile    string
+		allUsers         bool
+		regions          []string
 		androidSdkLevels []int64
-		versionCodes    []int64
-		versionRangeMin int64
-		versionRangeMax int64
+		versionCodes     []int64
+		versionRangeMin  int64
+		versionRangeMax  int64
 	)
 
 	createCmd := &cobra.Command{
@@ -128,7 +128,7 @@ func (c *CLI) addRecoveryCommands() {
 	c.rootCmd.AddCommand(recoveryCmd)
 }
 
-func (c *CLI) recoveryCreate(ctx context.Context, versionCode int64, targetingFile string, allUsers bool, regions []string, androidSdkLevels []int64, versionCodes []int64, versionRangeMin, versionRangeMax int64) error {
+func (c *CLI) recoveryCreate(ctx context.Context, versionCode int64, targetingFile string, allUsers bool, regions []string, androidSdkLevels, versionCodes []int64, versionRangeMin, versionRangeMax int64) error {
 	client, err := c.getAPIClient(ctx)
 	if err != nil {
 		return c.OutputError(err.(*errors.APIError))
@@ -371,15 +371,15 @@ func (c *CLI) recoveryAddTargeting(ctx context.Context, recoveryID, targetingFil
 	}
 
 	result := output.NewResult(map[string]interface{}{
-		"success":         true,
-		"appRecoveryId":   appRecoveryID,
-		"targetingAdded":  true,
-		"package":         c.packageName,
+		"success":        true,
+		"appRecoveryId":  appRecoveryID,
+		"targetingAdded": true,
+		"package":        c.packageName,
 	})
 	return c.Output(result.WithServices("androidpublisher"))
 }
 
-func (c *CLI) recoveryCapabilities(ctx context.Context) error {
+func (c *CLI) recoveryCapabilities(_ context.Context) error {
 	result := output.NewResult(map[string]interface{}{
 		"operations": []string{"create", "list", "deploy", "cancel", "add-targeting"},
 		"recoveryStatuses": []string{
@@ -390,10 +390,10 @@ func (c *CLI) recoveryCapabilities(ctx context.Context) error {
 			"RECOVERY_STATUS_GENERATION_IN_PROGRESS",
 		},
 		"targetingOptions": map[string]interface{}{
-			"allUsers":    "Target all users",
-			"regions":     "Target specific regions by ISO country codes",
-			"sdkLevels":   "Target specific Android SDK levels",
-			"versionList": "Target specific app version codes",
+			"allUsers":     "Target all users",
+			"regions":      "Target specific regions by ISO country codes",
+			"sdkLevels":    "Target specific Android SDK levels",
+			"versionList":  "Target specific app version codes",
 			"versionRange": "Target app version code ranges",
 		},
 		"notes": []string{

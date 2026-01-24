@@ -116,7 +116,7 @@ Fish:
 	c.rootCmd.AddCommand(configCmd)
 }
 
-func (c *CLI) configInit(cmd *cobra.Command) error {
+func (c *CLI) configInit(_ *cobra.Command) error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
@@ -143,7 +143,7 @@ func (c *CLI) configInit(cmd *cobra.Command) error {
 	return c.Output(result.WithServices("config"))
 }
 
-func (c *CLI) configDoctor(cmd *cobra.Command) error {
+func (c *CLI) configDoctor(_ *cobra.Command) error {
 	paths := config.GetPaths()
 	issues := []string{}
 	checks := map[string]interface{}{}
@@ -238,7 +238,7 @@ func findGPDBinaries() []string {
 	return binaries
 }
 
-func (c *CLI) configPath(cmd *cobra.Command) error {
+func (c *CLI) configPath(_ *cobra.Command) error {
 	paths := config.GetPaths()
 	result := output.NewResult(map[string]interface{}{
 		"configDir":  paths.ConfigDir,
@@ -249,7 +249,7 @@ func (c *CLI) configPath(cmd *cobra.Command) error {
 	return c.Output(result.WithServices("config"))
 }
 
-func (c *CLI) configGet(cmd *cobra.Command, key string) error {
+func (c *CLI) configGet(_ *cobra.Command, key string) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
@@ -274,7 +274,7 @@ func (c *CLI) configGet(cmd *cobra.Command, key string) error {
 	return c.Output(result.WithServices("config"))
 }
 
-func (c *CLI) configSet(cmd *cobra.Command, key, value string) error {
+func (c *CLI) configSet(_ *cobra.Command, key, value string) error {
 	cfg, err := config.Load()
 	if err != nil {
 		cfg = config.DefaultConfig()
@@ -307,7 +307,7 @@ func (c *CLI) configSet(cmd *cobra.Command, key, value string) error {
 	return c.Output(result.WithServices("config"))
 }
 
-func (c *CLI) configPrint(cmd *cobra.Command, resolved bool) error {
+func (c *CLI) configPrint(_ *cobra.Command, resolved bool) error {
 	cfg, err := config.Load()
 	if err != nil {
 		cfg = config.DefaultConfig()
@@ -337,7 +337,7 @@ func (c *CLI) configPrint(cmd *cobra.Command, resolved bool) error {
 	return c.Output(result.WithServices("config"))
 }
 
-func (c *CLI) configCompletion(cmd *cobra.Command, shell string) error {
+func (c *CLI) configCompletion(_ *cobra.Command, shell string) error {
 	var err error
 	switch shell {
 	case "bash":

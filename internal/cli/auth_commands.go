@@ -3,7 +3,6 @@ package cli
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/spf13/cobra"
 
@@ -162,7 +161,7 @@ func (c *CLI) authCheck(ctx context.Context) error {
 	return c.Output(result.WithServices("androidpublisher", "playdeveloperreporting"))
 }
 
-func (c *CLI) authLogout(ctx context.Context) error {
+func (c *CLI) authLogout(_ context.Context) error {
 	c.authMgr.Clear()
 
 	result := output.NewResult(map[string]interface{}{
@@ -170,9 +169,4 @@ func (c *CLI) authLogout(ctx context.Context) error {
 		"message": "Credentials cleared",
 	})
 	return c.Output(result.WithServices("auth"))
-}
-
-func init() {
-	// Suppress unused import warning
-	_ = fmt.Sprintf
 }

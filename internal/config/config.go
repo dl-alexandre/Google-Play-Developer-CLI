@@ -173,7 +173,7 @@ const (
 	EnvServiceAccountKey = "GPD_SERVICE_ACCOUNT_KEY"
 	EnvPackage           = "GPD_PACKAGE"
 	EnvTimeout           = "GPD_TIMEOUT"
-	EnvStoreTokens       = "GPD_STORE_TOKENS"
+	EnvStoreTokens       = "GPD_STORE_TOKENS" //nolint:gosec // G101: This is an env var name, not credentials
 	EnvCI                = "GPD_CI"
 )
 
@@ -254,7 +254,7 @@ func InitProject(dir string) error {
 		"en-US": "Bug fixes and improvements.",
 	}
 	rnData, _ := json.MarshalIndent(releaseNotes, "", "  ")
-	if err := os.WriteFile(filepath.Join(dir, "release-notes.json"), rnData, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "release-notes.json"), rnData, 0644); err != nil { //nolint:gosec // G306: Template file should be world-readable
 		return err
 	}
 
@@ -264,7 +264,7 @@ func InitProject(dir string) error {
 service-account*.json
 .gpd/
 `
-	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(gitignore), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(gitignore), 0644); err != nil { //nolint:gosec // G306: gitignore should be world-readable
 		return err
 	}
 

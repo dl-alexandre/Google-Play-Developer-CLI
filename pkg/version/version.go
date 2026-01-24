@@ -23,8 +23,8 @@ type Info struct {
 }
 
 // Get returns the current version information.
-func Get() Info {
-	return Info{
+func Get() *Info {
+	return &Info{
 		Version:   Version,
 		GitCommit: GitCommit,
 		BuildTime: BuildTime,
@@ -34,11 +34,11 @@ func Get() Info {
 }
 
 // String returns a human-readable version string.
-func (i Info) String() string {
+func (i *Info) String() string {
 	return fmt.Sprintf("gpd %s (%s) built %s", i.Version, i.GitCommit, i.BuildTime)
 }
 
 // Short returns a short version string.
-func (i Info) Short() string {
+func (i *Info) Short() string {
 	return i.Version
 }

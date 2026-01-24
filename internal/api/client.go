@@ -258,7 +258,11 @@ func calculateDelayWithConfig(cfg RetryConfig, attempt int, err error) time.Dura
 		return retryAfter
 	}
 
-	delay := cfg.InitialDelay * time.Duration(1<<uint(attempt))
+	shift := attempt
+	if shift > 62 {
+		shift = 62
+	}
+	delay := cfg.InitialDelay * time.Duration(1<<shift)
 	if delay > cfg.MaxDelay {
 		delay = cfg.MaxDelay
 	}

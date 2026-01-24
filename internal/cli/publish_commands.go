@@ -1014,19 +1014,17 @@ func (c *CLI) publishHalt(ctx context.Context, track, editID string, noAutoCommi
 	if err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
-	defer editMgr.ReleaseLock(c.packageName)
+	defer func() { _ = editMgr.ReleaseLock(c.packageName) }()
 
-	// Get current track info
 	trackInfo, err := publisher.Edits.Tracks.Get(c.packageName, edit.ServerID, track).Context(ctx).Do()
 	if err != nil {
 		if created {
-			publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+			_ = publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
 		}
 		return c.OutputError(errors.NewAPIError(errors.CodeNotFound,
 			fmt.Sprintf("track not found: %s", track)))
 	}
 
-	// Find the in-progress release and halt it
 	var haltedRelease *androidpublisher.TrackRelease
 	for i, release := range trackInfo.Releases {
 		if release.Status == "inProgress" {
@@ -1037,17 +1035,16 @@ func (c *CLI) publishHalt(ctx context.Context, track, editID string, noAutoCommi
 	}
 
 	if haltedRelease == nil {
-		publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+		_ = publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
 		return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
 			"no in-progress release found on track").
 			WithHint("Only releases with status 'inProgress' can be halted"))
 	}
 
-	// Update the track
 	_, err = publisher.Edits.Tracks.Update(c.packageName, edit.ServerID, track, trackInfo).Context(ctx).Do()
 	if err != nil {
 		if created {
-			publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+			_ = publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
 		}
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
 			fmt.Sprintf("failed to update track: %v", err)))
@@ -1115,23 +1112,20 @@ func (c *CLI) publishRollback(ctx context.Context, track, versionCode, editID st
 	if err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
-	defer editMgr.ReleaseLock(c.packageName)
+	defer func() { _ = editMgr.ReleaseLock(c.packageName) }()
 
-	// Get current track info
 	trackInfo, err := publisher.Edits.Tracks.Get(c.packageName, edit.ServerID, track).Context(ctx).Do()
 	if err != nil {
 		if created {
-			publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+			_ = publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
 		}
 		return c.OutputError(errors.NewAPIError(errors.CodeNotFound,
 			fmt.Sprintf("track not found: %s", track)))
 	}
 
-	// Find the target version in history or halted releases
 	var rollbackVersionCodes []int64
 	var foundRelease *androidpublisher.TrackRelease
 
-	// If version code specified, look for it
 	if targetVersionCode > 0 {
 		for _, release := range trackInfo.Releases {
 			for _, vc := range release.VersionCodes {
@@ -1147,14 +1141,13 @@ func (c *CLI) publishRollback(ctx context.Context, track, versionCode, editID st
 		}
 		if foundRelease == nil {
 			if created {
-				publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+				_ = publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
 			}
 			return c.OutputError(errors.NewAPIError(errors.CodeNotFound,
 				fmt.Sprintf("version code %d not found in track history", targetVersionCode)).
 				WithHint("Check available versions with 'gpd publish status --track " + track + "'"))
 		}
 	} else {
-		// Find the previous completed release (not current inProgress or halted)
 		var currentRelease *androidpublisher.TrackRelease
 		var previousRelease *androidpublisher.TrackRelease
 		for _, release := range trackInfo.Releases {
@@ -1166,31 +1159,28 @@ func (c *CLI) publishRollback(ctx context.Context, track, versionCode, editID st
 		}
 		if previousRelease == nil {
 			if created {
-				publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+				_ = publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
 			}
 			return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
 				"no previous release found to rollback to").
 				WithHint("Specify a version code with --version-code flag"))
 		}
-		_ = currentRelease // For future use
+		_ = currentRelease
 		rollbackVersionCodes = previousRelease.VersionCodes
 		foundRelease = previousRelease
 	}
 
-	// Create a new release with the rollback version
 	newRelease := &androidpublisher.TrackRelease{
 		VersionCodes: rollbackVersionCodes,
 		Status:       "completed",
 	}
 
-	// Replace releases on track
 	trackInfo.Releases = []*androidpublisher.TrackRelease{newRelease}
 
-	// Update the track
 	_, err = publisher.Edits.Tracks.Update(c.packageName, edit.ServerID, track, trackInfo).Context(ctx).Do()
 	if err != nil {
 		if created {
-			publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+			_ = publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
 		}
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
 			fmt.Sprintf("failed to update track: %v", err)))
@@ -1231,7 +1221,7 @@ func (c *CLI) publishStatus(ctx context.Context, track string) error {
 	if err != nil {
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
 	}
-	defer publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+	defer func() { _ = publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do() }()
 
 	if track != "" {
 		trackInfo, err := publisher.Edits.Tracks.Get(c.packageName, edit.Id, track).Context(ctx).Do()
@@ -1380,7 +1370,7 @@ func (c *CLI) publishListingGet(ctx context.Context, locale string) error {
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
 			fmt.Sprintf("failed to create edit: %v", err)))
 	}
-	defer publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+	defer func() { _ = publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do() }()
 
 	if locale != "" {
 		// Get specific locale listing
@@ -1691,7 +1681,7 @@ func (c *CLI) publishDetailsGet(ctx context.Context) error {
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
 			fmt.Sprintf("failed to create edit: %v", err)))
 	}
-	defer publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+	defer func() { _ = publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do() }()
 
 	details, err := publisher.Edits.Details.Get(c.packageName, edit.Id).Context(ctx).Do()
 	if err != nil {
@@ -1969,7 +1959,7 @@ func (c *CLI) publishImagesList(ctx context.Context, imageType, locale, editID s
 		edit = &androidpublisher.AppEdit{Id: editID}
 	}
 	if created {
-		defer publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+		defer func() { _ = publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do() }()
 	}
 	images, err := publisher.Edits.Images.List(c.packageName, edit.Id, locale, imageType).Context(ctx).Do()
 	if err != nil {
@@ -2411,7 +2401,7 @@ func (c *CLI) publishTestersList(ctx context.Context, track string) error {
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
 			fmt.Sprintf("failed to create edit: %v", err)))
 	}
-	defer publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do()
+	defer func() { _ = publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do() }()
 
 	if track != "" {
 		// Get testers for specific track

@@ -215,7 +215,6 @@ func (c *CLI) publishTestersList(ctx context.Context, track string) error {
 
 	g, gctx := errgroup.WithContext(ctx)
 	for _, t := range tracks {
-		t := t
 		g.Go(func() error {
 			if err := client.Acquire(gctx); err != nil {
 				return err

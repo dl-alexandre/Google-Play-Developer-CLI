@@ -14,66 +14,128 @@ import (
 	"github.com/dl-alexandre/gpd/internal/output"
 )
 
-// File extension constants
 const (
 	extAPK = ".apk"
 	extAAB = ".aab"
 )
+
+type uploadContext struct {
+	filePath       string
+	info           os.FileInfo
+	ext            string
+	hash           string
+	idempotencyKey string
+}
+
+func (c *CLI) validateUploadFile(filePath string) (*uploadContext, error) {
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return nil, errors.NewAPIError(errors.CodeValidationError,
+			fmt.Sprintf("file not found: %s", filePath))
+	}
+
+	ext := strings.ToLower(filepath.Ext(filePath))
+	if ext != extAAB && ext != extAPK {
+		return nil, errors.NewAPIError(errors.CodeValidationError,
+			"file must be an AAB or APK").WithHint("Supported formats: .aab, .apk")
+	}
+
+	hash, err := edits.HashFile(filePath)
+	if err != nil {
+		return nil, errors.NewAPIError(errors.CodeGeneralError,
+			fmt.Sprintf("failed to compute file hash: %v", err))
+	}
+
+	return &uploadContext{
+		filePath: filePath,
+		info:     info,
+		ext:      ext,
+		hash:     hash,
+	}, nil
+}
+
+func (c *CLI) checkIdempotentUpload(uc *uploadContext, editMgr *edits.Manager) *output.Result {
+	idempotencyResult, idempotencyKey, _ := editMgr.Idempotent.CheckUploadByHash(c.packageName, uc.hash)
+	uc.idempotencyKey = idempotencyKey
+
+	if idempotencyResult == nil || !idempotencyResult.Found {
+		return nil
+	}
+
+	data, ok := idempotencyResult.Data.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+
+	return output.NewResult(map[string]interface{}{
+		"idempotent":  true,
+		"versionCode": data["versionCode"],
+		"sha256":      data["sha256"],
+		"path":        uc.filePath,
+		"size":        uc.info.Size(),
+		"sizeHuman":   edits.FormatBytes(uc.info.Size()),
+		"type":        uc.ext[1:],
+		"package":     c.packageName,
+		"editId":      data["editId"],
+		"recordedAt":  idempotencyResult.Timestamp,
+	}).WithNoOp("upload already completed").WithServices("androidpublisher")
+}
+
+func (c *CLI) checkCachedUpload(uc *uploadContext, editMgr *edits.Manager) *output.Result {
+	cached, err := editMgr.GetCachedArtifactByHash(c.packageName, uc.hash)
+	if err != nil || cached == nil {
+		return nil
+	}
+
+	return output.NewResult(map[string]interface{}{
+		"cached":    true,
+		"sha256":    cached.SHA256,
+		"path":      uc.filePath,
+		"size":      uc.info.Size(),
+		"sizeHuman": edits.FormatBytes(uc.info.Size()),
+	}).WithNoOp("artifact already uploaded").WithServices("androidpublisher")
+}
+
+func (c *CLI) uploadArtifact(ctx context.Context, publisher *androidpublisher.Service, editID string, uc *uploadContext) (int64, error) {
+	f, err := os.Open(uc.filePath)
+	if err != nil {
+		return 0, errors.NewAPIError(errors.CodeGeneralError, err.Error())
+	}
+	defer f.Close()
+
+	if uc.ext == extAAB {
+		bundle, err := publisher.Edits.Bundles.Upload(c.packageName, editID).Media(f).Context(ctx).Do()
+		if err != nil {
+			return 0, fmt.Errorf("failed to upload bundle: %w", err)
+		}
+		return bundle.VersionCode, nil
+	}
+
+	apk, err := publisher.Edits.Apks.Upload(c.packageName, editID).Media(f).Context(ctx).Do()
+	if err != nil {
+		return 0, fmt.Errorf("failed to upload APK: %w", err)
+	}
+	return apk.VersionCode, nil
+}
 
 func (c *CLI) publishUpload(ctx context.Context, filePath, editID string, noAutoCommit, dryRun bool) error {
 	if err := c.requirePackage(); err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
 
-	info, err := os.Stat(filePath)
+	uc, err := c.validateUploadFile(filePath)
 	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
-			fmt.Sprintf("file not found: %s", filePath)))
-	}
-
-	ext := strings.ToLower(filepath.Ext(filePath))
-	if ext != extAAB && ext != extAPK {
-		return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
-			"file must be an AAB or APK").WithHint("Supported formats: .aab, .apk"))
-	}
-
-	hash, err := edits.HashFile(filePath)
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
-			fmt.Sprintf("failed to compute file hash: %v", err)))
+		return c.OutputError(err.(*errors.APIError))
 	}
 
 	editMgr := edits.NewManager()
 
-	idempotencyResult, idempotencyKey, _ := editMgr.Idempotent.CheckUploadByHash(c.packageName, hash)
-	if idempotencyResult != nil && idempotencyResult.Found {
-		if data, ok := idempotencyResult.Data.(map[string]interface{}); ok {
-			result := output.NewResult(map[string]interface{}{
-				"idempotent":  true,
-				"versionCode": data["versionCode"],
-				"sha256":      data["sha256"],
-				"path":        filePath,
-				"size":        info.Size(),
-				"sizeHuman":   edits.FormatBytes(info.Size()),
-				"type":        ext[1:],
-				"package":     c.packageName,
-				"editId":      data["editId"],
-				"recordedAt":  idempotencyResult.Timestamp,
-			})
-			return c.Output(result.WithNoOp("upload already completed").WithServices("androidpublisher"))
-		}
+	if result := c.checkIdempotentUpload(uc, editMgr); result != nil {
+		return c.Output(result)
 	}
 
-	cached, err := editMgr.GetCachedArtifactByHash(c.packageName, hash)
-	if err == nil && cached != nil {
-		result := output.NewResult(map[string]interface{}{
-			"cached":    true,
-			"sha256":    cached.SHA256,
-			"path":      filePath,
-			"size":      info.Size(),
-			"sizeHuman": edits.FormatBytes(info.Size()),
-		})
-		return c.Output(result.WithNoOp("artifact already uploaded").WithServices("androidpublisher"))
+	if result := c.checkCachedUpload(uc, editMgr); result != nil {
+		return c.Output(result)
 	}
 
 	if dryRun {
@@ -81,10 +143,10 @@ func (c *CLI) publishUpload(ctx context.Context, filePath, editID string, noAuto
 			"dryRun":    true,
 			"action":    "upload",
 			"path":      filePath,
-			"sha256":    hash,
-			"size":      info.Size(),
-			"sizeHuman": edits.FormatBytes(info.Size()),
-			"type":      ext[1:],
+			"sha256":    uc.hash,
+			"size":      uc.info.Size(),
+			"sizeHuman": edits.FormatBytes(uc.info.Size()),
+			"type":      uc.ext[1:],
 			"package":   c.packageName,
 		})
 		return c.Output(result.WithServices("androidpublisher"))
@@ -106,61 +168,38 @@ func (c *CLI) publishUpload(ctx context.Context, filePath, editID string, noAuto
 	}
 	defer func() { _ = editMgr.ReleaseLock(c.packageName) }()
 
-	f, err := os.Open(filePath)
+	versionCode, err := c.uploadArtifact(ctx, publisher, edit.ServerID, uc)
 	if err != nil {
+		if created {
+			_ = publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+		}
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-	defer f.Close()
-
-	var versionCode int64
-	if ext == extAAB {
-		bundle, err := publisher.Edits.Bundles.Upload(c.packageName, edit.ServerID).
-			Media(f).Context(ctx).Do()
-		if err != nil {
-			if created {
-				_ = publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
-			}
-			return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
-				fmt.Sprintf("failed to upload bundle: %v", err)))
-		}
-		versionCode = bundle.VersionCode
-	} else {
-		apk, err := publisher.Edits.Apks.Upload(c.packageName, edit.ServerID).
-			Media(f).Context(ctx).Do()
-		if err != nil {
-			if created {
-				_ = publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
-			}
-			return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
-				fmt.Sprintf("failed to upload APK: %v", err)))
-		}
-		versionCode = apk.VersionCode
 	}
 
 	if err := c.finalizeEdit(ctx, publisher, editMgr, edit, !noAutoCommit); err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
 
-	_ = editMgr.CacheArtifactWithHash(c.packageName, filePath, hash, versionCode)
+	_ = editMgr.CacheArtifactWithHash(c.packageName, filePath, uc.hash, versionCode)
 
 	uploadResult := &edits.UploadResult{
 		VersionCode: versionCode,
-		SHA256:      hash,
+		SHA256:      uc.hash,
 		Path:        filePath,
-		Size:        info.Size(),
-		Type:        ext[1:],
+		Size:        uc.info.Size(),
+		Type:        uc.ext[1:],
 		EditID:      edit.ServerID,
 	}
-	_ = editMgr.Idempotent.RecordUpload(idempotencyKey, c.packageName, hash, uploadResult)
+	_ = editMgr.Idempotent.RecordUpload(uc.idempotencyKey, c.packageName, uc.hash, uploadResult)
 
 	result := output.NewResult(map[string]interface{}{
 		"success":     true,
 		"versionCode": versionCode,
-		"sha256":      hash,
+		"sha256":      uc.hash,
 		"path":        filePath,
-		"size":        info.Size(),
-		"sizeHuman":   edits.FormatBytes(info.Size()),
-		"type":        ext[1:],
+		"size":        uc.info.Size(),
+		"sizeHuman":   edits.FormatBytes(uc.info.Size()),
+		"type":        uc.ext[1:],
 		"package":     c.packageName,
 		"editId":      edit.ServerID,
 		"committed":   !noAutoCommit,

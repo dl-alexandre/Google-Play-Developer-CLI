@@ -1,4 +1,3 @@
-// Package edits provides edit transaction management for gpd.
 package edits
 
 import (
@@ -10,9 +9,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/dl-alexandre/gpd/internal/config"
 	"github.com/dl-alexandre/gpd/internal/errors"
@@ -41,7 +43,7 @@ const (
 type Manager struct {
 	editsDir   string
 	cacheDir   string
-	mu         sync.Mutex
+	mu         sync.RWMutex
 	lockFiles  map[string]*LockFile
 	Idempotent *IdempotencyStore
 }
@@ -367,33 +369,64 @@ func (m *Manager) CacheArtifactWithHash(packageName, artifactPath, hash string, 
 	return os.WriteFile(cachePath, data, 0600)
 }
 
-// CleanExpiredCache removes expired cache entries.
 func (m *Manager) CleanExpiredCache() error {
-	return filepath.Walk(m.cacheDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil // Skip errors
-		}
+	return m.CleanExpiredCacheWithContext(context.Background())
+}
 
+func (m *Manager) CleanExpiredCacheWithContext(ctx context.Context) error {
+	var paths []string
+	err := filepath.Walk(m.cacheDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
 		if info.IsDir() || filepath.Ext(path) != ".json" {
 			return nil
 		}
-
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil
-		}
-
-		var entry CacheEntry
-		if json.Unmarshal(data, &entry) != nil {
-			return nil
-		}
-
-		if time.Now().After(entry.ExpiresAt) {
-			os.Remove(path)
-		}
-
+		paths = append(paths, path)
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+
+	if len(paths) == 0 {
+		return nil
+	}
+
+	workers := runtime.GOMAXPROCS(0)
+	if workers > 4 {
+		workers = 4
+	}
+
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(workers)
+
+	for _, p := range paths {
+		g.Go(func() error {
+			select {
+			case <-gctx.Done():
+				return gctx.Err()
+			default:
+			}
+
+			data, err := os.ReadFile(p)
+			if err != nil {
+				return nil
+			}
+
+			var entry CacheEntry
+			if json.Unmarshal(data, &entry) != nil {
+				return nil
+			}
+
+			if time.Now().After(entry.ExpiresAt) {
+				os.Remove(p)
+			}
+			return nil
+		})
+	}
+
+	return g.Wait()
 }
 
 func HashFile(path string) (string, error) {
@@ -580,6 +613,10 @@ func (s *IdempotencyStore) Get(key string) (*CheckResult, error) {
 }
 
 func (s *IdempotencyStore) CleanExpired() error {
+	return s.CleanExpiredWithContext(context.Background())
+}
+
+func (s *IdempotencyStore) CleanExpiredWithContext(ctx context.Context) error {
 	entries, err := os.ReadDir(s.dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -588,24 +625,52 @@ func (s *IdempotencyStore) CleanExpired() error {
 		return err
 	}
 
+	var paths []string
 	for _, entry := range entries {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
 			continue
 		}
-		path := filepath.Join(s.dir, entry.Name())
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-		var e IdempotencyEntry
-		if json.Unmarshal(data, &e) != nil {
-			continue
-		}
-		if time.Now().After(e.ExpiresAt) {
-			os.Remove(path)
-		}
+		paths = append(paths, filepath.Join(s.dir, entry.Name()))
 	}
-	return nil
+
+	if len(paths) == 0 {
+		return nil
+	}
+
+	workers := runtime.GOMAXPROCS(0)
+	if workers > 4 {
+		workers = 4
+	}
+
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(workers)
+
+	for _, p := range paths {
+		g.Go(func() error {
+			select {
+			case <-gctx.Done():
+				return gctx.Err()
+			default:
+			}
+
+			data, err := os.ReadFile(p)
+			if err != nil {
+				return nil
+			}
+
+			var e IdempotencyEntry
+			if json.Unmarshal(data, &e) != nil {
+				return nil
+			}
+
+			if time.Now().After(e.ExpiresAt) {
+				os.Remove(p)
+			}
+			return nil
+		})
+	}
+
+	return g.Wait()
 }
 
 type UploadResult struct {

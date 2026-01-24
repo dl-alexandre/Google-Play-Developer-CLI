@@ -722,13 +722,13 @@ func (c *CLI) publishRelease(ctx context.Context, track, name, status string, ve
 	if err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
-	defer editMgr.ReleaseLock(c.packageName)
+	defer func() { _ = editMgr.ReleaseLock(c.packageName) }()
 
 	// Get track and update release
 	trackInfo, err := publisher.Edits.Tracks.Get(c.packageName, edit.ServerID, track).Context(ctx).Do()
 	if err != nil {
 		if created {
-			publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+			_ = publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
 		}
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
 			fmt.Sprintf("failed to get track: %v", err)))
@@ -803,13 +803,13 @@ func (c *CLI) publishRollout(ctx context.Context, track string, percentage float
 	if err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
-	defer editMgr.ReleaseLock(c.packageName)
+	defer func() { _ = editMgr.ReleaseLock(c.packageName) }()
 
 	// Get current track info
 	trackInfo, err := publisher.Edits.Tracks.Get(c.packageName, edit.ServerID, track).Context(ctx).Do()
 	if err != nil {
 		if created {
-			publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+			_ = publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
 		}
 		return c.OutputError(errors.NewAPIError(errors.CodeNotFound,
 			fmt.Sprintf("track not found: %s", track)))
@@ -828,7 +828,7 @@ func (c *CLI) publishRollout(ctx context.Context, track string, percentage float
 	}
 
 	if updatedRelease == nil {
-		publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+		_ = publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
 		return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
 			"no in-progress release found on track").
 			WithHint("Create a staged rollout release first with status 'inProgress'"))
@@ -838,7 +838,7 @@ func (c *CLI) publishRollout(ctx context.Context, track string, percentage float
 		_, err = publisher.Edits.Tracks.Update(c.packageName, edit.ServerID, track, trackInfo).Context(ctx).Do()
 	if err != nil {
 		if created {
-			publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+			_ = publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
 		}
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
 			fmt.Sprintf("failed to update track: %v", err)))
@@ -902,13 +902,13 @@ func (c *CLI) publishPromote(ctx context.Context, fromTrack, toTrack string, per
 	if err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
-	defer editMgr.ReleaseLock(c.packageName)
+	defer func() { _ = editMgr.ReleaseLock(c.packageName) }()
 
 	// Get source track info
 	sourceTrack, err := publisher.Edits.Tracks.Get(c.packageName, edit.ServerID, fromTrack).Context(ctx).Do()
 	if err != nil {
 		if created {
-			publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+			_ = publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
 		}
 		return c.OutputError(errors.NewAPIError(errors.CodeNotFound,
 			fmt.Sprintf("source track not found: %s", fromTrack)))
@@ -924,7 +924,7 @@ func (c *CLI) publishPromote(ctx context.Context, fromTrack, toTrack string, per
 	}
 
 	if sourceRelease == nil {
-		publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+		_ = publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
 		return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
 			fmt.Sprintf("no active release found on track: %s", fromTrack)).
 			WithHint("Ensure the source track has a completed or in-progress release"))
@@ -960,7 +960,7 @@ func (c *CLI) publishPromote(ctx context.Context, fromTrack, toTrack string, per
 	_, err = publisher.Edits.Tracks.Update(c.packageName, edit.ServerID, toTrack, destTrack).Context(ctx).Do()
 	if err != nil {
 		if created {
-			publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+			_ = publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
 		}
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
 			fmt.Sprintf("failed to update destination track: %v", err)))

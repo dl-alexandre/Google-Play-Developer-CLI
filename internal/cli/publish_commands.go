@@ -1305,7 +1305,7 @@ func (c *CLI) publishListingUpdate(ctx context.Context, locale, title, shortDesc
 	if err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
-	defer editMgr.ReleaseLock(c.packageName)
+	defer func() { _ = editMgr.ReleaseLock(c.packageName) }()
 
 	// Build listing update
 	listing := &androidpublisher.Listing{
@@ -1325,7 +1325,7 @@ func (c *CLI) publishListingUpdate(ctx context.Context, locale, title, shortDesc
 	updatedListing, err := publisher.Edits.Listings.Update(c.packageName, edit.ServerID, locale, listing).Context(ctx).Do()
 	if err != nil {
 		if created {
-			publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+			_ = publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
 		}
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
 			fmt.Sprintf("failed to update listing: %v", err)))
@@ -1488,11 +1488,11 @@ func (c *CLI) publishDeobfuscationUpload(ctx context.Context, filePath, fileType
 		}
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
 	}
-	defer editMgr.ReleaseLock(c.packageName)
+	defer func() { _ = editMgr.ReleaseLock(c.packageName) }()
 
 	if err := c.ensureVersionCodeExists(ctx, publisher, edit.ServerID, versionCode); err != nil {
 		if created {
-			publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+			_ = publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
 		}
 		return c.OutputError(err)
 	}
@@ -1513,7 +1513,7 @@ func (c *CLI) publishDeobfuscationUpload(ctx context.Context, filePath, fileType
 	resp, err := call.Context(ctx).Do()
 	if err != nil {
 		if created {
-			publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+			_ = publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
 		}
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
 			fmt.Sprintf("failed to upload deobfuscation file: %v", err)))
@@ -1732,7 +1732,7 @@ func (c *CLI) publishDetailsUpdate(ctx context.Context, email, phone, website, d
 	if err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
-	defer editMgr.ReleaseLock(c.packageName)
+	defer func() { _ = editMgr.ReleaseLock(c.packageName) }()
 
 	details := &androidpublisher.AppDetails{
 		ContactEmail:   email,
@@ -1744,7 +1744,7 @@ func (c *CLI) publishDetailsUpdate(ctx context.Context, email, phone, website, d
 	updated, err := publisher.Edits.Details.Update(c.packageName, edit.ServerID, details).Context(ctx).Do()
 	if err != nil {
 		if created {
-			publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+			_ = publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
 		}
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
 	}
@@ -1805,7 +1805,7 @@ func (c *CLI) publishDetailsPatch(ctx context.Context, email, phone, website, de
 	if err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
-	defer editMgr.ReleaseLock(c.packageName)
+	defer func() { _ = editMgr.ReleaseLock(c.packageName) }()
 
 	details := &androidpublisher.AppDetails{
 		ContactEmail:   email,
@@ -1838,7 +1838,7 @@ func (c *CLI) publishDetailsPatch(ctx context.Context, email, phone, website, de
 	updated, err := call.Context(ctx).Do()
 	if err != nil {
 		if created {
-			publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+			_ = publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
 		}
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
 	}
@@ -1902,7 +1902,7 @@ func (c *CLI) publishImagesUpload(ctx context.Context, imageType, filePath, loca
 		}
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
 	}
-	defer editMgr.ReleaseLock(c.packageName)
+	defer func() { _ = editMgr.ReleaseLock(c.packageName) }()
 
 	f, err := os.Open(filePath)
 	if err != nil {
@@ -1914,7 +1914,7 @@ func (c *CLI) publishImagesUpload(ctx context.Context, imageType, filePath, loca
 		Media(f).Context(ctx).Do()
 	if err != nil {
 		if created {
-			publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+			_ = publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
 		}
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
 	}
@@ -1995,11 +1995,11 @@ func (c *CLI) publishImagesDelete(ctx context.Context, imageType, imageID, local
 	if err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
-	defer editMgr.ReleaseLock(c.packageName)
+	defer func() { _ = editMgr.ReleaseLock(c.packageName) }()
 
 	if err := publisher.Edits.Images.Delete(c.packageName, edit.ServerID, locale, imageType, imageID).Context(ctx).Do(); err != nil {
 		if created {
-			publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+			_ = publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
 		}
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
 	}
@@ -2044,11 +2044,11 @@ func (c *CLI) publishImagesDeleteAll(ctx context.Context, imageType, locale, edi
 	if err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
-	defer editMgr.ReleaseLock(c.packageName)
+	defer func() { _ = editMgr.ReleaseLock(c.packageName) }()
 
 	if _, err := publisher.Edits.Images.Deleteall(c.packageName, edit.ServerID, locale, imageType).Context(ctx).Do(); err != nil {
 		if created {
-			publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+			_ = publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
 		}
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
 	}
@@ -2246,7 +2246,7 @@ func (c *CLI) publishTestersAdd(ctx context.Context, track string, groups []stri
 	if err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
-	defer editMgr.ReleaseLock(c.packageName)
+	defer func() { _ = editMgr.ReleaseLock(c.packageName) }()
 
 	// Get current testers
 	testers, err := publisher.Edits.Testers.Get(c.packageName, edit.ServerID, track).Context(ctx).Do()
@@ -2270,7 +2270,7 @@ func (c *CLI) publishTestersAdd(ctx context.Context, track string, groups []stri
 	_, err = publisher.Edits.Testers.Update(c.packageName, edit.ServerID, track, testers).Context(ctx).Do()
 	if err != nil {
 		if created {
-			publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+			_ = publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
 		}
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
 			fmt.Sprintf("failed to update testers: %v", err)))
@@ -2328,13 +2328,13 @@ func (c *CLI) publishTestersRemove(ctx context.Context, track string, groups []s
 	if err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
-	defer editMgr.ReleaseLock(c.packageName)
+	defer func() { _ = editMgr.ReleaseLock(c.packageName) }()
 
 	// Get current testers
 	testers, err := publisher.Edits.Testers.Get(c.packageName, edit.ServerID, track).Context(ctx).Do()
 	if err != nil {
 		if created {
-			publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+			_ = publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
 		}
 		return c.OutputError(errors.NewAPIError(errors.CodeNotFound,
 			fmt.Sprintf("no testers found for track: %s", track)))
@@ -2357,7 +2357,7 @@ func (c *CLI) publishTestersRemove(ctx context.Context, track string, groups []s
 	_, err = publisher.Edits.Testers.Update(c.packageName, edit.ServerID, track, testers).Context(ctx).Do()
 	if err != nil {
 		if created {
-			publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+			_ = publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
 		}
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
 			fmt.Sprintf("failed to update testers: %v", err)))

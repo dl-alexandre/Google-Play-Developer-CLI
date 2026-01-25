@@ -23,69 +23,98 @@ const (
 )
 
 func (c *CLI) publishRelease(ctx context.Context, track, name, status string, versionCodes []string, releaseNotesFile, editID string, noAutoCommit, dryRun, wait bool, waitTimeout string) error {
+	if err := c.validateReleaseParams(track, status); err != nil {
+		return c.OutputError(err)
+	}
+
+	codes, err := c.parseVersionCodes(versionCodes)
+	if err != nil {
+		return c.OutputError(err)
+	}
+
+	releaseNotes, err := c.parseReleaseNotesFile(releaseNotesFile)
+	if err != nil {
+		return c.OutputError(err)
+	}
+
+	if dryRun {
+		return c.outputDryRunRelease(track, name, status, codes, releaseNotes)
+	}
+
+	return c.executeRelease(ctx, track, name, status, codes, releaseNotes, editID, noAutoCommit, wait, waitTimeout)
+}
+
+func (c *CLI) validateReleaseParams(track, status string) *errors.APIError {
 	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
+		return err.(*errors.APIError)
 	}
-
 	if !config.IsValidTrack(track) {
-		return c.OutputError(errors.ErrTrackInvalid)
+		return errors.ErrTrackInvalid
 	}
-
 	if !api.IsValidReleaseStatus(status) {
-		return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
+		return errors.NewAPIError(errors.CodeValidationError,
 			fmt.Sprintf("invalid status: %s", status)).
-			WithHint("Valid statuses: draft, completed, halted, inProgress"))
+			WithHint("Valid statuses: draft, completed, halted, inProgress")
 	}
+	return nil
+}
 
+func (c *CLI) parseVersionCodes(versionCodes []string) ([]int64, *errors.APIError) {
 	var codes []int64
 	for _, vc := range versionCodes {
 		code, err := strconv.ParseInt(vc, 10, 64)
 		if err != nil {
-			return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
-				fmt.Sprintf("invalid version code: %s", vc)))
+			return nil, errors.NewAPIError(errors.CodeValidationError,
+				fmt.Sprintf("invalid version code: %s", vc))
 		}
 		codes = append(codes, code)
 	}
+	return codes, nil
+}
 
-	// Parse release notes if provided
+func (c *CLI) parseReleaseNotesFile(releaseNotesFile string) (map[string]string, *errors.APIError) {
+	if releaseNotesFile == "" {
+		return nil, nil
+	}
+
+	data, err := os.ReadFile(releaseNotesFile)
+	if err != nil {
+		return nil, errors.NewAPIError(errors.CodeValidationError,
+			fmt.Sprintf("failed to read release notes file: %v", err))
+	}
+
 	var releaseNotes map[string]string
-	if releaseNotesFile != "" {
-		data, err := os.ReadFile(releaseNotesFile)
-		if err != nil {
-			return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
-				fmt.Sprintf("failed to read release notes file: %v", err)))
-		}
-		if err := json.Unmarshal(data, &releaseNotes); err != nil {
-			return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
-				fmt.Sprintf("invalid release notes JSON: %v", err)).
-				WithHint("Expected format: {\"en-US\": \"Release notes text\", \"ja-JP\": \"リリースノート\"}"))
-		}
-
-		// Normalize locale keys (en_US -> en-US)
-		normalized := make(map[string]string, len(releaseNotes))
-		for locale, text := range releaseNotes {
-			normalized[config.NormalizeLocale(locale)] = text
-		}
-		releaseNotes = normalized
+	if err := json.Unmarshal(data, &releaseNotes); err != nil {
+		return nil, errors.NewAPIError(errors.CodeValidationError,
+			fmt.Sprintf("invalid release notes JSON: %v", err)).
+			WithHint("Expected format: {\"en-US\": \"Release notes text\", \"ja-JP\": \"リリースノート\"}")
 	}
 
-	if dryRun {
-		dryRunData := map[string]interface{}{
-			"dryRun":       true,
-			"action":       "release",
-			"track":        track,
-			"name":         name,
-			"status":       status,
-			"versionCodes": codes,
-			"package":      c.packageName,
-		}
-		if len(releaseNotes) > 0 {
-			dryRunData["releaseNotes"] = releaseNotes
-		}
-		result := output.NewResult(dryRunData)
-		return c.Output(result.WithServices("androidpublisher"))
+	normalized := make(map[string]string, len(releaseNotes))
+	for locale, text := range releaseNotes {
+		normalized[config.NormalizeLocale(locale)] = text
 	}
+	return normalized, nil
+}
 
+func (c *CLI) outputDryRunRelease(track, name, status string, codes []int64, releaseNotes map[string]string) error {
+	dryRunData := map[string]interface{}{
+		"dryRun":       true,
+		"action":       "release",
+		"track":        track,
+		"name":         name,
+		"status":       status,
+		"versionCodes": codes,
+		"package":      c.packageName,
+	}
+	if len(releaseNotes) > 0 {
+		dryRunData["releaseNotes"] = releaseNotes
+	}
+	result := output.NewResult(dryRunData)
+	return c.Output(result.WithServices("androidpublisher"))
+}
+
+func (c *CLI) executeRelease(ctx context.Context, track, name, status string, codes []int64, releaseNotes map[string]string, editID string, noAutoCommit, wait bool, waitTimeout string) error {
 	client, err := c.getAPIClient(ctx)
 	if err != nil {
 		return c.OutputError(err.(*errors.APIError))
@@ -104,13 +133,35 @@ func (c *CLI) publishRelease(ctx context.Context, track, name, status string, ve
 
 	trackInfo, err := publisher.Edits.Tracks.Get(c.packageName, edit.ServerID, track).Context(ctx).Do()
 	if err != nil {
-		if created {
-			_ = publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
-		}
+		c.cleanupEditOnError(ctx, publisher, edit.ServerID, created)
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
 			fmt.Sprintf("failed to get track: %v", err)))
 	}
 
+	release := c.buildTrackRelease(name, status, codes, releaseNotes)
+	trackInfo.Releases = []*androidpublisher.TrackRelease{release}
+
+	_, err = publisher.Edits.Tracks.Update(c.packageName, edit.ServerID, track, trackInfo).Context(ctx).Do()
+	if err != nil {
+		c.cleanupEditOnError(ctx, publisher, edit.ServerID, created)
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
+			fmt.Sprintf("failed to update track: %v", err)))
+	}
+
+	if err := c.finalizeEdit(ctx, publisher, editMgr, edit, !noAutoCommit); err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+
+	return c.outputReleaseResult(ctx, publisher, track, name, status, codes, releaseNotes, edit.ServerID, noAutoCommit, wait, waitTimeout)
+}
+
+func (c *CLI) cleanupEditOnError(ctx context.Context, publisher *androidpublisher.Service, editID string, created bool) {
+	if created {
+		_ = publisher.Edits.Delete(c.packageName, editID).Context(ctx).Do()
+	}
+}
+
+func (c *CLI) buildTrackRelease(name, status string, codes []int64, releaseNotes map[string]string) *androidpublisher.TrackRelease {
 	release := &androidpublisher.TrackRelease{
 		Name:         name,
 		VersionCodes: codes,
@@ -128,21 +179,10 @@ func (c *CLI) publishRelease(ctx context.Context, track, name, status string, ve
 		release.ReleaseNotes = localizedNotes
 	}
 
-	trackInfo.Releases = []*androidpublisher.TrackRelease{release}
+	return release
+}
 
-	_, err = publisher.Edits.Tracks.Update(c.packageName, edit.ServerID, track, trackInfo).Context(ctx).Do()
-	if err != nil {
-		if created {
-			_ = publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
-		}
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
-			fmt.Sprintf("failed to update track: %v", err)))
-	}
-
-	if err := c.finalizeEdit(ctx, publisher, editMgr, edit, !noAutoCommit); err != nil {
-		return c.OutputError(err.(*errors.APIError))
-	}
-
+func (c *CLI) outputReleaseResult(ctx context.Context, publisher *androidpublisher.Service, track, name, status string, codes []int64, releaseNotes map[string]string, editID string, noAutoCommit, wait bool, waitTimeout string) error {
 	resultData := map[string]interface{}{
 		"success":      true,
 		"track":        track,
@@ -150,7 +190,7 @@ func (c *CLI) publishRelease(ctx context.Context, track, name, status string, ve
 		"status":       status,
 		"versionCodes": codes,
 		"package":      c.packageName,
-		"editId":       edit.ServerID,
+		"editId":       editID,
 		"committed":    !noAutoCommit,
 	}
 	if len(releaseNotes) > 0 {
@@ -158,25 +198,32 @@ func (c *CLI) publishRelease(ctx context.Context, track, name, status string, ve
 	}
 
 	if wait && status == statusInProgress {
-		timeout, err := time.ParseDuration(waitTimeout)
-		if err != nil {
-			return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
-				fmt.Sprintf("invalid wait-timeout: %v", err)).
-				WithHint("Examples: 30m, 1h, 90m"))
+		if err := c.waitAndUpdateResult(ctx, publisher, track, waitTimeout, resultData); err != nil {
+			return c.OutputError(err)
 		}
-
-		finalRelease, err := c.waitForReleaseCompletion(ctx, publisher, c.packageName, track, timeout)
-		if err != nil {
-			return c.OutputError(err.(*errors.APIError))
-		}
-
-		resultData["waited"] = true
-		resultData["finalStatus"] = finalRelease.Status
-		resultData["waitDuration"] = timeout.String()
 	}
 
 	result := output.NewResult(resultData)
 	return c.Output(result.WithServices("androidpublisher"))
+}
+
+func (c *CLI) waitAndUpdateResult(ctx context.Context, publisher *androidpublisher.Service, track, waitTimeout string, resultData map[string]interface{}) *errors.APIError {
+	timeout, err := time.ParseDuration(waitTimeout)
+	if err != nil {
+		return errors.NewAPIError(errors.CodeValidationError,
+			fmt.Sprintf("invalid wait-timeout: %v", err)).
+			WithHint("Examples: 30m, 1h, 90m")
+	}
+
+	finalRelease, apiErr := c.waitForReleaseCompletion(ctx, publisher, c.packageName, track, timeout)
+	if apiErr != nil {
+		return apiErr.(*errors.APIError)
+	}
+
+	resultData["waited"] = true
+	resultData["finalStatus"] = finalRelease.Status
+	resultData["waitDuration"] = timeout.String()
+	return nil
 }
 
 func (c *CLI) waitForReleaseCompletion(ctx context.Context, publisher *androidpublisher.Service, packageName, track string, timeout time.Duration) (*androidpublisher.TrackRelease, error) {

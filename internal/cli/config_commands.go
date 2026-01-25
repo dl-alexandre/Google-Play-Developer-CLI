@@ -476,62 +476,8 @@ func (c *CLI) configImport(_ *cobra.Command, inputPath string, merge bool) error
 			WithHint("Expected JSON format from 'gpd config export'"))
 	}
 
-	var cfg *config.Config
-	if merge {
-		cfg, err = config.Load()
-		if err != nil {
-			cfg = &config.Config{}
-		}
-	} else {
-		cfg = &config.Config{}
-	}
-
-	imported := []string{}
-
-	if val, ok := importData.Config["defaultPackage"].(string); ok && val != "" {
-		cfg.DefaultPackage = val
-		imported = append(imported, "defaultPackage")
-	}
-	if val, ok := importData.Config["outputFormat"].(string); ok && val != "" {
-		cfg.OutputFormat = val
-		imported = append(imported, "outputFormat")
-	}
-	if val, ok := importData.Config["timeoutSeconds"].(float64); ok && val > 0 {
-		cfg.TimeoutSeconds = int(val)
-		imported = append(imported, "timeoutSeconds")
-	}
-	if val, ok := importData.Config["storeTokens"].(string); ok && val != "" {
-		cfg.StoreTokens = val
-		imported = append(imported, "storeTokens")
-	}
-	if val, ok := importData.Config["rateLimits"].(map[string]interface{}); ok && len(val) > 0 {
-		rateLimits := make(map[string]string)
-		for k, v := range val {
-			if strVal, ok := v.(string); ok {
-				rateLimits[k] = strVal
-			}
-		}
-		cfg.RateLimits = rateLimits
-		imported = append(imported, "rateLimits")
-	}
-	if val, ok := importData.Config["testerLimits"].(map[string]interface{}); ok && len(val) > 0 {
-		limits := config.DefaultTesterLimits()
-		if internal, ok := val["internal"].(float64); ok {
-			limits.Internal = int(internal)
-		}
-		if alpha, ok := val["alpha"].(float64); ok {
-			limits.Alpha = int(alpha)
-		}
-		if beta, ok := val["beta"].(float64); ok {
-			limits.Beta = int(beta)
-		}
-		cfg.TesterLimits = limits
-		imported = append(imported, "testerLimits")
-	}
-	if val, ok := importData.Config["serviceAccountKeyPath"].(string); ok && val != "" {
-		cfg.ServiceAccountKeyPath = val
-		imported = append(imported, "serviceAccountKeyPath")
-	}
+	cfg := c.loadOrCreateConfig(merge)
+	imported := c.applyImportedConfig(cfg, importData.Config)
 
 	if err := cfg.Save(); err != nil {
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
@@ -545,4 +491,73 @@ func (c *CLI) configImport(_ *cobra.Command, inputPath string, merge bool) error
 		"version":  importData.Version,
 	})
 	return c.Output(result)
+}
+
+func (c *CLI) loadOrCreateConfig(merge bool) *config.Config {
+	if merge {
+		cfg, err := config.Load()
+		if err == nil {
+			return cfg
+		}
+	}
+	return &config.Config{}
+}
+
+func (c *CLI) applyImportedConfig(cfg *config.Config, data map[string]interface{}) []string {
+	imported := []string{}
+
+	if val, ok := data["defaultPackage"].(string); ok && val != "" {
+		cfg.DefaultPackage = val
+		imported = append(imported, "defaultPackage")
+	}
+	if val, ok := data["outputFormat"].(string); ok && val != "" {
+		cfg.OutputFormat = val
+		imported = append(imported, "outputFormat")
+	}
+	if val, ok := data["timeoutSeconds"].(float64); ok && val > 0 {
+		cfg.TimeoutSeconds = int(val)
+		imported = append(imported, "timeoutSeconds")
+	}
+	if val, ok := data["storeTokens"].(string); ok && val != "" {
+		cfg.StoreTokens = val
+		imported = append(imported, "storeTokens")
+	}
+	if val, ok := data["rateLimits"].(map[string]interface{}); ok && len(val) > 0 {
+		cfg.RateLimits = c.parseRateLimits(val)
+		imported = append(imported, "rateLimits")
+	}
+	if val, ok := data["testerLimits"].(map[string]interface{}); ok && len(val) > 0 {
+		cfg.TesterLimits = c.parseTesterLimits(val)
+		imported = append(imported, "testerLimits")
+	}
+	if val, ok := data["serviceAccountKeyPath"].(string); ok && val != "" {
+		cfg.ServiceAccountKeyPath = val
+		imported = append(imported, "serviceAccountKeyPath")
+	}
+
+	return imported
+}
+
+func (c *CLI) parseRateLimits(val map[string]interface{}) map[string]string {
+	rateLimits := make(map[string]string)
+	for k, v := range val {
+		if strVal, ok := v.(string); ok {
+			rateLimits[k] = strVal
+		}
+	}
+	return rateLimits
+}
+
+func (c *CLI) parseTesterLimits(val map[string]interface{}) *config.TesterLimits {
+	limits := config.DefaultTesterLimits()
+	if internal, ok := val["internal"].(float64); ok {
+		limits.Internal = int(internal)
+	}
+	if alpha, ok := val["alpha"].(float64); ok {
+		limits.Alpha = int(alpha)
+	}
+	if beta, ok := val["beta"].(float64); ok {
+		limits.Beta = int(beta)
+	}
+	return limits
 }

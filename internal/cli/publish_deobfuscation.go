@@ -13,6 +13,7 @@ import (
 
 	"github.com/dl-alexandre/gpd/internal/edits"
 	"github.com/dl-alexandre/gpd/internal/errors"
+	"github.com/dl-alexandre/gpd/internal/logging"
 	"github.com/dl-alexandre/gpd/internal/output"
 )
 
@@ -60,11 +61,17 @@ func (c *CLI) publishDeobfuscationUpload(ctx context.Context, filePath, fileType
 		}
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
 	}
-	defer func() { _ = editMgr.ReleaseLock(c.packageName) }()
+	defer func() {
+		if err := editMgr.ReleaseLock(c.packageName); err != nil {
+			logging.Warn("failed to release edit lock", logging.String("package", c.packageName), logging.Err(err))
+		}
+	}()
 
 	if err := c.ensureVersionCodeExists(ctx, publisher, edit.ServerID, versionCode); err != nil {
 		if created {
-			_ = publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+			if cleanupErr := publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do(); cleanupErr != nil {
+				logging.Warn("failed to delete edit", logging.String("package", c.packageName), logging.String("editId", edit.ServerID), logging.Err(cleanupErr))
+			}
 		}
 		return c.OutputError(err)
 	}
@@ -73,7 +80,6 @@ func (c *CLI) publishDeobfuscationUpload(ctx context.Context, filePath, fileType
 	if err != nil {
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
 	}
-	defer f.Close()
 
 	call := publisher.Edits.Deobfuscationfiles.Upload(c.packageName, edit.ServerID, versionCode, fileType)
 	if chunkSize > 0 {
@@ -83,12 +89,21 @@ func (c *CLI) publishDeobfuscationUpload(ctx context.Context, filePath, fileType
 	}
 
 	resp, err := call.Context(ctx).Do()
+	closeErr := f.Close()
 	if err != nil {
+		if closeErr != nil {
+			logging.Warn("failed to close deobfuscation file", logging.String("path", filePath), logging.Err(closeErr))
+		}
 		if created {
-			_ = publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+			if cleanupErr := publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do(); cleanupErr != nil {
+				logging.Warn("failed to delete edit", logging.String("package", c.packageName), logging.String("editId", edit.ServerID), logging.Err(cleanupErr))
+			}
 		}
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
 			fmt.Sprintf("failed to upload deobfuscation file: %v", err)))
+	}
+	if closeErr != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, closeErr.Error()))
 	}
 
 	if err := c.finalizeEdit(ctx, publisher, editMgr, edit, !noAutoCommit); err != nil {
@@ -145,24 +160,27 @@ func looksLikeProguardMapping(filePath string) bool {
 	if err != nil {
 		return false
 	}
-	defer f.Close()
-
 	scanner := bufio.NewScanner(f)
 	lines := 0
+	found := false
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
 			continue
 		}
 		if strings.Contains(line, "->") && strings.HasSuffix(line, ":") {
-			return true
+			found = true
+			break
 		}
 		lines++
 		if lines > 50 {
 			break
 		}
 	}
-	return false
+	if err := f.Close(); err != nil {
+		return false
+	}
+	return found
 }
 
 func (c *CLI) ensureVersionCodeExists(ctx context.Context, publisher *androidpublisher.Service, editID string, versionCode int64) *errors.APIError {

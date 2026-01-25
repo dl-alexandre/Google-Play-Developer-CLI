@@ -116,8 +116,13 @@ func (l *Logger) log(level Level, msg string, fields ...Field) {
 			"message":   msg,
 			"fields":    redactedFields,
 		}
-		data, _ := json.Marshal(entry)
-		fmt.Fprintln(l.writer, string(data))
+		data, err := json.Marshal(entry)
+		if err != nil {
+			return
+		}
+		if _, err := fmt.Fprintln(l.writer, string(data)); err != nil {
+			return
+		}
 	} else {
 		// Simple format for normal mode
 		var parts []string
@@ -128,7 +133,9 @@ func (l *Logger) log(level Level, msg string, fields ...Field) {
 		if len(parts) > 0 {
 			fieldStr = " " + strings.Join(parts, " ")
 		}
-		fmt.Fprintf(l.writer, "[%s] %s%s\n", level.String(), msg, fieldStr)
+		if _, err := fmt.Fprintf(l.writer, "[%s] %s%s\n", level.String(), msg, fieldStr); err != nil {
+			return
+		}
 	}
 }
 

@@ -22,15 +22,23 @@ const (
 	statusInProgress = "inProgress"
 )
 
-func (c *CLI) publishRelease(ctx context.Context, track, name, status string, versionCodes []string, releaseNotesFile, editID string, noAutoCommit, dryRun, wait bool, waitTimeout string) error {
+func (c *CLI) publishRelease(ctx context.Context, track, name, status string, versionCodes, retainVersionCodes []string, inAppUpdatePriority int, releaseNotesFile, editID string, noAutoCommit, dryRun, wait bool, waitTimeout string) error {
 	if err := c.validateReleaseParams(track, status); err != nil {
 		return c.OutputError(err)
+	}
+	if inAppUpdatePriority != -1 && (inAppUpdatePriority < 0 || inAppUpdatePriority > 5) {
+		return c.OutputError(errors.NewAPIError(errors.CodeValidationError, "in-app-update-priority must be between 0 and 5"))
 	}
 
 	codes, err := c.parseVersionCodes(versionCodes)
 	if err != nil {
 		return c.OutputError(err)
 	}
+	retainedCodes, err := c.parseVersionCodes(retainVersionCodes)
+	if err != nil {
+		return c.OutputError(err)
+	}
+	combinedCodes := mergeVersionCodes(codes, retainedCodes)
 
 	releaseNotes, err := c.parseReleaseNotesFile(releaseNotesFile)
 	if err != nil {
@@ -38,10 +46,10 @@ func (c *CLI) publishRelease(ctx context.Context, track, name, status string, ve
 	}
 
 	if dryRun {
-		return c.outputDryRunRelease(track, name, status, codes, releaseNotes)
+		return c.outputDryRunRelease(track, name, status, combinedCodes, retainedCodes, inAppUpdatePriority, releaseNotes)
 	}
 
-	return c.executeRelease(ctx, track, name, status, codes, releaseNotes, editID, noAutoCommit, wait, waitTimeout)
+	return c.executeRelease(ctx, track, name, status, combinedCodes, retainedCodes, inAppUpdatePriority, releaseNotes, editID, noAutoCommit, wait, waitTimeout)
 }
 
 func (c *CLI) validateReleaseParams(track, status string) *errors.APIError {
@@ -72,6 +80,26 @@ func (c *CLI) parseVersionCodes(versionCodes []string) ([]int64, *errors.APIErro
 	return codes, nil
 }
 
+func mergeVersionCodes(primary, retain []int64) []int64 {
+	seen := map[int64]bool{}
+	var combined []int64
+	for _, code := range primary {
+		if seen[code] {
+			continue
+		}
+		seen[code] = true
+		combined = append(combined, code)
+	}
+	for _, code := range retain {
+		if seen[code] {
+			continue
+		}
+		seen[code] = true
+		combined = append(combined, code)
+	}
+	return combined
+}
+
 func (c *CLI) parseReleaseNotesFile(releaseNotesFile string) (map[string]string, *errors.APIError) {
 	if releaseNotesFile == "" {
 		return nil, nil
@@ -97,7 +125,7 @@ func (c *CLI) parseReleaseNotesFile(releaseNotesFile string) (map[string]string,
 	return normalized, nil
 }
 
-func (c *CLI) outputDryRunRelease(track, name, status string, codes []int64, releaseNotes map[string]string) error {
+func (c *CLI) outputDryRunRelease(track, name, status string, codes, retainedCodes []int64, inAppUpdatePriority int, releaseNotes map[string]string) error {
 	dryRunData := map[string]interface{}{
 		"dryRun":       true,
 		"action":       "release",
@@ -107,6 +135,12 @@ func (c *CLI) outputDryRunRelease(track, name, status string, codes []int64, rel
 		"versionCodes": codes,
 		"package":      c.packageName,
 	}
+	if len(retainedCodes) > 0 {
+		dryRunData["retainedVersionCodes"] = retainedCodes
+	}
+	if inAppUpdatePriority >= 0 {
+		dryRunData["inAppUpdatePriority"] = inAppUpdatePriority
+	}
 	if len(releaseNotes) > 0 {
 		dryRunData["releaseNotes"] = releaseNotes
 	}
@@ -114,7 +148,7 @@ func (c *CLI) outputDryRunRelease(track, name, status string, codes []int64, rel
 	return c.Output(result.WithServices("androidpublisher"))
 }
 
-func (c *CLI) executeRelease(ctx context.Context, track, name, status string, codes []int64, releaseNotes map[string]string, editID string, noAutoCommit, wait bool, waitTimeout string) error {
+func (c *CLI) executeRelease(ctx context.Context, track, name, status string, codes, retainedCodes []int64, inAppUpdatePriority int, releaseNotes map[string]string, editID string, noAutoCommit, wait bool, waitTimeout string) error {
 	client, err := c.getAPIClient(ctx)
 	if err != nil {
 		return c.OutputError(err.(*errors.APIError))
@@ -138,7 +172,7 @@ func (c *CLI) executeRelease(ctx context.Context, track, name, status string, co
 			fmt.Sprintf("failed to get track: %v", err)))
 	}
 
-	release := c.buildTrackRelease(name, status, codes, releaseNotes)
+	release := c.buildTrackRelease(name, status, codes, inAppUpdatePriority, releaseNotes)
 	trackInfo.Releases = []*androidpublisher.TrackRelease{release}
 
 	_, err = publisher.Edits.Tracks.Update(c.packageName, edit.ServerID, track, trackInfo).Context(ctx).Do()
@@ -152,7 +186,7 @@ func (c *CLI) executeRelease(ctx context.Context, track, name, status string, co
 		return c.OutputError(err.(*errors.APIError))
 	}
 
-	return c.outputReleaseResult(ctx, publisher, track, name, status, codes, releaseNotes, edit.ServerID, noAutoCommit, wait, waitTimeout)
+	return c.outputReleaseResult(ctx, publisher, track, name, status, codes, retainedCodes, inAppUpdatePriority, releaseNotes, edit.ServerID, noAutoCommit, wait, waitTimeout)
 }
 
 func (c *CLI) cleanupEditOnError(ctx context.Context, publisher *androidpublisher.Service, editID string, created bool) {
@@ -161,11 +195,14 @@ func (c *CLI) cleanupEditOnError(ctx context.Context, publisher *androidpublishe
 	}
 }
 
-func (c *CLI) buildTrackRelease(name, status string, codes []int64, releaseNotes map[string]string) *androidpublisher.TrackRelease {
+func (c *CLI) buildTrackRelease(name, status string, codes []int64, inAppUpdatePriority int, releaseNotes map[string]string) *androidpublisher.TrackRelease {
 	release := &androidpublisher.TrackRelease{
 		Name:         name,
 		VersionCodes: codes,
 		Status:       status,
+	}
+	if inAppUpdatePriority >= 0 {
+		release.InAppUpdatePriority = int64(inAppUpdatePriority)
 	}
 
 	if len(releaseNotes) > 0 {
@@ -182,7 +219,7 @@ func (c *CLI) buildTrackRelease(name, status string, codes []int64, releaseNotes
 	return release
 }
 
-func (c *CLI) outputReleaseResult(ctx context.Context, publisher *androidpublisher.Service, track, name, status string, codes []int64, releaseNotes map[string]string, editID string, noAutoCommit, wait bool, waitTimeout string) error {
+func (c *CLI) outputReleaseResult(ctx context.Context, publisher *androidpublisher.Service, track, name, status string, codes, retainedCodes []int64, inAppUpdatePriority int, releaseNotes map[string]string, editID string, noAutoCommit, wait bool, waitTimeout string) error {
 	resultData := map[string]interface{}{
 		"success":      true,
 		"track":        track,
@@ -192,6 +229,12 @@ func (c *CLI) outputReleaseResult(ctx context.Context, publisher *androidpublish
 		"package":      c.packageName,
 		"editId":       editID,
 		"committed":    !noAutoCommit,
+	}
+	if len(retainedCodes) > 0 {
+		resultData["retainedVersionCodes"] = retainedCodes
+	}
+	if inAppUpdatePriority >= 0 {
+		resultData["inAppUpdatePriority"] = inAppUpdatePriority
 	}
 	if len(releaseNotes) > 0 {
 		resultData["releaseNotes"] = releaseNotes

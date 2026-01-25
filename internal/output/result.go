@@ -272,8 +272,12 @@ func (m *Manager) writeTableSlice(data []interface{}) error {
 	}
 
 	// Write headers
-	fmt.Fprintln(m.writer, strings.Join(headers, "\t"))
-	fmt.Fprintln(m.writer, strings.Repeat("-", len(strings.Join(headers, "\t"))))
+	if _, err := fmt.Fprintln(m.writer, strings.Join(headers, "\t")); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(m.writer, strings.Repeat("-", len(strings.Join(headers, "\t")))); err != nil {
+		return err
+	}
 
 	// Write rows
 	for _, item := range data {
@@ -285,7 +289,9 @@ func (m *Manager) writeTableSlice(data []interface{}) error {
 		for _, h := range headers {
 			values = append(values, fmt.Sprintf("%v", row[h]))
 		}
-		fmt.Fprintln(m.writer, strings.Join(values, "\t"))
+		if _, err := fmt.Fprintln(m.writer, strings.Join(values, "\t")); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -293,16 +299,22 @@ func (m *Manager) writeTableSlice(data []interface{}) error {
 
 func (m *Manager) writeTableMap(data map[string]interface{}) error {
 	for k, v := range data {
-		fmt.Fprintf(m.writer, "%s:\t%v\n", k, v)
+		if _, err := fmt.Fprintf(m.writer, "%s:\t%v\n", k, v); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
 func (m *Manager) writeMarkdown(r *Result) error {
 	if r.Error != nil {
-		fmt.Fprintf(m.writer, "## Error\n\n**Code:** %s\n\n**Message:** %s\n", r.Error.Code, r.Error.Message)
+		if _, err := fmt.Fprintf(m.writer, "## Error\n\n**Code:** %s\n\n**Message:** %s\n", r.Error.Code, r.Error.Message); err != nil {
+			return err
+		}
 		if r.Error.Hint != "" {
-			fmt.Fprintf(m.writer, "\n**Hint:** %s\n", r.Error.Hint)
+			if _, err := fmt.Fprintf(m.writer, "\n**Hint:** %s\n", r.Error.Hint); err != nil {
+				return err
+			}
 		}
 		return nil
 	}
@@ -324,7 +336,9 @@ func (m *Manager) writeMarkdown(r *Result) error {
 
 func (m *Manager) writeMarkdownTable(data []interface{}) error {
 	if len(data) == 0 {
-		fmt.Fprintln(m.writer, "*No data*")
+		if _, err := fmt.Fprintln(m.writer, "*No data*"); err != nil {
+			return err
+		}
 		return nil
 	}
 
@@ -339,12 +353,16 @@ func (m *Manager) writeMarkdownTable(data []interface{}) error {
 	}
 
 	// Write headers
-	fmt.Fprintf(m.writer, "| %s |\n", strings.Join(headers, " | "))
+	if _, err := fmt.Fprintf(m.writer, "| %s |\n", strings.Join(headers, " | ")); err != nil {
+		return err
+	}
 	var sep []string
 	for range headers {
 		sep = append(sep, "---")
 	}
-	fmt.Fprintf(m.writer, "| %s |\n", strings.Join(sep, " | "))
+	if _, err := fmt.Fprintf(m.writer, "| %s |\n", strings.Join(sep, " | ")); err != nil {
+		return err
+	}
 
 	// Write rows
 	for _, item := range data {
@@ -356,7 +374,9 @@ func (m *Manager) writeMarkdownTable(data []interface{}) error {
 		for _, h := range headers {
 			values = append(values, fmt.Sprintf("%v", row[h]))
 		}
-		fmt.Fprintf(m.writer, "| %s |\n", strings.Join(values, " | "))
+		if _, err := fmt.Fprintf(m.writer, "| %s |\n", strings.Join(values, " | ")); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -364,7 +384,9 @@ func (m *Manager) writeMarkdownTable(data []interface{}) error {
 
 func (m *Manager) writeMarkdownMap(data map[string]interface{}) error {
 	for k, v := range data {
-		fmt.Fprintf(m.writer, "- **%s:** %v\n", k, v)
+		if _, err := fmt.Fprintf(m.writer, "- **%s:** %v\n", k, v); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -399,7 +421,9 @@ func (m *Manager) writeCSV(r *Result) error {
 	}
 
 	// Write CSV header
-	fmt.Fprintln(m.writer, strings.Join(headers, ","))
+	if _, err := fmt.Fprintln(m.writer, strings.Join(headers, ",")); err != nil {
+		return err
+	}
 
 	// Write rows
 	for _, item := range slice {
@@ -416,7 +440,9 @@ func (m *Manager) writeCSV(r *Result) error {
 			}
 			values = append(values, val)
 		}
-		fmt.Fprintln(m.writer, strings.Join(values, ","))
+		if _, err := fmt.Fprintln(m.writer, strings.Join(values, ",")); err != nil {
+			return err
+		}
 	}
 
 	return nil

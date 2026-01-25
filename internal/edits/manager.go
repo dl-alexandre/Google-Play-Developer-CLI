@@ -85,7 +85,10 @@ func (m *Manager) AcquireLock(ctx context.Context, packageName string) error {
 	}
 
 	lockPath := filepath.Join(m.editsDir, packageName+".lock")
-	hostname, _ := os.Hostname()
+	hostname, err := os.Hostname()
+	if err != nil {
+		return err
+	}
 
 	lockData := &LockFile{
 		PID:       os.Getpid(),
@@ -122,7 +125,9 @@ func (m *Manager) tryAcquireLock(lockPath string, newLock *LockFile, hostname st
 			// Check if lock is stale
 			if m.isLockStale(&existing, hostname) {
 				// Remove stale lock
-				os.Remove(lockPath)
+				if err := os.Remove(lockPath); err != nil {
+					return false
+				}
 			} else {
 				return false
 			}
@@ -130,15 +135,25 @@ func (m *Manager) tryAcquireLock(lockPath string, newLock *LockFile, hostname st
 	}
 
 	// Try to create new lock atomically
-	lockData, _ := json.Marshal(newLock)
+	lockData, err := json.Marshal(newLock)
+	if err != nil {
+		return false
+	}
 	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
 		return false
 	}
-	defer f.Close()
-
 	_, err = f.Write(lockData)
-	return err == nil
+	if err != nil {
+		if closeErr := f.Close(); closeErr != nil {
+			return false
+		}
+		return false
+	}
+	if err := f.Close(); err != nil {
+		return false
+	}
+	return true
 }
 
 func (m *Manager) isLockStale(lock *LockFile, currentHostname string) bool {
@@ -334,7 +349,9 @@ func (m *Manager) GetCachedArtifactByHash(packageName, hash string) (*CacheEntry
 	}
 
 	if time.Now().After(entry.ExpiresAt) {
-		os.Remove(cachePath)
+		if err := os.Remove(cachePath); err != nil && !os.IsNotExist(err) {
+			return nil, err
+		}
 		return nil, nil
 	}
 
@@ -420,7 +437,9 @@ func (m *Manager) CleanExpiredCacheWithContext(ctx context.Context) error {
 			}
 
 			if time.Now().After(entry.ExpiresAt) {
-				os.Remove(p)
+				if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+					return err
+				}
 			}
 			return nil
 		})
@@ -433,12 +452,16 @@ func HashFile(path string) (string, error) {
 	return HashFileWithProgress(path, nil)
 }
 
-func HashFileWithProgress(path string, progress ProgressCallback) (string, error) {
+func HashFileWithProgress(path string, progress ProgressCallback) (hash string, err error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
 
 	info, err := f.Stat()
 	if err != nil {
@@ -461,7 +484,9 @@ func HashFileWithProgress(path string, progress ProgressCallback) (string, error
 	for {
 		n, err := f.Read(buf)
 		if n > 0 {
-			h.Write(buf[:n])
+			if _, err := h.Write(buf[:n]); err != nil {
+				return "", err
+			}
 			bytesProcessed += int64(n)
 			if progress != nil {
 				progress(bytesProcessed, totalBytes)
@@ -481,9 +506,13 @@ func HashFileWithProgress(path string, progress ProgressCallback) (string, error
 // IdempotencyKey generates an idempotency key for an operation.
 func IdempotencyKey(operation string, args ...string) string {
 	h := sha256.New()
-	h.Write([]byte(operation))
+	if _, err := h.Write([]byte(operation)); err != nil {
+		return ""
+	}
 	for _, arg := range args {
-		h.Write([]byte(arg))
+		if _, err := h.Write([]byte(arg)); err != nil {
+			return ""
+		}
 	}
 	return hex.EncodeToString(h.Sum(nil))[:16]
 }
@@ -525,9 +554,15 @@ func NewIdempotencyStore() *IdempotencyStore {
 
 func (s *IdempotencyStore) generateKey(operation, packageName, contentHash string) string {
 	h := sha256.New()
-	h.Write([]byte(operation))
-	h.Write([]byte(packageName))
-	h.Write([]byte(contentHash))
+	if _, err := h.Write([]byte(operation)); err != nil {
+		return ""
+	}
+	if _, err := h.Write([]byte(packageName)); err != nil {
+		return ""
+	}
+	if _, err := h.Write([]byte(contentHash)); err != nil {
+		return ""
+	}
 	return hex.EncodeToString(h.Sum(nil))[:32]
 }
 
@@ -600,7 +635,9 @@ func (s *IdempotencyStore) Get(key string) (*CheckResult, error) {
 	}
 
 	if time.Now().After(entry.ExpiresAt) {
-		os.Remove(path)
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return nil, err
+		}
 		return &CheckResult{Found: false, Key: key, Expired: true}, nil
 	}
 
@@ -664,7 +701,9 @@ func (s *IdempotencyStore) CleanExpiredWithContext(ctx context.Context) error {
 			}
 
 			if time.Now().After(e.ExpiresAt) {
-				os.Remove(p)
+				if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+					return err
+				}
 			}
 			return nil
 		})

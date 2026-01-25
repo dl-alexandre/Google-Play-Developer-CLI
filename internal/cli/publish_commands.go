@@ -33,6 +33,10 @@ func (c *CLI) addPublishUploadCommands(publishCmd *cobra.Command) {
 		editID       string
 		dryRun       bool
 		noAutoCommit bool
+		obbMain      string
+		obbPatch     string
+		obbMainRef   int64
+		obbPatchRef  int64
 	)
 
 	uploadCmd := &cobra.Command{
@@ -41,10 +45,19 @@ func (c *CLI) addPublishUploadCommands(publishCmd *cobra.Command) {
 		Long:  "Upload an Android App Bundle (AAB) or APK to an edit transaction.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return c.publishUpload(cmd.Context(), args[0], editID, noAutoCommit, dryRun)
+			return c.publishUpload(cmd.Context(), args[0], obbOptions{
+				mainPath:              obbMain,
+				patchPath:             obbPatch,
+				mainReferenceVersion:  obbMainRef,
+				patchReferenceVersion: obbPatchRef,
+			}, editID, noAutoCommit, dryRun)
 		},
 	}
 	uploadCmd.Flags().StringVar(&editID, "edit-id", "", "Explicit edit transaction ID")
+	uploadCmd.Flags().StringVar(&obbMain, "obb-main", "", "Main expansion file path")
+	uploadCmd.Flags().StringVar(&obbPatch, "obb-patch", "", "Patch expansion file path")
+	uploadCmd.Flags().Int64Var(&obbMainRef, "obb-main-references-version", 0, "Reference version code for main expansion file")
+	uploadCmd.Flags().Int64Var(&obbPatchRef, "obb-patch-references-version", 0, "Reference version code for patch expansion file")
 	uploadCmd.Flags().BoolVar(&noAutoCommit, "no-auto-commit", false, "Keep edit open for manual commit")
 	uploadCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show intended actions without executing")
 
@@ -58,6 +71,8 @@ func (c *CLI) addPublishReleaseCommands(publishCmd *cobra.Command) {
 		status              string
 		name                string
 		versionCodes        []string
+		retainVersionCodes  []string
+		inAppUpdatePriority int
 		percentage          float64
 		releaseNotesFile    string
 		confirm             bool
@@ -75,13 +90,15 @@ func (c *CLI) addPublishReleaseCommands(publishCmd *cobra.Command) {
 		Short: "Create or update a release",
 		Long:  "Create a new release on a track with specified version codes.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return c.publishRelease(cmd.Context(), track, name, status, versionCodes, releaseNotesFile, editID, noAutoCommit, dryRun, wait, waitTimeout)
+			return c.publishRelease(cmd.Context(), track, name, status, versionCodes, retainVersionCodes, inAppUpdatePriority, releaseNotesFile, editID, noAutoCommit, dryRun, wait, waitTimeout)
 		},
 	}
 	releaseCmd.Flags().StringVar(&track, "track", "", "Release track (internal, alpha, beta, production)")
 	releaseCmd.Flags().StringVar(&name, "name", "", "Release name")
 	releaseCmd.Flags().StringVar(&status, "status", "draft", "Release status (draft, completed, halted, inProgress)")
 	releaseCmd.Flags().StringSliceVar(&versionCodes, "version-code", nil, "Version codes to include (repeatable)")
+	releaseCmd.Flags().StringSliceVar(&retainVersionCodes, "retain-version-codes", nil, "Version codes to retain (repeatable)")
+	releaseCmd.Flags().IntVar(&inAppUpdatePriority, "in-app-update-priority", -1, "In-app update priority (0-5)")
 	releaseCmd.Flags().StringVar(&releaseNotesFile, "release-notes-file", "", "JSON file with localized release notes")
 	releaseCmd.Flags().StringVar(&editID, "edit-id", "", "Explicit edit transaction ID")
 	releaseCmd.Flags().BoolVar(&noAutoCommit, "no-auto-commit", false, "Keep edit open for manual commit")
@@ -364,6 +381,7 @@ func (c *CLI) addPublishImagesCommands(publishCmd *cobra.Command) {
 		editID       string
 		noAutoCommit bool
 		dryRun       bool
+		syncImages   bool
 	)
 
 	imagesUploadCmd := &cobra.Command{
@@ -371,10 +389,11 @@ func (c *CLI) addPublishImagesCommands(publishCmd *cobra.Command) {
 		Short: "Upload an image",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return c.publishImagesUpload(cmd.Context(), args[0], args[1], imageLocale, editID, noAutoCommit, dryRun)
+			return c.publishImagesUpload(cmd.Context(), args[0], args[1], imageLocale, syncImages, editID, noAutoCommit, dryRun)
 		},
 	}
 	imagesUploadCmd.Flags().StringVar(&imageLocale, "locale", "en-US", "Locale code")
+	imagesUploadCmd.Flags().BoolVar(&syncImages, "sync-images", false, "Skip upload if identical image already exists")
 	imagesUploadCmd.Flags().StringVar(&editID, "edit-id", "", "Explicit edit transaction ID")
 	imagesUploadCmd.Flags().BoolVar(&noAutoCommit, "no-auto-commit", false, "Keep edit open for manual commit")
 	imagesUploadCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show intended actions without executing")

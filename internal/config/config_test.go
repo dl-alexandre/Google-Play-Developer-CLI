@@ -49,37 +49,48 @@ func TestNormalizeLocale(t *testing.T) {
 }
 
 func TestDetectCI(t *testing.T) {
+	setEnv := func(key, value string) {
+		if err := os.Setenv(key, value); err != nil {
+			t.Fatalf("Setenv(%q) failed: %v", key, err)
+		}
+	}
+	unsetEnv := func(key string) {
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatalf("Unsetenv(%q) failed: %v", key, err)
+		}
+	}
+
 	// Save original env
 	origCI := os.Getenv("CI")
 	origGHA := os.Getenv("GITHUB_ACTIONS")
 	defer func() {
-		os.Setenv("CI", origCI)
-		os.Setenv("GITHUB_ACTIONS", origGHA)
+		setEnv("CI", origCI)
+		setEnv("GITHUB_ACTIONS", origGHA)
 	}()
 
 	// Clear CI variables
-	os.Unsetenv("CI")
-	os.Unsetenv("GITHUB_ACTIONS")
-	os.Unsetenv("JENKINS_URL")
-	os.Unsetenv("BUILDKITE")
-	os.Unsetenv("CIRCLECI")
-	os.Unsetenv("TRAVIS")
-	os.Unsetenv("GITLAB_CI")
-	os.Unsetenv("GPD_CI")
+	unsetEnv("CI")
+	unsetEnv("GITHUB_ACTIONS")
+	unsetEnv("JENKINS_URL")
+	unsetEnv("BUILDKITE")
+	unsetEnv("CIRCLECI")
+	unsetEnv("TRAVIS")
+	unsetEnv("GITLAB_CI")
+	unsetEnv("GPD_CI")
 
 	if DetectCI() {
 		t.Error("DetectCI() = true when no CI env vars set, want false")
 	}
 
 	// Set CI variable
-	os.Setenv("CI", "true")
+	setEnv("CI", "true")
 	if !DetectCI() {
 		t.Error("DetectCI() = false with CI=true, want true")
 	}
-	os.Unsetenv("CI")
+	unsetEnv("CI")
 
 	// Test GITHUB_ACTIONS
-	os.Setenv("GITHUB_ACTIONS", "true")
+	setEnv("GITHUB_ACTIONS", "true")
 	if !DetectCI() {
 		t.Error("DetectCI() = false with GITHUB_ACTIONS=true, want true")
 	}

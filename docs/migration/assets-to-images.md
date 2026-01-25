@@ -71,6 +71,7 @@ The following image types are supported in the new `images` command:
 | Image Type | Description | Use Case |
 |------------|-------------|----------|
 | `phoneScreenshots` | Phone screenshots | Screenshots for phones (320-3840px) |
+| `tabletScreenshots` | Tablet screenshots | Screenshots for tablets |
 | `sevenInchScreenshots` | 7-inch tablet screenshots | Screenshots for 7-inch tablets |
 | `tenInchScreenshots` | 10-inch tablet screenshots | Screenshots for 10-inch tablets |
 | `tvScreenshots` | TV screenshots | Screenshots for Android TV |
@@ -95,6 +96,7 @@ Each image type has specific dimension requirements:
 | `featureGraphic` | 1024 | 1024 | 500 | 500 |
 | `tvBanner` | 1280 | 1280 | 720 | 720 |
 | `phoneScreenshots` | 320 | 3840 | 320 | 3840 |
+| `tabletScreenshots` | 320 | 3840 | 320 | 3840 |
 | `sevenInchScreenshots` | 320 | 3840 | 320 | 3840 |
 | `tenInchScreenshots` | 320 | 3840 | 320 | 3840 |
 | `tvScreenshots` | 320 | 3840 | 320 | 3840 |
@@ -142,7 +144,7 @@ Map your old category structure to the new image types:
 | Old Category | New Image Type |
 |--------------|----------------|
 | `phone/` | `phoneScreenshots` |
-| `tablet/` | `sevenInchScreenshots` or `tenInchScreenshots` |
+| `tablet/` | `tabletScreenshots`, `sevenInchScreenshots`, or `tenInchScreenshots` |
 | `tv/` | `tvScreenshots` |
 | `wear/` | `wearScreenshots` |
 | `icon.png` | `icon` |

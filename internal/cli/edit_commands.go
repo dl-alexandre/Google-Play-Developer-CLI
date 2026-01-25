@@ -44,14 +44,16 @@ func (c *CLI) addEditCommands(publishCmd *cobra.Command) {
 		},
 	}
 
+	var changesNotSentForReview bool
 	editCommitCmd := &cobra.Command{
 		Use:   "commit <edit-id>",
 		Short: "Commit an edit",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return c.publishEditCommit(cmd.Context(), args[0])
+			return c.publishEditCommit(cmd.Context(), args[0], changesNotSentForReview)
 		},
 	}
+	editCommitCmd.Flags().BoolVar(&changesNotSentForReview, "changes-not-sent-for-review", false, "Do not send changes for review")
 
 	editValidateCmd := &cobra.Command{
 		Use:   "validate <edit-id>",
@@ -193,7 +195,7 @@ func (c *CLI) publishEditGet(ctx context.Context, editID string) error {
 	return c.Output(result.WithServices("androidpublisher"))
 }
 
-func (c *CLI) publishEditCommit(ctx context.Context, editID string) error {
+func (c *CLI) publishEditCommit(ctx context.Context, editID string, changesNotSentForReview bool) error {
 	if err := c.requirePackage(); err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
@@ -229,7 +231,11 @@ func (c *CLI) publishEditCommit(ctx context.Context, editID string) error {
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
 	}
 
-	_, err = publisher.Edits.Commit(c.packageName, serverID).Context(ctx).Do()
+	commitCall := publisher.Edits.Commit(c.packageName, serverID).Context(ctx)
+	if changesNotSentForReview {
+		commitCall = commitCall.ChangesNotSentForReview(true)
+	}
+	_, err = commitCall.Do()
 	if err != nil {
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
 			fmt.Sprintf("failed to commit edit: %v", err)))
@@ -242,11 +248,15 @@ func (c *CLI) publishEditCommit(ctx context.Context, editID string) error {
 		_ = editMgr.DeleteEdit(c.packageName, local.Handle)
 	}
 
-	result := output.NewResult(map[string]interface{}{
+	resultData := map[string]interface{}{
 		"success": true,
 		"editId":  serverID,
 		"package": c.packageName,
-	})
+	}
+	if changesNotSentForReview {
+		resultData["changesNotSentForReview"] = true
+	}
+	result := output.NewResult(resultData)
 	return c.Output(result.WithServices("androidpublisher"))
 }
 

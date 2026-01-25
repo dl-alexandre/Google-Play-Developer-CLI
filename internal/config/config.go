@@ -254,7 +254,7 @@ func InitProject(dir string) error {
 		"en-US": "Bug fixes and improvements.",
 	}
 	rnData, _ := json.MarshalIndent(releaseNotes, "", "  ")
-	if err := os.WriteFile(filepath.Join(dir, "release-notes.json"), rnData, 0644); err != nil { //nolint:gosec // G306: Template file should be world-readable
+	if err := os.WriteFile(filepath.Join(dir, "release-notes.json"), rnData, 0644); err != nil {
 		return err
 	}
 
@@ -264,7 +264,7 @@ func InitProject(dir string) error {
 service-account*.json
 .gpd/
 `
-	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(gitignore), 0644); err != nil { //nolint:gosec // G306: gitignore should be world-readable
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(gitignore), 0644); err != nil {
 		return err
 	}
 

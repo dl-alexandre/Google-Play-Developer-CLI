@@ -196,6 +196,24 @@ gpd publish testers list --package ... --track internal
 gpd publish testers add --package ... --track internal --group testers@example.com
 ```
 
+#### `gpd migrate` - Metadata Migration
+
+```bash
+# Validate fastlane metadata locally
+gpd migrate fastlane validate --dir fastlane/metadata/android
+
+# Export Google Play listings to fastlane format
+gpd migrate fastlane export --package ... --output fastlane/metadata/android
+gpd migrate fastlane export --package ... --output fastlane/metadata/android --include-images
+gpd migrate fastlane export --package ... --output fastlane/metadata/android --locales en-US,ja-JP
+
+# Import fastlane metadata into Google Play
+gpd migrate fastlane import --package ... --dir fastlane/metadata/android --dry-run
+gpd migrate fastlane import --package ... --dir fastlane/metadata/android --replace-images
+gpd migrate fastlane import --package ... --dir fastlane/metadata/android --skip-images
+gpd migrate fastlane import --package ... --dir fastlane/metadata/android --edit-id <edit-id> --no-auto-commit
+```
+
 #### `gpd reviews` - Review Management
 
 ```bash

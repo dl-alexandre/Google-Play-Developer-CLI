@@ -7,11 +7,13 @@ import (
 	_ "image/jpeg" // Register JPEG decoder for image.DecodeConfig
 	_ "image/png"  // Register PNG decoder for image.DecodeConfig
 	"os"
+	"strings"
 
 	"google.golang.org/api/androidpublisher/v3"
 
 	"github.com/dl-alexandre/gpd/internal/edits"
 	"github.com/dl-alexandre/gpd/internal/errors"
+	"github.com/dl-alexandre/gpd/internal/logging"
 	"github.com/dl-alexandre/gpd/internal/output"
 )
 
@@ -49,12 +51,16 @@ func validateImageFile(filePath, imageType string) (info os.FileInfo, cfg image.
 	if err != nil {
 		return nil, image.Config{}, "", errors.NewAPIError(errors.CodeGeneralError, err.Error())
 	}
-	defer f.Close()
-
-	var err2 error
-	cfg, format, err2 = image.DecodeConfig(f)
-	if err2 != nil {
+	cfg, format, decodeErr := image.DecodeConfig(f)
+	closeErr := f.Close()
+	if decodeErr != nil {
+		if closeErr != nil {
+			return nil, image.Config{}, "", errors.NewAPIError(errors.CodeValidationError, fmt.Sprintf("invalid image file: %v", closeErr))
+		}
 		return nil, image.Config{}, "", errors.NewAPIError(errors.CodeValidationError, "invalid image file")
+	}
+	if closeErr != nil {
+		return nil, image.Config{}, "", errors.NewAPIError(errors.CodeGeneralError, closeErr.Error())
 	}
 
 	spec, ok := imageSpecs()[imageType]
@@ -82,7 +88,7 @@ func validateImageFile(filePath, imageType string) (info os.FileInfo, cfg image.
 	return info, cfg, format, nil
 }
 
-func (c *CLI) publishImagesUpload(ctx context.Context, imageType, filePath, locale, editID string, noAutoCommit, dryRun bool) error {
+func (c *CLI) publishImagesUpload(ctx context.Context, imageType, filePath, locale string, syncImages bool, editID string, noAutoCommit, dryRun bool) error {
 	if err := c.requirePackage(); err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
@@ -90,8 +96,16 @@ func (c *CLI) publishImagesUpload(ctx context.Context, imageType, filePath, loca
 	if apiErr != nil {
 		return c.OutputError(apiErr)
 	}
+	var localHash string
+	if syncImages {
+		hash, err := edits.HashFile(filePath)
+		if err != nil {
+			return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+		}
+		localHash = hash
+	}
 	if dryRun {
-		result := output.NewResult(map[string]interface{}{
+		resultData := map[string]interface{}{
 			"dryRun":    true,
 			"action":    "images_upload",
 			"type":      imageType,
@@ -103,7 +117,11 @@ func (c *CLI) publishImagesUpload(ctx context.Context, imageType, filePath, loca
 			"size":      info.Size(),
 			"sizeHuman": edits.FormatBytes(info.Size()),
 			"package":   c.packageName,
-		})
+		}
+		if localHash != "" {
+			resultData["sha256"] = localHash
+		}
+		result := output.NewResult(resultData)
 		return c.Output(result.WithServices("androidpublisher"))
 	}
 
@@ -127,21 +145,62 @@ func (c *CLI) publishImagesUpload(ctx context.Context, imageType, filePath, loca
 		}
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
 	}
-	defer func() { _ = editMgr.ReleaseLock(c.packageName) }()
+	defer func() {
+		if err := editMgr.ReleaseLock(c.packageName); err != nil {
+			logging.Warn("failed to release edit lock", logging.String("package", c.packageName), logging.Err(err))
+		}
+	}()
+
+	if syncImages && localHash != "" {
+		images, err := publisher.Edits.Images.List(c.packageName, edit.ServerID, locale, imageType).Context(ctx).Do()
+		if err != nil {
+			if created {
+				if cleanupErr := publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do(); cleanupErr != nil {
+					logging.Warn("failed to delete edit", logging.String("package", c.packageName), logging.String("editId", edit.ServerID), logging.Err(cleanupErr))
+				}
+			}
+			return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+		}
+		for _, image := range images.Images {
+			if image != nil && strings.EqualFold(image.Sha256, localHash) {
+				if err := c.finalizeEdit(ctx, publisher, editMgr, edit, !noAutoCommit); err != nil {
+					return c.OutputError(err.(*errors.APIError))
+				}
+				result := output.NewResult(map[string]interface{}{
+					"idempotent": true,
+					"type":       imageType,
+					"locale":     locale,
+					"sha256":     localHash,
+					"package":    c.packageName,
+					"editId":     edit.ServerID,
+					"committed":  !noAutoCommit,
+				})
+				return c.Output(result.WithNoOp("image already uploaded").WithServices("androidpublisher"))
+			}
+		}
+	}
 
 	f, err := os.Open(filePath)
 	if err != nil {
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
 	}
-	defer f.Close()
 
 	resp, err := publisher.Edits.Images.Upload(c.packageName, edit.ServerID, locale, imageType).
 		Media(f).Context(ctx).Do()
+	closeErr := f.Close()
 	if err != nil {
+		if closeErr != nil {
+			logging.Warn("failed to close image file", logging.String("path", filePath), logging.Err(closeErr))
+		}
 		if created {
-			_ = publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+			if cleanupErr := publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do(); cleanupErr != nil {
+				logging.Warn("failed to delete edit", logging.String("package", c.packageName), logging.String("editId", edit.ServerID), logging.Err(cleanupErr))
+			}
 		}
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+	if closeErr != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, closeErr.Error()))
 	}
 
 	if err := c.finalizeEdit(ctx, publisher, editMgr, edit, !noAutoCommit); err != nil {
@@ -184,7 +243,11 @@ func (c *CLI) publishImagesList(ctx context.Context, imageType, locale, editID s
 		edit = &androidpublisher.AppEdit{Id: editID}
 	}
 	if created {
-		defer func() { _ = publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do() }()
+		defer func() {
+			if err := publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do(); err != nil {
+				logging.Warn("failed to delete edit", logging.String("package", c.packageName), logging.String("editId", edit.Id), logging.Err(err))
+			}
+		}()
 	}
 	images, err := publisher.Edits.Images.List(c.packageName, edit.Id, locale, imageType).Context(ctx).Do()
 	if err != nil {
@@ -220,11 +283,17 @@ func (c *CLI) publishImagesDelete(ctx context.Context, imageType, imageID, local
 	if err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
-	defer func() { _ = editMgr.ReleaseLock(c.packageName) }()
+	defer func() {
+		if err := editMgr.ReleaseLock(c.packageName); err != nil {
+			logging.Warn("failed to release edit lock", logging.String("package", c.packageName), logging.Err(err))
+		}
+	}()
 
 	if err := publisher.Edits.Images.Delete(c.packageName, edit.ServerID, locale, imageType, imageID).Context(ctx).Do(); err != nil {
 		if created {
-			_ = publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+			if cleanupErr := publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do(); cleanupErr != nil {
+				logging.Warn("failed to delete edit", logging.String("package", c.packageName), logging.String("editId", edit.ServerID), logging.Err(cleanupErr))
+			}
 		}
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
 	}
@@ -269,11 +338,17 @@ func (c *CLI) publishImagesDeleteAll(ctx context.Context, imageType, locale, edi
 	if err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
-	defer func() { _ = editMgr.ReleaseLock(c.packageName) }()
+	defer func() {
+		if err := editMgr.ReleaseLock(c.packageName); err != nil {
+			logging.Warn("failed to release edit lock", logging.String("package", c.packageName), logging.Err(err))
+		}
+	}()
 
 	if _, err := publisher.Edits.Images.Deleteall(c.packageName, edit.ServerID, locale, imageType).Context(ctx).Do(); err != nil {
 		if created {
-			_ = publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+			if cleanupErr := publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do(); cleanupErr != nil {
+				logging.Warn("failed to delete edit", logging.String("package", c.packageName), logging.String("editId", edit.ServerID), logging.Err(cleanupErr))
+			}
 		}
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
 	}

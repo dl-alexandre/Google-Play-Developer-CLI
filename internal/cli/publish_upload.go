@@ -11,6 +11,7 @@ import (
 
 	"github.com/dl-alexandre/gpd/internal/edits"
 	"github.com/dl-alexandre/gpd/internal/errors"
+	"github.com/dl-alexandre/gpd/internal/logging"
 	"github.com/dl-alexandre/gpd/internal/output"
 )
 
@@ -55,8 +56,12 @@ func (c *CLI) validateUploadFile(filePath string) (*uploadContext, error) {
 }
 
 func (c *CLI) checkIdempotentUpload(uc *uploadContext, editMgr *edits.Manager) *output.Result {
-	idempotencyResult, idempotencyKey, _ := editMgr.Idempotent.CheckUploadByHash(c.packageName, uc.hash)
+	idempotencyResult, idempotencyKey, err := editMgr.Idempotent.CheckUploadByHash(c.packageName, uc.hash)
 	uc.idempotencyKey = idempotencyKey
+	if err != nil {
+		logging.Warn("failed to check idempotent upload", logging.String("package", c.packageName), logging.Err(err))
+		return nil
+	}
 
 	if idempotencyResult == nil || !idempotencyResult.Found {
 		return nil
@@ -101,24 +106,37 @@ func (c *CLI) uploadArtifact(ctx context.Context, publisher *androidpublisher.Se
 	if err != nil {
 		return 0, errors.NewAPIError(errors.CodeGeneralError, err.Error())
 	}
-	defer f.Close()
 
 	if uc.ext == extAAB {
-		bundle, err := publisher.Edits.Bundles.Upload(c.packageName, editID).Media(f).Context(ctx).Do()
-		if err != nil {
-			return 0, fmt.Errorf("failed to upload bundle: %w", err)
+		bundle, uploadErr := publisher.Edits.Bundles.Upload(c.packageName, editID).Media(f).Context(ctx).Do()
+		closeErr := f.Close()
+		if uploadErr != nil {
+			if closeErr != nil {
+				return 0, fmt.Errorf("failed to upload bundle: %v; close error: %v", uploadErr, closeErr)
+			}
+			return 0, fmt.Errorf("failed to upload bundle: %w", uploadErr)
+		}
+		if closeErr != nil {
+			return 0, fmt.Errorf("failed to close artifact: %w", closeErr)
 		}
 		return bundle.VersionCode, nil
 	}
 
-	apk, err := publisher.Edits.Apks.Upload(c.packageName, editID).Media(f).Context(ctx).Do()
-	if err != nil {
-		return 0, fmt.Errorf("failed to upload APK: %w", err)
+	apk, uploadErr := publisher.Edits.Apks.Upload(c.packageName, editID).Media(f).Context(ctx).Do()
+	closeErr := f.Close()
+	if uploadErr != nil {
+		if closeErr != nil {
+			return 0, fmt.Errorf("failed to upload APK: %v; close error: %v", uploadErr, closeErr)
+		}
+		return 0, fmt.Errorf("failed to upload APK: %w", uploadErr)
+	}
+	if closeErr != nil {
+		return 0, fmt.Errorf("failed to close artifact: %w", closeErr)
 	}
 	return apk.VersionCode, nil
 }
 
-func (c *CLI) publishUpload(ctx context.Context, filePath, editID string, noAutoCommit, dryRun bool) error {
+func (c *CLI) publishUpload(ctx context.Context, filePath string, obbOpts obbOptions, editID string, noAutoCommit, dryRun bool) error {
 	if err := c.requirePackage(); err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
@@ -128,27 +146,45 @@ func (c *CLI) publishUpload(ctx context.Context, filePath, editID string, noAuto
 		return c.OutputError(err.(*errors.APIError))
 	}
 
+	if apiErr := validateObbOptions(uc.ext, obbOpts); apiErr != nil {
+		return c.OutputError(apiErr)
+	}
+
+	var obbMainInfo os.FileInfo
+	var obbPatchInfo os.FileInfo
+	if obbOpts.mainPath != "" {
+		info, apiErr := validateObbFile(obbOpts.mainPath)
+		if apiErr != nil {
+			return c.OutputError(apiErr)
+		}
+		obbMainInfo = info
+	}
+	if obbOpts.patchPath != "" {
+		info, apiErr := validateObbFile(obbOpts.patchPath)
+		if apiErr != nil {
+			return c.OutputError(apiErr)
+		}
+		obbPatchInfo = info
+	}
+
 	editMgr := edits.NewManager()
+	hasObb := hasObbOptions(obbOpts)
 
 	if result := c.checkIdempotentUpload(uc, editMgr); result != nil {
-		return c.Output(result)
+		if !hasObb {
+			return c.Output(result)
+		}
 	}
 
 	if result := c.checkCachedUpload(uc, editMgr); result != nil {
-		return c.Output(result)
+		if !hasObb {
+			return c.Output(result)
+		}
 	}
 
 	if dryRun {
-		result := output.NewResult(map[string]interface{}{
-			"dryRun":    true,
-			"action":    "upload",
-			"path":      filePath,
-			"sha256":    uc.hash,
-			"size":      uc.info.Size(),
-			"sizeHuman": edits.FormatBytes(uc.info.Size()),
-			"type":      uc.ext[1:],
-			"package":   c.packageName,
-		})
+		resultData := c.buildUploadDryRunResult(filePath, uc, obbMainInfo, obbPatchInfo, obbOpts)
+		result := output.NewResult(resultData)
 		return c.Output(result.WithServices("androidpublisher"))
 	}
 
@@ -166,21 +202,39 @@ func (c *CLI) publishUpload(ctx context.Context, filePath, editID string, noAuto
 	if err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
-	defer func() { _ = editMgr.ReleaseLock(c.packageName) }()
+	defer func() {
+		if err := editMgr.ReleaseLock(c.packageName); err != nil {
+			logging.Warn("failed to release edit lock", logging.String("package", c.packageName), logging.Err(err))
+		}
+	}()
 
 	versionCode, err := c.uploadArtifact(ctx, publisher, edit.ServerID, uc)
 	if err != nil {
 		if created {
-			_ = publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+			if cleanupErr := publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do(); cleanupErr != nil {
+				logging.Warn("failed to delete edit", logging.String("package", c.packageName), logging.String("editId", edit.ServerID), logging.Err(cleanupErr))
+			}
 		}
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+
+	obbResults, apiErr := c.uploadObbFiles(ctx, publisher, edit.ServerID, versionCode, obbOpts)
+	if apiErr != nil {
+		if created {
+			if cleanupErr := publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do(); cleanupErr != nil {
+				logging.Warn("failed to delete edit", logging.String("package", c.packageName), logging.String("editId", edit.ServerID), logging.Err(cleanupErr))
+			}
+		}
+		return c.OutputError(apiErr)
 	}
 
 	if err := c.finalizeEdit(ctx, publisher, editMgr, edit, !noAutoCommit); err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
 
-	_ = editMgr.CacheArtifactWithHash(c.packageName, filePath, uc.hash, versionCode)
+	if err := editMgr.CacheArtifactWithHash(c.packageName, filePath, uc.hash, versionCode); err != nil {
+		logging.Warn("failed to cache artifact", logging.String("package", c.packageName), logging.String("path", filePath), logging.Err(err))
+	}
 
 	uploadResult := &edits.UploadResult{
 		VersionCode: versionCode,
@@ -190,9 +244,11 @@ func (c *CLI) publishUpload(ctx context.Context, filePath, editID string, noAuto
 		Type:        uc.ext[1:],
 		EditID:      edit.ServerID,
 	}
-	_ = editMgr.Idempotent.RecordUpload(uc.idempotencyKey, c.packageName, uc.hash, uploadResult)
+	if err := editMgr.Idempotent.RecordUpload(uc.idempotencyKey, c.packageName, uc.hash, uploadResult); err != nil {
+		logging.Warn("failed to record idempotent upload", logging.String("package", c.packageName), logging.String("editId", edit.ServerID), logging.Err(err))
+	}
 
-	result := output.NewResult(map[string]interface{}{
+	resultData := map[string]interface{}{
 		"success":     true,
 		"versionCode": versionCode,
 		"sha256":      uc.hash,
@@ -203,8 +259,56 @@ func (c *CLI) publishUpload(ctx context.Context, filePath, editID string, noAuto
 		"package":     c.packageName,
 		"editId":      edit.ServerID,
 		"committed":   !noAutoCommit,
-	})
+	}
+	if len(obbResults) > 0 {
+		resultData["expansionFiles"] = obbResults
+	}
+	result := output.NewResult(resultData)
 	return c.Output(result.WithServices("androidpublisher"))
+}
+
+func (c *CLI) buildUploadDryRunResult(filePath string, uc *uploadContext, obbMainInfo, obbPatchInfo os.FileInfo, obbOpts obbOptions) map[string]interface{} {
+	resultData := map[string]interface{}{
+		"dryRun":    true,
+		"action":    "upload",
+		"path":      filePath,
+		"sha256":    uc.hash,
+		"size":      uc.info.Size(),
+		"sizeHuman": edits.FormatBytes(uc.info.Size()),
+		"type":      uc.ext[1:],
+		"package":   c.packageName,
+	}
+	obbData := map[string]interface{}{}
+	if obbMainInfo != nil {
+		obbData["main"] = map[string]interface{}{
+			"path":      obbOpts.mainPath,
+			"size":      obbMainInfo.Size(),
+			"sizeHuman": edits.FormatBytes(obbMainInfo.Size()),
+		}
+	} else if obbOpts.mainReferenceVersion > 0 {
+		obbData["main"] = map[string]interface{}{
+			"referencesVersion": obbOpts.mainReferenceVersion,
+		}
+	}
+	if obbPatchInfo != nil {
+		obbData["patch"] = map[string]interface{}{
+			"path":      obbOpts.patchPath,
+			"size":      obbPatchInfo.Size(),
+			"sizeHuman": edits.FormatBytes(obbPatchInfo.Size()),
+		}
+	} else if obbOpts.patchReferenceVersion > 0 {
+		obbData["patch"] = map[string]interface{}{
+			"referencesVersion": obbOpts.patchReferenceVersion,
+		}
+	}
+	if len(obbData) > 0 {
+		resultData["expansionFiles"] = obbData
+	}
+	return resultData
+}
+
+func hasObbOptions(opts obbOptions) bool {
+	return opts.mainPath != "" || opts.patchPath != "" || opts.mainReferenceVersion > 0 || opts.patchReferenceVersion > 0
 }
 
 func (c *CLI) publishInternalShareUpload(ctx context.Context, filePath string, dryRun bool) error {
@@ -245,15 +349,21 @@ func (c *CLI) publishInternalShareUpload(ctx context.Context, filePath string, d
 	if err != nil {
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
 	}
-	defer f.Close()
 	var resp *androidpublisher.InternalAppSharingArtifact
 	if ext == extAPK {
 		resp, err = publisher.Internalappsharingartifacts.Uploadapk(c.packageName).Media(f).Context(ctx).Do()
 	} else {
 		resp, err = publisher.Internalappsharingartifacts.Uploadbundle(c.packageName).Media(f).Context(ctx).Do()
 	}
+	closeErr := f.Close()
 	if err != nil {
+		if closeErr != nil {
+			logging.Warn("failed to close artifact", logging.String("path", filePath), logging.Err(closeErr))
+		}
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+	if closeErr != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, closeErr.Error()))
 	}
 	result := output.NewResult(map[string]interface{}{
 		"success":  true,

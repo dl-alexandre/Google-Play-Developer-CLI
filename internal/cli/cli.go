@@ -101,6 +101,7 @@ for automating Android app publishing and management tasks.`,
 	c.addAuthCommands()
 	c.addConfigCommands()
 	c.addPublishCommands()
+	c.addMigrateCommands()
 	c.addReviewsCommands()
 	c.addPurchasesCommands()
 	c.addAnalyticsCommands()
@@ -258,8 +259,8 @@ Output Format:
   Use --output table for tabular output
 `,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Fprintln(c.stdout, cmd.Long)
-			return nil
+			_, err := fmt.Fprintln(c.stdout, cmd.Long)
+			return err
 		},
 	}
 

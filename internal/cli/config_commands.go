@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -88,6 +89,33 @@ func (c *CLI) addConfigCommands() {
 		return c.configPrint(cmd, resolved)
 	}
 
+	// config export
+	var exportOutput string
+	var exportIncludePaths bool
+	exportCmd := &cobra.Command{
+		Use:   "export",
+		Short: "Export configuration to file",
+		Long:  "Export safe configuration values to a JSON file.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return c.configExport(cmd, exportOutput, exportIncludePaths)
+		},
+	}
+	exportCmd.Flags().StringVarP(&exportOutput, "output", "o", "gpd-config.json", "Output file path")
+	exportCmd.Flags().BoolVar(&exportIncludePaths, "include-paths", false, "Include serviceAccountKeyPath (warning: may be machine-specific)")
+
+	// config import
+	var importMerge bool
+	importCmd := &cobra.Command{
+		Use:   "import <file>",
+		Short: "Import configuration from file",
+		Long:  "Import configuration values from a JSON file.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return c.configImport(cmd, args[0], importMerge)
+		},
+	}
+	importCmd.Flags().BoolVar(&importMerge, "merge", true, "Merge with existing config (default: true, use --merge=false to replace)")
+
 	// config completion
 	completionCmd := &cobra.Command{
 		Use:   "completion [bash|zsh|fish]",
@@ -112,7 +140,7 @@ Fish:
 		},
 	}
 
-	configCmd.AddCommand(initCmd, doctorCmd, pathCmd, getCmd, setCmd, printCmd, completionCmd)
+	configCmd.AddCommand(initCmd, doctorCmd, pathCmd, getCmd, setCmd, printCmd, exportCmd, importCmd, completionCmd)
 	c.rootCmd.AddCommand(configCmd)
 }
 
@@ -356,4 +384,165 @@ func (c *CLI) configCompletion(_ *cobra.Command, shell string) error {
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
 	}
 	return nil
+}
+
+type ConfigExport struct {
+	Version    string                 `json:"version"`
+	ExportedAt string                 `json:"exportedAt"`
+	Config     map[string]interface{} `json:"config"`
+	Metadata   map[string]interface{} `json:"metadata"`
+}
+
+func (c *CLI) configExport(_ *cobra.Command, outputPath string, includePaths bool) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
+			fmt.Sprintf("failed to load config: %v", err)))
+	}
+
+	exportData := map[string]interface{}{}
+	warnings := []string{}
+
+	if cfg.DefaultPackage != "" {
+		exportData["defaultPackage"] = cfg.DefaultPackage
+	}
+	if cfg.OutputFormat != "" {
+		exportData["outputFormat"] = cfg.OutputFormat
+	}
+	if cfg.TimeoutSeconds > 0 {
+		exportData["timeoutSeconds"] = cfg.TimeoutSeconds
+	}
+	if cfg.StoreTokens != "" {
+		exportData["storeTokens"] = cfg.StoreTokens
+	}
+	if len(cfg.RateLimits) > 0 {
+		exportData["rateLimits"] = cfg.RateLimits
+	}
+	if cfg.TesterLimits != nil {
+		exportData["testerLimits"] = cfg.TesterLimits
+	}
+
+	if cfg.ServiceAccountKeyPath != "" {
+		if includePaths {
+			exportData["serviceAccountKeyPath"] = cfg.ServiceAccountKeyPath
+			warnings = append(warnings, "serviceAccountKeyPath included - may be machine-specific")
+		} else {
+			warnings = append(warnings, "serviceAccountKeyPath not included - use --include-paths to export")
+		}
+	}
+
+	export := ConfigExport{
+		Version:    "1.0",
+		ExportedAt: time.Now().UTC().Format(time.RFC3339),
+		Config:     exportData,
+		Metadata: map[string]interface{}{
+			"platform":         runtime.GOOS,
+			"credentialOrigin": cfg.CredentialOrigin,
+			"warnings":         warnings,
+		},
+	}
+
+	data, err := json.MarshalIndent(export, "", "  ")
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
+			fmt.Sprintf("failed to marshal config: %v", err)))
+	}
+
+	if err := os.WriteFile(outputPath, data, 0600); err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
+			fmt.Sprintf("failed to write file: %v", err)))
+	}
+
+	result := output.NewResult(map[string]interface{}{
+		"success":    true,
+		"exported":   len(exportData),
+		"outputPath": outputPath,
+		"warnings":   warnings,
+	})
+	return c.Output(result)
+}
+
+func (c *CLI) configImport(_ *cobra.Command, inputPath string, merge bool) error {
+	data, err := os.ReadFile(inputPath)
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
+			fmt.Sprintf("failed to read file: %v", err)))
+	}
+
+	var importData ConfigExport
+	if err := json.Unmarshal(data, &importData); err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
+			fmt.Sprintf("invalid config file: %v", err)).
+			WithHint("Expected JSON format from 'gpd config export'"))
+	}
+
+	var cfg *config.Config
+	if merge {
+		cfg, err = config.Load()
+		if err != nil {
+			cfg = &config.Config{}
+		}
+	} else {
+		cfg = &config.Config{}
+	}
+
+	imported := []string{}
+
+	if val, ok := importData.Config["defaultPackage"].(string); ok && val != "" {
+		cfg.DefaultPackage = val
+		imported = append(imported, "defaultPackage")
+	}
+	if val, ok := importData.Config["outputFormat"].(string); ok && val != "" {
+		cfg.OutputFormat = val
+		imported = append(imported, "outputFormat")
+	}
+	if val, ok := importData.Config["timeoutSeconds"].(float64); ok && val > 0 {
+		cfg.TimeoutSeconds = int(val)
+		imported = append(imported, "timeoutSeconds")
+	}
+	if val, ok := importData.Config["storeTokens"].(string); ok && val != "" {
+		cfg.StoreTokens = val
+		imported = append(imported, "storeTokens")
+	}
+	if val, ok := importData.Config["rateLimits"].(map[string]interface{}); ok && len(val) > 0 {
+		rateLimits := make(map[string]string)
+		for k, v := range val {
+			if strVal, ok := v.(string); ok {
+				rateLimits[k] = strVal
+			}
+		}
+		cfg.RateLimits = rateLimits
+		imported = append(imported, "rateLimits")
+	}
+	if val, ok := importData.Config["testerLimits"].(map[string]interface{}); ok && len(val) > 0 {
+		limits := config.DefaultTesterLimits()
+		if internal, ok := val["internal"].(float64); ok {
+			limits.Internal = int(internal)
+		}
+		if alpha, ok := val["alpha"].(float64); ok {
+			limits.Alpha = int(alpha)
+		}
+		if beta, ok := val["beta"].(float64); ok {
+			limits.Beta = int(beta)
+		}
+		cfg.TesterLimits = limits
+		imported = append(imported, "testerLimits")
+	}
+	if val, ok := importData.Config["serviceAccountKeyPath"].(string); ok && val != "" {
+		cfg.ServiceAccountKeyPath = val
+		imported = append(imported, "serviceAccountKeyPath")
+	}
+
+	if err := cfg.Save(); err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
+			fmt.Sprintf("failed to save config: %v", err)))
+	}
+
+	result := output.NewResult(map[string]interface{}{
+		"success":  true,
+		"imported": imported,
+		"merge":    merge,
+		"version":  importData.Version,
+	})
+	return c.Output(result)
 }

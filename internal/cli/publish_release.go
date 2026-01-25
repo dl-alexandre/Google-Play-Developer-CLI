@@ -2,8 +2,11 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"strconv"
+	"time"
 
 	"google.golang.org/api/androidpublisher/v3"
 
@@ -19,7 +22,7 @@ const (
 	statusInProgress = "inProgress"
 )
 
-func (c *CLI) publishRelease(ctx context.Context, track, name, status string, versionCodes []string, _, editID string, noAutoCommit, dryRun bool) error {
+func (c *CLI) publishRelease(ctx context.Context, track, name, status string, versionCodes []string, releaseNotesFile, editID string, noAutoCommit, dryRun, wait bool, waitTimeout string) error {
 	if err := c.requirePackage(); err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
@@ -44,8 +47,30 @@ func (c *CLI) publishRelease(ctx context.Context, track, name, status string, ve
 		codes = append(codes, code)
 	}
 
+	// Parse release notes if provided
+	var releaseNotes map[string]string
+	if releaseNotesFile != "" {
+		data, err := os.ReadFile(releaseNotesFile)
+		if err != nil {
+			return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
+				fmt.Sprintf("failed to read release notes file: %v", err)))
+		}
+		if err := json.Unmarshal(data, &releaseNotes); err != nil {
+			return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
+				fmt.Sprintf("invalid release notes JSON: %v", err)).
+				WithHint("Expected format: {\"en-US\": \"Release notes text\", \"ja-JP\": \"リリースノート\"}"))
+		}
+
+		// Normalize locale keys (en_US -> en-US)
+		normalized := make(map[string]string, len(releaseNotes))
+		for locale, text := range releaseNotes {
+			normalized[config.NormalizeLocale(locale)] = text
+		}
+		releaseNotes = normalized
+	}
+
 	if dryRun {
-		result := output.NewResult(map[string]interface{}{
+		dryRunData := map[string]interface{}{
 			"dryRun":       true,
 			"action":       "release",
 			"track":        track,
@@ -53,7 +78,11 @@ func (c *CLI) publishRelease(ctx context.Context, track, name, status string, ve
 			"status":       status,
 			"versionCodes": codes,
 			"package":      c.packageName,
-		})
+		}
+		if len(releaseNotes) > 0 {
+			dryRunData["releaseNotes"] = releaseNotes
+		}
+		result := output.NewResult(dryRunData)
 		return c.Output(result.WithServices("androidpublisher"))
 	}
 
@@ -82,24 +111,39 @@ func (c *CLI) publishRelease(ctx context.Context, track, name, status string, ve
 			fmt.Sprintf("failed to get track: %v", err)))
 	}
 
-	release := &struct {
-		Name         string  `json:"name,omitempty"`
-		VersionCodes []int64 `json:"versionCodes"`
-		Status       string  `json:"status"`
-	}{
+	release := &androidpublisher.TrackRelease{
 		Name:         name,
 		VersionCodes: codes,
 		Status:       status,
 	}
 
-	_ = trackInfo
-	_ = release
+	if len(releaseNotes) > 0 {
+		localizedNotes := make([]*androidpublisher.LocalizedText, 0, len(releaseNotes))
+		for locale, text := range releaseNotes {
+			localizedNotes = append(localizedNotes, &androidpublisher.LocalizedText{
+				Language: locale,
+				Text:     text,
+			})
+		}
+		release.ReleaseNotes = localizedNotes
+	}
+
+	trackInfo.Releases = []*androidpublisher.TrackRelease{release}
+
+	_, err = publisher.Edits.Tracks.Update(c.packageName, edit.ServerID, track, trackInfo).Context(ctx).Do()
+	if err != nil {
+		if created {
+			_ = publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+		}
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
+			fmt.Sprintf("failed to update track: %v", err)))
+	}
 
 	if err := c.finalizeEdit(ctx, publisher, editMgr, edit, !noAutoCommit); err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
 
-	result := output.NewResult(map[string]interface{}{
+	resultData := map[string]interface{}{
 		"success":      true,
 		"track":        track,
 		"name":         name,
@@ -108,8 +152,69 @@ func (c *CLI) publishRelease(ctx context.Context, track, name, status string, ve
 		"package":      c.packageName,
 		"editId":       edit.ServerID,
 		"committed":    !noAutoCommit,
-	})
+	}
+	if len(releaseNotes) > 0 {
+		resultData["releaseNotes"] = releaseNotes
+	}
+
+	if wait && status == statusInProgress {
+		timeout, err := time.ParseDuration(waitTimeout)
+		if err != nil {
+			return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
+				fmt.Sprintf("invalid wait-timeout: %v", err)).
+				WithHint("Examples: 30m, 1h, 90m"))
+		}
+
+		finalRelease, err := c.waitForReleaseCompletion(ctx, publisher, c.packageName, track, timeout)
+		if err != nil {
+			return c.OutputError(err.(*errors.APIError))
+		}
+
+		resultData["waited"] = true
+		resultData["finalStatus"] = finalRelease.Status
+		resultData["waitDuration"] = timeout.String()
+	}
+
+	result := output.NewResult(resultData)
 	return c.Output(result.WithServices("androidpublisher"))
+}
+
+func (c *CLI) waitForReleaseCompletion(ctx context.Context, publisher *androidpublisher.Service, packageName, track string, timeout time.Duration) (*androidpublisher.TrackRelease, error) {
+	deadline := time.Now().Add(timeout)
+	pollInterval := 10 * time.Second
+
+	for time.Now().Before(deadline) {
+		tempEdit, err := publisher.Edits.Insert(packageName, nil).Context(ctx).Do()
+		if err != nil {
+			return nil, errors.NewAPIError(errors.CodeGeneralError,
+				fmt.Sprintf("failed to create edit for polling: %v", err))
+		}
+
+		trackInfo, err := publisher.Edits.Tracks.Get(packageName, tempEdit.Id, track).Context(ctx).Do()
+		_ = publisher.Edits.Delete(packageName, tempEdit.Id).Context(ctx).Do()
+
+		if err != nil {
+			return nil, errors.NewAPIError(errors.CodeGeneralError,
+				fmt.Sprintf("failed to get track status: %v", err))
+		}
+
+		for _, release := range trackInfo.Releases {
+			if release.Status == statusCompleted {
+				return release, nil
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, errors.NewAPIError(errors.CodeGeneralError, "context cancelled")
+		case <-time.After(pollInterval):
+			continue
+		}
+	}
+
+	return nil, errors.NewAPIError(errors.CodeGeneralError,
+		fmt.Sprintf("release did not complete within timeout (%v)", timeout)).
+		WithHint("Increase --wait-timeout or check release status manually")
 }
 
 func (c *CLI) publishRollout(ctx context.Context, track string, percentage float64, editID string, noAutoCommit, dryRun bool) error {

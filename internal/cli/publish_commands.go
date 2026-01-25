@@ -66,6 +66,8 @@ func (c *CLI) addPublishReleaseCommands(publishCmd *cobra.Command) {
 		fromTrack           string
 		toTrack             string
 		rollbackVersionCode string
+		wait                bool
+		waitTimeout         string
 	)
 
 	releaseCmd := &cobra.Command{
@@ -73,7 +75,7 @@ func (c *CLI) addPublishReleaseCommands(publishCmd *cobra.Command) {
 		Short: "Create or update a release",
 		Long:  "Create a new release on a track with specified version codes.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return c.publishRelease(cmd.Context(), track, name, status, versionCodes, releaseNotesFile, editID, noAutoCommit, dryRun)
+			return c.publishRelease(cmd.Context(), track, name, status, versionCodes, releaseNotesFile, editID, noAutoCommit, dryRun, wait, waitTimeout)
 		},
 	}
 	releaseCmd.Flags().StringVar(&track, "track", "", "Release track (internal, alpha, beta, production)")
@@ -84,6 +86,8 @@ func (c *CLI) addPublishReleaseCommands(publishCmd *cobra.Command) {
 	releaseCmd.Flags().StringVar(&editID, "edit-id", "", "Explicit edit transaction ID")
 	releaseCmd.Flags().BoolVar(&noAutoCommit, "no-auto-commit", false, "Keep edit open for manual commit")
 	releaseCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show intended actions without executing")
+	releaseCmd.Flags().BoolVar(&wait, "wait", false, "Wait for release to complete")
+	releaseCmd.Flags().StringVar(&waitTimeout, "wait-timeout", "30m", "Maximum time to wait (e.g., 30m, 1h)")
 	_ = releaseCmd.MarkFlagRequired("track")
 
 	rolloutCmd := &cobra.Command{
@@ -455,9 +459,10 @@ func (c *CLI) addPublishDeobfuscationCommands(publishCmd *cobra.Command) {
 
 func (c *CLI) addPublishInternalShareCommands(publishCmd *cobra.Command) {
 	internalShareCmd := &cobra.Command{
-		Use:   "internal-share",
-		Short: "Upload artifacts for internal sharing",
-		Long:  "Upload APK/AAB for internal testing without edit workflow.",
+		Use:     "internal-share",
+		Aliases: []string{"internal", "share"},
+		Short:   "Upload artifacts for internal sharing",
+		Long:    "Upload APK/AAB for internal testing without edit workflow.",
 	}
 
 	var dryRun bool

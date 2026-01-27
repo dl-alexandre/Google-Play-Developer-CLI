@@ -3,6 +3,7 @@ package cli
 
 import (
 	"context"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -48,7 +49,19 @@ func (c *CLI) addAuthCommands() {
 		},
 	}
 
-	authCmd.AddCommand(statusCmd, checkCmd, logoutCmd)
+	// auth diagnose
+	diagnoseCmd := &cobra.Command{
+		Use:   "diagnose",
+		Short: "Diagnose authentication setup",
+		Long:  "Show detailed authentication diagnostics and token refresh status.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			refreshCheck, _ := cmd.Flags().GetBool("refresh-check")
+			return c.authDiagnose(cmd.Context(), refreshCheck)
+		},
+	}
+	diagnoseCmd.Flags().Bool("refresh-check", false, "Attempt a token refresh and report errors")
+
+	authCmd.AddCommand(statusCmd, checkCmd, logoutCmd, diagnoseCmd)
 	c.rootCmd.AddCommand(authCmd)
 }
 
@@ -168,5 +181,63 @@ func (c *CLI) authLogout(_ context.Context) error {
 		"success": true,
 		"message": "Credentials cleared",
 	})
+	return c.Output(result.WithServices("auth"))
+}
+
+func (c *CLI) authDiagnose(ctx context.Context, refreshCheck bool) error {
+	creds, err := c.authMgr.Authenticate(ctx, c.keyPath)
+	if err != nil {
+		result := output.NewResult(map[string]interface{}{
+			"authenticated": false,
+			"error":         err.Error(),
+		})
+		return c.Output(result.WithServices("auth"))
+	}
+
+	meta, _ := c.authMgr.LoadTokenMetadata("default")
+	tokenLocation := c.authMgr.TokenLocation()
+
+	token, tokenErr := creds.TokenSource.Token()
+	tokenValid := tokenErr == nil && token != nil && token.Valid()
+	tokenExpiry := ""
+	if tokenErr == nil && token != nil && !token.Expiry.IsZero() {
+		tokenExpiry = token.Expiry.Format(time.RFC3339)
+	}
+
+	clientHash := ""
+	clientLast4 := ""
+	if meta != nil {
+		clientHash = meta.ClientIDHash
+		clientLast4 = meta.ClientIDLast4
+	}
+
+	diagnostics := map[string]interface{}{
+		"authenticated": true,
+		"origin":        creds.Origin.String(),
+		"email":         creds.Email,
+		"keyPath":       creds.KeyPath,
+		"tokenLocation": tokenLocation,
+		"clientIdHash":  clientHash,
+		"clientIdLast4": clientLast4,
+		"scopes":        creds.Scopes,
+		"tokenValid":    tokenValid,
+		"tokenExpiry":   tokenExpiry,
+	}
+
+	if refreshCheck {
+		refreshResult := map[string]interface{}{
+			"success": tokenErr == nil,
+		}
+		if tokenErr != nil {
+			if apiErr := errors.ClassifyAuthError(tokenErr); apiErr != nil {
+				refreshResult["error"] = apiErr
+			} else {
+				refreshResult["error"] = tokenErr.Error()
+			}
+		}
+		diagnostics["refreshCheck"] = refreshResult
+	}
+
+	result := output.NewResult(diagnostics)
 	return c.Output(result.WithServices("auth"))
 }

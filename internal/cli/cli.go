@@ -128,6 +128,13 @@ func (c *CLI) setup(_ *cobra.Command) error {
 	if c.packageName == "" && c.config.DefaultPackage != "" {
 		c.packageName = c.config.DefaultPackage
 	}
+	if envStore := config.GetEnvStoreTokens(); envStore != "" && c.storeTokens == "auto" {
+		c.storeTokens = envStore
+	}
+	if c.storeTokens == "auto" && c.config.StoreTokens != "" {
+		c.storeTokens = c.config.StoreTokens
+	}
+	c.authMgr.SetStoreTokens(c.storeTokens)
 
 	// Configure output manager
 	c.outputMgr.SetFormat(output.ParseFormat(c.outputFormat))

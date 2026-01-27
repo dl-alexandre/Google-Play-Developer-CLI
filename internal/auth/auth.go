@@ -55,6 +55,8 @@ type Credentials struct {
 	Origin      CredentialOrigin
 	KeyPath     string // Only for keyfile origin
 	Email       string // Service account email
+	ClientID    string // Service account client ID
+	Scopes      []string
 }
 
 // Manager handles authentication operations.
@@ -62,13 +64,22 @@ type Manager struct {
 	creds   *Credentials
 	mu      sync.Mutex
 	storage SecureStorage
+	storeTokensMode string
 }
 
 // NewManager creates a new authentication manager.
 func NewManager(storage SecureStorage) *Manager {
 	return &Manager{
 		storage: storage,
+		storeTokensMode: "auto",
 	}
+}
+
+func (m *Manager) SetStoreTokens(mode string) {
+	if mode == "" {
+		return
+	}
+	m.storeTokensMode = mode
 }
 
 // Authenticate attempts to obtain credentials from various sources.
@@ -90,7 +101,7 @@ func (m *Manager) Authenticate(ctx context.Context, keyPath string) (*Credential
 
 	// Priority 2: Environment variable
 	if envKey := config.GetEnvServiceAccountKey(); envKey != "" {
-		creds, err := m.authenticateFromJSON(ctx, []byte(envKey), scopes)
+		creds, err := m.authenticateFromJSON(ctx, []byte(envKey), scopes, OriginEnvironment, "")
 		if err != nil {
 			return nil, err
 		}
@@ -125,7 +136,7 @@ func (m *Manager) authenticateFromKeyfile(ctx context.Context, path string, scop
 			WithHint("Check that the service account key file exists and is readable")
 	}
 
-	creds, err := m.authenticateFromJSON(ctx, data, scopes)
+	creds, err := m.authenticateFromJSON(ctx, data, scopes, OriginKeyfile, path)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +145,7 @@ func (m *Manager) authenticateFromKeyfile(ctx context.Context, path string, scop
 	return creds, nil
 }
 
-func (m *Manager) authenticateFromJSON(ctx context.Context, jsonKey []byte, scopes []string) (*Credentials, error) {
+func (m *Manager) authenticateFromJSON(ctx context.Context, jsonKey []byte, scopes []string, origin CredentialOrigin, keyPath string) (*Credentials, error) {
 	// Validate JSON structure
 	var keyData struct {
 		Type                    string `json:"type"`
@@ -162,18 +173,16 @@ func (m *Manager) authenticateFromJSON(ctx context.Context, jsonKey []byte, scop
 		return nil, errors.ErrServiceAccountInvalid.WithDetails(err.Error())
 	}
 
-	// Wrap token source with early refresh
 	baseTokenSource := jwtConfig.TokenSource(ctx)
-	wrappedTokenSource := &EarlyRefreshTokenSource{
-		base:          baseTokenSource,
-		refreshLeeway: 300 * time.Second, // 5 minutes before expiry
-		clockSkew:     30 * time.Second,
-	}
+	wrappedTokenSource := m.wrapTokenSource(ctx, baseTokenSource, origin, keyData.ClientEmail, keyData.ClientID, scopes, keyPath)
 
 	return &Credentials{
 		TokenSource: wrappedTokenSource,
-		Origin:      OriginKeyfile,
+		Origin:      origin,
 		Email:       keyData.ClientEmail,
+		ClientID:    keyData.ClientID,
+		Scopes:      scopes,
+		KeyPath:     keyPath,
 	}, nil
 }
 
@@ -184,17 +193,50 @@ func (m *Manager) authenticateFromADC(ctx context.Context, scopes []string) (*Cr
 			WithHint("Set GOOGLE_APPLICATION_CREDENTIALS or configure Application Default Credentials")
 	}
 
-	// Wrap token source with early refresh
-	wrappedTokenSource := &EarlyRefreshTokenSource{
-		base:          creds.TokenSource,
-		refreshLeeway: 300 * time.Second,
-		clockSkew:     30 * time.Second,
-	}
+	wrappedTokenSource := m.wrapTokenSource(ctx, creds.TokenSource, OriginADC, "", "", scopes, "")
 
 	return &Credentials{
 		TokenSource: wrappedTokenSource,
 		Origin:      OriginADC,
+		Scopes:      scopes,
 	}, nil
+}
+
+func (m *Manager) wrapTokenSource(ctx context.Context, base oauth2.TokenSource, origin CredentialOrigin, email, clientID string, scopes []string, keyPath string) oauth2.TokenSource {
+	tokenSource := base
+	if m.storageEnabled() {
+		hash, last4 := clientIDHash(clientID)
+		key := tokenStorageKey(defaultAuthProfile, hash)
+		if storedToken, err := m.loadStoredToken(key); err == nil && storedToken != nil {
+			tokenSource = oauth2.ReuseTokenSource(storedToken, tokenSource)
+		}
+		tokenSource = &EarlyRefreshTokenSource{
+			base:          tokenSource,
+			refreshLeeway: 300 * time.Second,
+			clockSkew:     30 * time.Second,
+		}
+		metadata := &TokenMetadata{
+			Profile:       defaultAuthProfile,
+			ClientIDHash:  hash,
+			ClientIDLast4: last4,
+			Origin:        origin.String(),
+			Email:         email,
+			Scopes:        scopes,
+			UpdatedAt:     time.Now().UTC().Format(time.RFC3339),
+		}
+		return &PersistedTokenSource{
+			base:       tokenSource,
+			storage:    m.storage,
+			storageKey: key,
+			metadata:   metadata,
+		}
+	}
+
+	return &EarlyRefreshTokenSource{
+		base:          tokenSource,
+		refreshLeeway: 300 * time.Second,
+		clockSkew:     30 * time.Second,
+	}
 }
 
 // GetTokenSource returns the current token source.

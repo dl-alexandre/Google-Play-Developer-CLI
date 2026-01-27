@@ -8,6 +8,15 @@ import (
 	"testing"
 )
 
+func setTestHome(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
+	t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
+	return home
+}
+
 func TestIsValidTrack(t *testing.T) {
 	validTracks := []string{"internal", "alpha", "beta", "production"}
 	invalidTracks := []string{"custom", "staging", "dev", ""}
@@ -147,8 +156,7 @@ func TestDefaultTesterLimits(t *testing.T) {
 }
 
 func TestGetPathsAndLegacyDir(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	home := setTestHome(t)
 	paths := GetPaths()
 	if paths.ConfigDir == "" || paths.CacheDir == "" || paths.ConfigFile == "" {
 		t.Fatal("expected non-empty paths")
@@ -172,8 +180,7 @@ func TestGetPathsForOS(t *testing.T) {
 		t.Fatal("expected windows cache dir from LOCALAPPDATA")
 	}
 
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	home := setTestHome(t)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdgconfig"))
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "xdgcache"))
 	linuxPaths := getPathsForOS("linux")
@@ -186,8 +193,7 @@ func TestGetPathsForOS(t *testing.T) {
 }
 
 func TestGetPathsForOSDefaultXDG(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	home := setTestHome(t)
 	t.Setenv("XDG_CONFIG_HOME", "")
 	t.Setenv("XDG_CACHE_HOME", "")
 	paths := getPathsForOS("linux")
@@ -200,8 +206,7 @@ func TestGetPathsForOSDefaultXDG(t *testing.T) {
 }
 
 func TestLoadPrimaryConfig(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	home := setTestHome(t)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdgconfig"))
 	paths := GetPaths()
 	if err := os.MkdirAll(paths.ConfigDir, 0700); err != nil {
@@ -222,8 +227,7 @@ func TestLoadPrimaryConfig(t *testing.T) {
 }
 
 func TestLoadLegacyConfig(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	home := setTestHome(t)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdgconfig"))
 	legacyDir := GetLegacyConfigDir()
 	if err := os.MkdirAll(legacyDir, 0700); err != nil {
@@ -245,8 +249,7 @@ func TestLoadLegacyConfig(t *testing.T) {
 }
 
 func TestLoadDefaultConfigWhenMissing(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t)
 	loaded, err := Load()
 	if err != nil {
 		t.Fatalf("Load failed: %v", err)
@@ -268,8 +271,7 @@ func TestLoadFromFileInvalidJSON(t *testing.T) {
 }
 
 func TestConfigSaveWritesFile(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t)
 	cfg := &Config{DefaultPackage: "com.example.app"}
 	if err := cfg.Save(); err != nil {
 		t.Fatalf("Save failed: %v", err)
@@ -285,8 +287,7 @@ func TestConfigSaveWritesFile(t *testing.T) {
 }
 
 func TestConfigSaveWriteError(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t)
 	paths := GetPaths()
 	orig := osWriteFile
 	osWriteFile = func(path string, data []byte, perm os.FileMode) error {
@@ -305,8 +306,7 @@ func TestConfigSaveWriteError(t *testing.T) {
 }
 
 func TestConfigSaveMkdirError(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t)
 	paths := GetPaths()
 	orig := osMkdirAll
 	osMkdirAll = func(path string, perm os.FileMode) error {
@@ -325,8 +325,7 @@ func TestConfigSaveMkdirError(t *testing.T) {
 }
 
 func TestConfigSaveMarshalError(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t)
 	orig := jsonMarshalIndent
 	jsonMarshalIndent = func(v interface{}, prefix, indent string) ([]byte, error) {
 		return nil, os.ErrInvalid
@@ -360,9 +359,8 @@ func TestEnvAccessors(t *testing.T) {
 }
 
 func TestInitProjectCreatesFiles(t *testing.T) {
-	home := t.TempDir()
+	setTestHome(t)
 	project := t.TempDir()
-	t.Setenv("HOME", home)
 	if err := InitProject(project); err != nil {
 		t.Fatalf("InitProject failed: %v", err)
 	}
@@ -382,9 +380,8 @@ func TestInitProjectCreatesFiles(t *testing.T) {
 }
 
 func TestInitProjectConfigDirError(t *testing.T) {
-	home := t.TempDir()
+	setTestHome(t)
 	project := t.TempDir()
-	t.Setenv("HOME", home)
 	paths := GetPaths()
 	orig := osMkdirAll
 	osMkdirAll = func(path string, perm os.FileMode) error {
@@ -402,9 +399,8 @@ func TestInitProjectConfigDirError(t *testing.T) {
 }
 
 func TestInitProjectCacheDirError(t *testing.T) {
-	home := t.TempDir()
+	setTestHome(t)
 	project := t.TempDir()
-	t.Setenv("HOME", home)
 	paths := GetPaths()
 	orig := osMkdirAll
 	osMkdirAll = func(path string, perm os.FileMode) error {
@@ -422,9 +418,8 @@ func TestInitProjectCacheDirError(t *testing.T) {
 }
 
 func TestInitProjectSaveError(t *testing.T) {
-	home := t.TempDir()
+	setTestHome(t)
 	project := t.TempDir()
-	t.Setenv("HOME", home)
 	paths := GetPaths()
 	orig := osWriteFile
 	osWriteFile = func(path string, data []byte, perm os.FileMode) error {
@@ -442,9 +437,8 @@ func TestInitProjectSaveError(t *testing.T) {
 }
 
 func TestInitProjectAssetsError(t *testing.T) {
-	home := t.TempDir()
+	setTestHome(t)
 	project := t.TempDir()
-	t.Setenv("HOME", home)
 	if err := os.WriteFile(filepath.Join(project, "assets"), []byte("file"), 0600); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
@@ -454,9 +448,8 @@ func TestInitProjectAssetsError(t *testing.T) {
 }
 
 func TestInitProjectReleaseNotesError(t *testing.T) {
-	home := t.TempDir()
+	setTestHome(t)
 	project := t.TempDir()
-	t.Setenv("HOME", home)
 	path := filepath.Join(project, "release-notes.json")
 	if err := os.WriteFile(path, []byte("existing"), 0400); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
@@ -467,9 +460,8 @@ func TestInitProjectReleaseNotesError(t *testing.T) {
 }
 
 func TestInitProjectGitignoreError(t *testing.T) {
-	home := t.TempDir()
+	setTestHome(t)
 	project := t.TempDir()
-	t.Setenv("HOME", home)
 	path := filepath.Join(project, ".gitignore")
 	if err := os.WriteFile(path, []byte("existing"), 0400); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)

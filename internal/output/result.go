@@ -32,6 +32,7 @@ type Metadata struct {
 	RequestID     string `json:"requestId,omitempty"`
 	PageToken     string `json:"pageToken,omitempty"`
 	NextPageToken string `json:"nextPageToken,omitempty"`
+	HasMorePages  *bool  `json:"hasMorePages,omitempty"`
 
 	// Optional warning/info fields
 	Warnings []string `json:"warnings,omitempty"`
@@ -119,6 +120,8 @@ func (r *Result) WithPagination(pageToken, nextPageToken string) *Result {
 	}
 	r.Meta.PageToken = pageToken
 	r.Meta.NextPageToken = nextPageToken
+	hasMore := nextPageToken != ""
+	r.Meta.HasMorePages = &hasMore
 	return r
 }
 

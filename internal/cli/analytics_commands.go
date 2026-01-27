@@ -44,7 +44,7 @@ func (c *CLI) addAnalyticsCommands() {
 	queryCmd.Flags().StringVar(&outputFmt, "format", "json", "Output format: json, csv")
 	queryCmd.Flags().Int64Var(&pageSize, "page-size", 100, "Results per page")
 	queryCmd.Flags().StringVar(&pageToken, "page-token", "", "Pagination token")
-	queryCmd.Flags().BoolVar(&all, "all", false, "Fetch all pages")
+	addPaginationFlags(queryCmd, &all)
 	_ = queryCmd.MarkFlagRequired("start-date")
 	_ = queryCmd.MarkFlagRequired("end-date")
 

@@ -52,6 +52,8 @@ func (c *CLI) vitalsCrashes(ctx context.Context, startDate, endDate string, dime
 		queryReq.PageToken = pageToken
 	}
 
+	startToken := pageToken
+	nextToken := ""
 	var allRows []map[string]interface{}
 	for {
 		resp, err := reporting.Vitals.Crashrate.Query(appName, queryReq).Context(ctx).Do()
@@ -75,11 +77,11 @@ func (c *CLI) vitalsCrashes(ctx context.Context, startDate, endDate string, dime
 			allRows = append(allRows, rowData)
 		}
 
-		if !all || resp.NextPageToken == "" {
-			pageToken = resp.NextPageToken
+		nextToken = resp.NextPageToken
+		if !all || nextToken == "" {
 			break
 		}
-		queryReq.PageToken = resp.NextPageToken
+		queryReq.PageToken = nextToken
 	}
 
 	result := output.NewResult(map[string]interface{}{
@@ -90,11 +92,12 @@ func (c *CLI) vitalsCrashes(ctx context.Context, startDate, endDate string, dime
 		"package":       c.packageName,
 		"rows":          allRows,
 		"rowCount":      len(allRows),
-		"nextPageToken": pageToken,
+		"nextPageToken": nextToken,
 		"dataFreshness": map[string]interface{}{
 			"note": "Vitals data may be delayed by 24-48 hours",
 		},
 	})
+	result.WithPagination(startToken, nextToken)
 	return c.Output(result.WithServices("playdeveloperreporting"))
 }
 
@@ -140,6 +143,8 @@ func (c *CLI) vitalsANRs(ctx context.Context, startDate, endDate string, dimensi
 		queryReq.PageToken = pageToken
 	}
 
+	startToken := pageToken
+	nextToken := ""
 	var allRows []map[string]interface{}
 	for {
 		resp, err := reporting.Vitals.Anrrate.Query(appName, queryReq).Context(ctx).Do()
@@ -163,11 +168,11 @@ func (c *CLI) vitalsANRs(ctx context.Context, startDate, endDate string, dimensi
 			allRows = append(allRows, rowData)
 		}
 
-		if !all || resp.NextPageToken == "" {
-			pageToken = resp.NextPageToken
+		nextToken = resp.NextPageToken
+		if !all || nextToken == "" {
 			break
 		}
-		queryReq.PageToken = resp.NextPageToken
+		queryReq.PageToken = nextToken
 	}
 
 	result := output.NewResult(map[string]interface{}{
@@ -178,11 +183,12 @@ func (c *CLI) vitalsANRs(ctx context.Context, startDate, endDate string, dimensi
 		"package":       c.packageName,
 		"rows":          allRows,
 		"rowCount":      len(allRows),
-		"nextPageToken": pageToken,
+		"nextPageToken": nextToken,
 		"dataFreshness": map[string]interface{}{
 			"note": "Vitals data may be delayed by 24-48 hours",
 		},
 	})
+	result.WithPagination(startToken, nextToken)
 	return c.Output(result.WithServices("playdeveloperreporting"))
 }
 
@@ -228,6 +234,8 @@ func (c *CLI) vitalsExcessiveWakeups(ctx context.Context, startDate, endDate str
 		queryReq.PageToken = pageToken
 	}
 
+	startToken := pageToken
+	nextToken := ""
 	var allRows []map[string]interface{}
 	for {
 		resp, err := reporting.Vitals.Excessivewakeuprate.Query(appName, queryReq).Context(ctx).Do()
@@ -251,11 +259,11 @@ func (c *CLI) vitalsExcessiveWakeups(ctx context.Context, startDate, endDate str
 			allRows = append(allRows, rowData)
 		}
 
-		if !all || resp.NextPageToken == "" {
-			pageToken = resp.NextPageToken
+		nextToken = resp.NextPageToken
+		if !all || nextToken == "" {
 			break
 		}
-		queryReq.PageToken = resp.NextPageToken
+		queryReq.PageToken = nextToken
 	}
 
 	result := output.NewResult(map[string]interface{}{
@@ -266,8 +274,9 @@ func (c *CLI) vitalsExcessiveWakeups(ctx context.Context, startDate, endDate str
 		"package":       c.packageName,
 		"rows":          allRows,
 		"rowCount":      len(allRows),
-		"nextPageToken": pageToken,
+		"nextPageToken": nextToken,
 	})
+	result.WithPagination(startToken, nextToken)
 	return c.Output(result.WithServices("playdeveloperreporting"))
 }
 
@@ -320,6 +329,8 @@ func (c *CLI) vitalsSlowRendering(ctx context.Context, startDate, endDate string
 		queryReq.PageToken = pageToken
 	}
 
+	startToken := pageToken
+	nextToken := ""
 	var allRows []map[string]interface{}
 	for {
 		resp, err := reporting.Vitals.Slowrenderingrate.Query(appName, queryReq).Context(ctx).Do()
@@ -343,11 +354,11 @@ func (c *CLI) vitalsSlowRendering(ctx context.Context, startDate, endDate string
 			allRows = append(allRows, rowData)
 		}
 
-		if !all || resp.NextPageToken == "" {
-			pageToken = resp.NextPageToken
+		nextToken = resp.NextPageToken
+		if !all || nextToken == "" {
 			break
 		}
-		queryReq.PageToken = resp.NextPageToken
+		queryReq.PageToken = nextToken
 	}
 
 	result := output.NewResult(map[string]interface{}{
@@ -358,8 +369,9 @@ func (c *CLI) vitalsSlowRendering(ctx context.Context, startDate, endDate string
 		"package":       c.packageName,
 		"rows":          allRows,
 		"rowCount":      len(allRows),
-		"nextPageToken": pageToken,
+		"nextPageToken": nextToken,
 	})
+	result.WithPagination(startToken, nextToken)
 	return c.Output(result.WithServices("playdeveloperreporting"))
 }
 
@@ -405,6 +417,8 @@ func (c *CLI) vitalsSlowStart(ctx context.Context, startDate, endDate string, di
 		queryReq.PageToken = pageToken
 	}
 
+	startToken := pageToken
+	nextToken := ""
 	var allRows []map[string]interface{}
 	for {
 		resp, err := reporting.Vitals.Slowstartrate.Query(appName, queryReq).Context(ctx).Do()
@@ -428,11 +442,11 @@ func (c *CLI) vitalsSlowStart(ctx context.Context, startDate, endDate string, di
 			allRows = append(allRows, rowData)
 		}
 
-		if !all || resp.NextPageToken == "" {
-			pageToken = resp.NextPageToken
+		nextToken = resp.NextPageToken
+		if !all || nextToken == "" {
 			break
 		}
-		queryReq.PageToken = resp.NextPageToken
+		queryReq.PageToken = nextToken
 	}
 
 	result := output.NewResult(map[string]interface{}{
@@ -443,8 +457,9 @@ func (c *CLI) vitalsSlowStart(ctx context.Context, startDate, endDate string, di
 		"package":       c.packageName,
 		"rows":          allRows,
 		"rowCount":      len(allRows),
-		"nextPageToken": pageToken,
+		"nextPageToken": nextToken,
 	})
+	result.WithPagination(startToken, nextToken)
 	return c.Output(result.WithServices("playdeveloperreporting"))
 }
 
@@ -490,6 +505,8 @@ func (c *CLI) vitalsStuckWakelocks(ctx context.Context, startDate, endDate strin
 		queryReq.PageToken = pageToken
 	}
 
+	startToken := pageToken
+	nextToken := ""
 	var allRows []map[string]interface{}
 	for {
 		resp, err := reporting.Vitals.Stuckbackgroundwakelockrate.Query(appName, queryReq).Context(ctx).Do()
@@ -513,11 +530,11 @@ func (c *CLI) vitalsStuckWakelocks(ctx context.Context, startDate, endDate strin
 			allRows = append(allRows, rowData)
 		}
 
-		if !all || resp.NextPageToken == "" {
-			pageToken = resp.NextPageToken
+		nextToken = resp.NextPageToken
+		if !all || nextToken == "" {
 			break
 		}
-		queryReq.PageToken = resp.NextPageToken
+		queryReq.PageToken = nextToken
 	}
 
 	result := output.NewResult(map[string]interface{}{
@@ -528,7 +545,8 @@ func (c *CLI) vitalsStuckWakelocks(ctx context.Context, startDate, endDate strin
 		"package":       c.packageName,
 		"rows":          allRows,
 		"rowCount":      len(allRows),
-		"nextPageToken": pageToken,
+		"nextPageToken": nextToken,
 	})
+	result.WithPagination(startToken, nextToken)
 	return c.Output(result.WithServices("playdeveloperreporting"))
 }

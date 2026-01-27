@@ -147,7 +147,7 @@ func FromHTTPStatus(status int) ErrorCode {
 // Common errors with hints.
 var (
 	ErrAuthNotConfigured = NewAPIError(CodeAuthFailure, "authentication not configured").
-				WithHint("Run 'gpd auth status' to check authentication or set GPD_SERVICE_ACCOUNT_KEY environment variable")
+				WithHint("Provide --key, set GPD_SERVICE_ACCOUNT_KEY, or set GOOGLE_APPLICATION_CREDENTIALS")
 
 	ErrServiceAccountInvalid = NewAPIError(CodeAuthFailure, "invalid service account key").
 					WithHint("Ensure the service account key file is valid JSON and contains required fields")

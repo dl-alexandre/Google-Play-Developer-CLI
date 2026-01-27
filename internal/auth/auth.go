@@ -25,6 +25,12 @@ const (
 	// ScopePlayReporting is the scope for Play Developer Reporting API
 	// Used for: analytics, vitals
 	ScopePlayReporting = "https://www.googleapis.com/auth/playdeveloperreporting"
+
+	// Origin string constants
+	originADCString         = "adc"
+	originKeyfileString     = "keyfile"
+	originEnvironmentString = "environment"
+	originUnknownString     = "unknown"
 )
 
 // CredentialOrigin indicates where credentials were obtained from.
@@ -39,13 +45,13 @@ const (
 func (o CredentialOrigin) String() string {
 	switch o {
 	case OriginADC:
-		return "adc"
+		return originADCString
 	case OriginKeyfile:
-		return "keyfile"
+		return originKeyfileString
 	case OriginEnvironment:
-		return "environment"
+		return originEnvironmentString
 	default:
-		return "unknown"
+		return originUnknownString
 	}
 }
 
@@ -61,16 +67,16 @@ type Credentials struct {
 
 // Manager handles authentication operations.
 type Manager struct {
-	creds   *Credentials
-	mu      sync.Mutex
-	storage SecureStorage
+	creds           *Credentials
+	mu              sync.Mutex
+	storage         SecureStorage
 	storeTokensMode string
 }
 
 // NewManager creates a new authentication manager.
 func NewManager(storage SecureStorage) *Manager {
 	return &Manager{
-		storage: storage,
+		storage:         storage,
 		storeTokensMode: "auto",
 	}
 }
@@ -100,7 +106,8 @@ func (m *Manager) Authenticate(ctx context.Context, keyPath string) (*Credential
 	}
 
 	// Priority 2: Environment variable
-	if envKey := config.GetEnvServiceAccountKey(); envKey != "" {
+	envKey := config.GetEnvServiceAccountKey()
+	if envKey != "" {
 		creds, err := m.authenticateFromJSON(ctx, []byte(envKey), scopes, OriginEnvironment, "")
 		if err != nil {
 			return nil, err
@@ -111,7 +118,8 @@ func (m *Manager) Authenticate(ctx context.Context, keyPath string) (*Credential
 	}
 
 	// Priority 3: GOOGLE_APPLICATION_CREDENTIALS
-	if gacPath := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"); gacPath != "" {
+	gacPath := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
+	if gacPath != "" {
 		creds, err := m.authenticateFromKeyfile(ctx, gacPath, scopes)
 		if err != nil {
 			return nil, err
@@ -123,7 +131,19 @@ func (m *Manager) Authenticate(ctx context.Context, keyPath string) (*Credential
 	// Priority 4: Application Default Credentials
 	creds, err := m.authenticateFromADC(ctx, scopes)
 	if err != nil {
-		return nil, errors.ErrAuthNotConfigured
+		details := map[string]interface{}{
+			"gpdServiceAccountKeySet":            envKey != "",
+			"googleApplicationCredentialsSet":    gacPath != "",
+			"googleApplicationCredentialsExists": false,
+		}
+		if gacPath != "" {
+			if _, statErr := os.Stat(gacPath); statErr == nil {
+				details["googleApplicationCredentialsExists"] = true
+			}
+		}
+		return nil, errors.NewAPIError(errors.CodeAuthFailure, "authentication not configured").
+			WithHint("Provide --key, set GPD_SERVICE_ACCOUNT_KEY, or set GOOGLE_APPLICATION_CREDENTIALS").
+			WithDetails(details)
 	}
 	m.creds = creds
 	return creds, nil
@@ -160,21 +180,37 @@ func (m *Manager) authenticateFromJSON(ctx context.Context, jsonKey []byte, scop
 		ClientX509CertURL       string `json:"client_x509_cert_url"`
 	}
 	if err := json.Unmarshal(jsonKey, &keyData); err != nil {
-		return nil, errors.ErrServiceAccountInvalid.WithDetails(err.Error())
+		return nil, invalidServiceAccountError(map[string]interface{}{"reason": "invalid_json", "details": err.Error()})
 	}
 
 	if keyData.Type != "service_account" {
-		return nil, errors.NewAPIError(errors.CodeAuthFailure, "invalid credential type").
-			WithHint("Credential file must be a service account key, not OAuth credentials")
+		return nil, invalidServiceAccountError(map[string]interface{}{"reason": "invalid_type", "type": keyData.Type})
+	}
+
+	missing := []string{}
+	if keyData.ClientEmail == "" {
+		missing = append(missing, "client_email")
+	}
+	if keyData.ClientID == "" {
+		missing = append(missing, "client_id")
+	}
+	if keyData.PrivateKey == "" {
+		missing = append(missing, "private_key")
+	}
+	if keyData.TokenURI == "" {
+		missing = append(missing, "token_uri")
+	}
+	if len(missing) > 0 {
+		return nil, invalidServiceAccountError(map[string]interface{}{"reason": "missing_fields", "fields": missing})
 	}
 
 	jwtConfig, err := google.JWTConfigFromJSON(jsonKey, scopes...)
 	if err != nil {
-		return nil, errors.ErrServiceAccountInvalid.WithDetails(err.Error())
+		return nil, invalidServiceAccountError(map[string]interface{}{"reason": "jwt_config_error", "details": err.Error()})
 	}
 
 	baseTokenSource := jwtConfig.TokenSource(ctx)
-	wrappedTokenSource := m.wrapTokenSource(ctx, baseTokenSource, origin, keyData.ClientEmail, keyData.ClientID, scopes, keyPath)
+	wrappedTokenSource := m.wrapTokenSource(baseTokenSource, origin, keyData.ClientEmail, keyData.ClientID, scopes)
 
 	return &Credentials{
 		TokenSource: wrappedTokenSource,
@@ -186,6 +222,12 @@ func (m *Manager) authenticateFromJSON(ctx context.Context, jsonKey []byte, scop
 	}, nil
 }
 
+func invalidServiceAccountError(details map[string]interface{}) *errors.APIError {
+	return errors.NewAPIError(errors.CodeAuthFailure, "invalid service account key").
+		WithHint("Ensure the service account key JSON includes client_email, client_id, private_key, and token_uri").
+		WithDetails(details)
+}
+
 func (m *Manager) authenticateFromADC(ctx context.Context, scopes []string) (*Credentials, error) {
 	creds, err := google.FindDefaultCredentials(ctx, scopes...)
 	if err != nil {
@@ -193,7 +235,7 @@ func (m *Manager) authenticateFromADC(ctx context.Context, scopes []string) (*Cr
 			WithHint("Set GOOGLE_APPLICATION_CREDENTIALS or configure Application Default Credentials")
 	}
 
-	wrappedTokenSource := m.wrapTokenSource(ctx, creds.TokenSource, OriginADC, "", "", scopes, "")
+	wrappedTokenSource := m.wrapTokenSource(creds.TokenSource, OriginADC, "", "", scopes)
 
 	return &Credentials{
 		TokenSource: wrappedTokenSource,
@@ -202,7 +244,7 @@ func (m *Manager) authenticateFromADC(ctx context.Context, scopes []string) (*Cr
 	}, nil
 }
 
-func (m *Manager) wrapTokenSource(ctx context.Context, base oauth2.TokenSource, origin CredentialOrigin, email, clientID string, scopes []string, keyPath string) oauth2.TokenSource {
+func (m *Manager) wrapTokenSource(base oauth2.TokenSource, origin CredentialOrigin, email, clientID string, scopes []string) oauth2.TokenSource {
 	tokenSource := base
 	if m.storageEnabled() {
 		hash, last4 := clientIDHash(clientID)

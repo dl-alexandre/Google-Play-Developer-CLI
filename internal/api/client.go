@@ -243,12 +243,14 @@ func (c *Client) calculateDelay(attempt int, err error) time.Duration {
 
 func cryptoRandFloat64() float64 {
 	var buf [8]byte
-	_, err := crand.Read(buf[:])
+	_, err := randRead(buf[:])
 	if err != nil {
 		return 0.5
 	}
 	return float64(binary.BigEndian.Uint64(buf[:])&(1<<53-1)) / float64(1<<53)
 }
+
+var randRead = crand.Read
 
 func calculateDelayWithConfig(cfg RetryConfig, attempt int, err error) time.Duration {
 	if retryAfter := extractRetryAfter(err); retryAfter > 0 {

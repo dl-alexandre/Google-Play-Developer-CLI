@@ -4,8 +4,9 @@ import (
 	"encoding/json"
 	"time"
 
-	gpdErrors "github.com/dl-alexandre/gpd/internal/errors"
 	"golang.org/x/oauth2"
+
+	gpdErrors "github.com/dl-alexandre/gpd/internal/errors"
 )
 
 type PersistedTokenSource struct {

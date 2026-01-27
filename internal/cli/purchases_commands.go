@@ -18,6 +18,7 @@ import (
 const (
 	purchaseTypeProduct      = "product"
 	purchaseTypeSubscription = "subscription"
+	purchaseTypeAuto         = "auto"
 )
 
 func (c *CLI) addPurchasesCommands() {
@@ -53,8 +54,8 @@ func (c *CLI) addPurchasesVerifyCommands(purchasesCmd *cobra.Command) {
 	}
 	verifyCmd.Flags().StringVar(&productID, "product-id", "", "Product ID")
 	verifyCmd.Flags().StringVar(&token, "token", "", "Purchase token")
-	verifyCmd.Flags().StringVar(&environment, "environment", "auto", "Environment: sandbox, production, auto")
-	verifyCmd.Flags().StringVar(&productType, "type", "auto", "Product type: product, subscription, auto")
+	verifyCmd.Flags().StringVar(&environment, "environment", purchaseTypeAuto, "Environment: sandbox, production, auto")
+	verifyCmd.Flags().StringVar(&productType, "type", purchaseTypeAuto, "Product type: product, subscription, auto")
 	_ = verifyCmd.MarkFlagRequired("token")
 
 	capabilitiesCmd := &cobra.Command{
@@ -80,13 +81,14 @@ func (c *CLI) addPurchasesVoidedCommands(purchasesCmd *cobra.Command) {
 		kind       string
 		maxResults int64
 		pageToken  string
+		all        bool
 	)
 
 	voidedListCmd := &cobra.Command{
 		Use:   "list",
 		Short: "List voided purchases",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return c.purchasesVoidedList(cmd.Context(), startTime, endTime, kind, maxResults, pageToken)
+			return c.purchasesVoidedList(cmd.Context(), startTime, endTime, kind, maxResults, pageToken, all)
 		},
 	}
 	voidedListCmd.Flags().StringVar(&startTime, "start-time", "", "Start time (RFC3339 or millis)")
@@ -94,6 +96,7 @@ func (c *CLI) addPurchasesVoidedCommands(purchasesCmd *cobra.Command) {
 	voidedListCmd.Flags().StringVar(&kind, "type", "", "Type: product or subscription")
 	voidedListCmd.Flags().Int64Var(&maxResults, "max-results", 0, "Max results per page")
 	voidedListCmd.Flags().StringVar(&pageToken, "page-token", "", "Pagination token")
+	addPaginationFlags(voidedListCmd, &all)
 
 	voidedCmd.AddCommand(voidedListCmd)
 	purchasesCmd.AddCommand(voidedCmd)
@@ -248,7 +251,7 @@ func (c *CLI) purchasesVerify(ctx context.Context, productID, token, environment
 	var purchaseType string
 
 	// Determine product type
-	if productType == "auto" || productType == purchaseTypeProduct {
+	if productType == purchaseTypeAuto || productType == purchaseTypeProduct {
 		// Try product purchase first
 		if productID != "" {
 			productPurchase, err := publisher.Purchases.Products.Get(c.packageName, productID, token).Context(ctx).Do()
@@ -272,7 +275,7 @@ func (c *CLI) purchasesVerify(ctx context.Context, productID, token, environment
 	}
 
 	// Try subscription if product failed or type is subscription
-	if purchaseData == nil && (productType == "auto" || productType == purchaseTypeSubscription) {
+	if purchaseData == nil && (productType == purchaseTypeAuto || productType == purchaseTypeSubscription) {
 		if productID != "" {
 			// Use subscriptions v2 API
 			subPurchase, err := publisher.Purchases.Subscriptionsv2.Get(c.packageName, token).Context(ctx).Do()
@@ -343,7 +346,7 @@ func (c *CLI) purchasesCapabilities(_ context.Context) error {
 	return c.Output(result.WithServices("androidpublisher"))
 }
 
-func (c *CLI) purchasesVoidedList(ctx context.Context, startTime, endTime, kind string, maxResults int64, pageToken string) error {
+func (c *CLI) purchasesVoidedList(ctx context.Context, startTime, endTime, kind string, maxResults int64, pageToken string, all bool) error {
 	if err := c.requirePackage(); err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
@@ -386,19 +389,31 @@ func (c *CLI) purchasesVoidedList(ctx context.Context, startTime, endTime, kind 
 	if pageToken != "" {
 		req = req.Token(pageToken)
 	}
-	resp, err := req.Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
+
+	startToken := pageToken
 	nextToken := ""
-	if resp.TokenPagination != nil {
-		nextToken = resp.TokenPagination.NextPageToken
+	var allPurchases []*androidpublisher.VoidedPurchase
+	for {
+		resp, err := req.Context(ctx).Do()
+		if err != nil {
+			return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+		}
+		allPurchases = append(allPurchases, resp.VoidedPurchases...)
+		nextToken = ""
+		if resp.TokenPagination != nil {
+			nextToken = resp.TokenPagination.NextPageToken
+		}
+		if nextToken == "" || !all {
+			break
+		}
+		req = req.Token(nextToken)
 	}
 	result := output.NewResult(map[string]interface{}{
-		"voidedPurchases": resp.VoidedPurchases,
+		"voidedPurchases": allPurchases,
 		"nextPageToken":   nextToken,
 		"package":         c.packageName,
 	})
+	result.WithPagination(startToken, nextToken)
 	return c.Output(result.WithServices("androidpublisher"))
 }
 

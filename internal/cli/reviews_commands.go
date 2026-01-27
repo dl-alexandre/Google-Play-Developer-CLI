@@ -60,7 +60,7 @@ func (c *CLI) addReviewsCommands() {
 	listCmd.Flags().StringVar(&translationLang, "translation-language", "", "Language for translated reviews")
 	listCmd.Flags().Int64Var(&pageSize, "page-size", 50, "Results per page")
 	listCmd.Flags().StringVar(&pageToken, "page-token", "", "Pagination token")
-	listCmd.Flags().BoolVar(&all, "all", false, "Fetch all pages")
+	addPaginationFlags(listCmd, &all)
 
 	// reviews reply
 	var (
@@ -206,7 +206,7 @@ func (c *CLI) fetchAndOutputReviews(ctx context.Context, params *reviewsListPara
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
 	}
 
-	return c.outputReviewsResult(allReviews, scannedCount, filteredCount, nextToken)
+	return c.outputReviewsResult(allReviews, scannedCount, filteredCount, params.pageToken, nextToken)
 }
 
 func (c *CLI) buildReviewsRequest(publisher *androidpublisher.Service, params *reviewsListParams) *androidpublisher.ReviewsListCall {
@@ -250,13 +250,11 @@ func (c *CLI) collectReviews(ctx context.Context, req *androidpublisher.ReviewsL
 	return allReviews, scannedCount, filteredCount, nextToken, nil
 }
 
-func (c *CLI) outputReviewsResult(reviews []map[string]interface{}, scanned, filtered int, nextToken string) error {
+func (c *CLI) outputReviewsResult(reviews []map[string]interface{}, scanned, filtered int, pageToken, nextToken string) error {
 	result := output.NewResult(reviews)
 	result.WithServices("androidpublisher")
 	result.WithPartial(scanned, filtered, 0)
-	if nextToken != "" {
-		result.WithPagination("", nextToken)
-	}
+	result.WithPagination(pageToken, nextToken)
 	return c.Output(result)
 }
 

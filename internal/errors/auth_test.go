@@ -45,3 +45,346 @@ func TestClassifyAuthErrorGoogleAPI(t *testing.T) {
 		t.Fatalf("expected auth failure, got %s", apiErr.Code)
 	}
 }
+
+func TestClassifyAuthErrorNil(t *testing.T) {
+	apiErr := ClassifyAuthError(nil)
+	if apiErr != nil {
+		t.Fatalf("expected nil for nil error")
+	}
+}
+
+func TestClassifyAuthErrorAlreadyAPIError(t *testing.T) {
+	original := NewAPIError(CodeValidationError, "test error")
+	result := ClassifyAuthError(original)
+	if result != original {
+		t.Fatalf("expected same APIError instance")
+	}
+}
+
+func TestClassifyAuthErrorOAuthTypes(t *testing.T) {
+	tests := []struct {
+		name         string
+		oauthError   string
+		expectedCode ErrorCode
+		expectHint   bool
+		hintContains string
+	}{
+		{
+			name:         "invalid_grant",
+			oauthError:   "invalid_grant",
+			expectedCode: CodeAuthFailure,
+			expectHint:   true,
+			hintContains: "Re-authenticate",
+		},
+		{
+			name:         "invalid_client",
+			oauthError:   "invalid_client",
+			expectedCode: CodeAuthFailure,
+			expectHint:   true,
+			hintContains: "client credentials",
+		},
+		{
+			name:         "unauthorized_client",
+			oauthError:   "unauthorized_client",
+			expectedCode: CodeAuthFailure,
+			expectHint:   true,
+			hintContains: "client credentials",
+		},
+		{
+			name:         "access_denied",
+			oauthError:   "access_denied",
+			expectedCode: CodeAuthFailure,
+			expectHint:   true,
+			hintContains: "Re-authenticate",
+		},
+		{
+			name:         "unknown_error",
+			oauthError:   "unknown_error",
+			expectedCode: CodeAuthFailure,
+			expectHint:   true,
+			hintContains: "Re-authenticate",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			retrieveErr := &oauth2.RetrieveError{
+				Response: &http.Response{
+					StatusCode: http.StatusBadRequest,
+					Header:     http.Header{"Date": []string{time.Now().UTC().Format(http.TimeFormat)}},
+				},
+				Body: []byte(`{"error":"` + tt.oauthError + `","error_description":"test description"}`),
+			}
+
+			apiErr := ClassifyAuthError(retrieveErr)
+			if apiErr == nil {
+				t.Fatalf("expected APIError")
+			}
+			if apiErr.Code != tt.expectedCode {
+				t.Errorf("expected code %s, got %s", tt.expectedCode, apiErr.Code)
+			}
+			if tt.expectHint && apiErr.Hint == "" {
+				t.Errorf("expected hint to be set")
+			}
+			if tt.hintContains != "" && !contains(apiErr.Hint, tt.hintContains) {
+				t.Errorf("expected hint to contain %q, got %q", tt.hintContains, apiErr.Hint)
+			}
+
+			// Check details
+			if apiErr.Details == nil {
+				t.Error("expected details to be set")
+			}
+			details, ok := apiErr.Details.(map[string]interface{})
+			if !ok {
+				t.Fatal("expected details to be map")
+			}
+			if details["oauthError"] != tt.oauthError {
+				t.Errorf("expected oauthError %q in details, got %v", tt.oauthError, details["oauthError"])
+			}
+		})
+	}
+}
+
+func TestClockSkewDetection(t *testing.T) {
+	tests := []struct {
+		name           string
+		timeOffset     time.Duration
+		expectSkewHint bool
+	}{
+		{
+			name:           "no_skew",
+			timeOffset:     0,
+			expectSkewHint: false,
+		},
+		{
+			name:           "small_skew_4min",
+			timeOffset:     4 * time.Minute,
+			expectSkewHint: false,
+		},
+		{
+			name:           "large_skew_6min",
+			timeOffset:     6 * time.Minute,
+			expectSkewHint: true,
+		},
+		{
+			name:           "very_large_skew_1hour",
+			timeOffset:     1 * time.Hour,
+			expectSkewHint: true,
+		},
+		{
+			name:           "negative_skew_10min",
+			timeOffset:     -10 * time.Minute,
+			expectSkewHint: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			skewedTime := time.Now().Add(tt.timeOffset)
+			retrieveErr := &oauth2.RetrieveError{
+				Response: &http.Response{
+					StatusCode: http.StatusBadRequest,
+					Header:     http.Header{"Date": []string{skewedTime.UTC().Format(http.TimeFormat)}},
+				},
+				Body: []byte(`{"error":"invalid_grant"}`),
+			}
+
+			apiErr := ClassifyAuthError(retrieveErr)
+			if apiErr == nil {
+				t.Fatalf("expected APIError")
+			}
+
+			hasClockSkewHint := contains(apiErr.Hint, "clock")
+			if hasClockSkewHint != tt.expectSkewHint {
+				t.Errorf("expected clock skew hint: %v, got: %v (hint: %q)", tt.expectSkewHint, hasClockSkewHint, apiErr.Hint)
+			}
+
+			if tt.expectSkewHint {
+				details, ok := apiErr.Details.(map[string]interface{})
+				if !ok || details["clockSkewSeconds"] == nil {
+					t.Error("expected clockSkewSeconds in details when skew detected")
+				}
+			}
+		})
+	}
+}
+
+func TestClockSkewNoDateHeader(t *testing.T) {
+	retrieveErr := &oauth2.RetrieveError{
+		Response: &http.Response{
+			StatusCode: http.StatusBadRequest,
+			Header:     http.Header{},
+		},
+		Body: []byte(`{"error":"invalid_grant"}`),
+	}
+
+	apiErr := ClassifyAuthError(retrieveErr)
+	if apiErr == nil {
+		t.Fatalf("expected APIError")
+	}
+
+	if contains(apiErr.Hint, "clock") {
+		t.Error("should not have clock skew hint without Date header")
+	}
+}
+
+func TestGoogleAPIErrorForbidden(t *testing.T) {
+	gapiErr := &googleapi.Error{
+		Code:    http.StatusForbidden,
+		Message: "forbidden",
+		Header:  http.Header{"Date": []string{time.Now().UTC().Format(http.TimeFormat)}},
+	}
+
+	apiErr := ClassifyAuthError(gapiErr)
+	if apiErr == nil {
+		t.Fatalf("expected APIError")
+	}
+	if apiErr.Code != CodePermissionDenied {
+		t.Errorf("expected permission denied, got %s", apiErr.Code)
+	}
+	if !contains(apiErr.Hint, "permissions") {
+		t.Errorf("expected hint about permissions, got %q", apiErr.Hint)
+	}
+}
+
+func TestGoogleAPIErrorWithClockSkew(t *testing.T) {
+	skewedTime := time.Now().Add(-10 * time.Minute)
+	gapiErr := &googleapi.Error{
+		Code:    http.StatusUnauthorized,
+		Message: "unauthorized",
+		Header:  http.Header{"Date": []string{skewedTime.UTC().Format(http.TimeFormat)}},
+	}
+
+	apiErr := ClassifyAuthError(gapiErr)
+	if apiErr == nil {
+		t.Fatalf("expected APIError")
+	}
+	if !contains(apiErr.Hint, "clock") {
+		t.Error("expected clock skew hint for Google API error with skew")
+	}
+}
+
+func TestAppendHint(t *testing.T) {
+	tests := []struct {
+		name     string
+		current  string
+		extra    string
+		expected string
+	}{
+		{
+			name:     "empty_current",
+			current:  "",
+			extra:    "new hint",
+			expected: "new hint",
+		},
+		{
+			name:     "append_to_existing",
+			current:  "existing hint",
+			extra:    "additional hint",
+			expected: "existing hint; additional hint",
+		},
+		{
+			name:     "duplicate_hint",
+			current:  "check credentials",
+			extra:    "check credentials",
+			expected: "check credentials",
+		},
+		{
+			name:     "contains_check",
+			current:  "Re-authenticate and check credentials",
+			extra:    "check credentials",
+			expected: "Re-authenticate and check credentials",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := appendHint(tt.current, tt.extra)
+			if result != tt.expected {
+				t.Errorf("expected %q, got %q", tt.expected, result)
+			}
+		})
+	}
+}
+
+func TestOAuthErrorResponseParsing(t *testing.T) {
+	retrieveErr := &oauth2.RetrieveError{
+		Response: &http.Response{
+			StatusCode: http.StatusBadRequest,
+			Header:     http.Header{},
+		},
+		Body: []byte(`{"error":"invalid_grant","error_description":"Token has been expired or revoked.","error_uri":"https://example.com/error"}`),
+	}
+
+	apiErr := ClassifyAuthError(retrieveErr)
+	if apiErr == nil {
+		t.Fatalf("expected APIError")
+	}
+
+	details, ok := apiErr.Details.(map[string]interface{})
+	if !ok {
+		t.Fatal("expected details to be map")
+	}
+
+	if details["oauthError"] != "invalid_grant" {
+		t.Errorf("expected oauthError in details")
+	}
+	if details["oauthErrorDescription"] != "Token has been expired or revoked." {
+		t.Errorf("expected oauthErrorDescription in details")
+	}
+}
+
+func TestOAuthErrorInvalidJSON(t *testing.T) {
+	retrieveErr := &oauth2.RetrieveError{
+		Response: &http.Response{
+			StatusCode: http.StatusBadRequest,
+			Header:     http.Header{},
+		},
+		Body: []byte(`not valid json`),
+	}
+
+	apiErr := ClassifyAuthError(retrieveErr)
+	if apiErr == nil {
+		t.Fatalf("expected APIError even with invalid JSON")
+	}
+	if apiErr.Code != CodeAuthFailure {
+		t.Errorf("expected auth failure, got %s", apiErr.Code)
+	}
+}
+
+func TestGenericError(t *testing.T) {
+	err := &testError{msg: "generic error"}
+	apiErr := ClassifyAuthError(err)
+	if apiErr == nil {
+		t.Fatalf("expected APIError")
+	}
+	if apiErr.Code != CodeAuthFailure {
+		t.Errorf("expected auth failure for generic error, got %s", apiErr.Code)
+	}
+	if apiErr.Message != "generic error" {
+		t.Errorf("expected message to be preserved, got %q", apiErr.Message)
+	}
+}
+
+// Helper functions
+
+func contains(s, substr string) bool {
+	return s != "" && substr != "" && (s == substr || len(s) >= len(substr) && containsSubstring(s, substr))
+}
+
+func containsSubstring(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
+type testError struct {
+	msg string
+}
+
+func (e *testError) Error() string {
+	return e.msg
+}

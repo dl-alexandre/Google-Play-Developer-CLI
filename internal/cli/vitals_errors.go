@@ -12,7 +12,7 @@ import (
 	"github.com/dl-alexandre/gpd/internal/output"
 )
 
-func (c *CLI) vitalsAnomaliesList(ctx context.Context, metric, timePeriod, minSeverity string, pageSize int64, pageToken string) error {
+func (c *CLI) vitalsAnomaliesList(ctx context.Context, metric, timePeriod, minSeverity string, pageSize int64, pageToken string, all bool) error {
 	if err := c.requirePackage(); err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
@@ -36,37 +36,50 @@ func (c *CLI) vitalsAnomaliesList(ctx context.Context, metric, timePeriod, minSe
 	if pageToken != "" {
 		req = req.PageToken(pageToken)
 	}
-	resp, err := req.Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-	anomalies := resp.Anomalies
-	if metric != "" {
-		filtered := make([]*playdeveloperreporting.GooglePlayDeveloperReportingV1beta1Anomaly, 0, len(anomalies))
-		for _, anomaly := range anomalies {
-			if anomaly == nil {
-				continue
-			}
-			if anomaly.Metric != nil && strings.EqualFold(anomaly.Metric.Metric, metric) {
-				filtered = append(filtered, anomaly)
-				continue
-			}
-			if strings.Contains(strings.ToLower(anomaly.MetricSet), strings.ToLower(metric)) {
-				filtered = append(filtered, anomaly)
-			}
+
+	startToken := pageToken
+	nextToken := ""
+	var allAnomalies []*playdeveloperreporting.GooglePlayDeveloperReportingV1beta1Anomaly
+	for {
+		resp, err := req.Context(ctx).Do()
+		if err != nil {
+			return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
 		}
-		anomalies = filtered
+		anomalies := resp.Anomalies
+		if metric != "" {
+			filtered := make([]*playdeveloperreporting.GooglePlayDeveloperReportingV1beta1Anomaly, 0, len(anomalies))
+			for _, anomaly := range anomalies {
+				if anomaly == nil {
+					continue
+				}
+				if anomaly.Metric != nil && strings.EqualFold(anomaly.Metric.Metric, metric) {
+					filtered = append(filtered, anomaly)
+					continue
+				}
+				if strings.Contains(strings.ToLower(anomaly.MetricSet), strings.ToLower(metric)) {
+					filtered = append(filtered, anomaly)
+				}
+			}
+			anomalies = filtered
+		}
+		allAnomalies = append(allAnomalies, anomalies...)
+		nextToken = resp.NextPageToken
+		if nextToken == "" || !all {
+			break
+		}
+		req = req.PageToken(nextToken)
 	}
 	result := output.NewResult(map[string]interface{}{
-		"anomalies":     anomalies,
+		"anomalies":     allAnomalies,
 		"metric":        metric,
 		"timePeriod":    timePeriod,
-		"nextPageToken": resp.NextPageToken,
+		"nextPageToken": nextToken,
 		"package":       c.packageName,
 	})
 	if minSeverity != "" {
 		result.WithWarnings("min-severity filtering is not supported by the API")
 	}
+	result.WithPagination(startToken, nextToken)
 	return c.Output(result.WithServices("playdeveloperreporting"))
 }
 
@@ -86,7 +99,7 @@ func buildAnomalyFilter(timePeriod string) string {
 	}
 }
 
-func (c *CLI) vitalsErrorsIssuesSearch(ctx context.Context, query, interval string, pageSize int64, pageToken string) error {
+func (c *CLI) vitalsErrorsIssuesSearch(ctx context.Context, query, interval string, pageSize int64, pageToken string, all bool) error {
 	if err := c.requirePackage(); err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
@@ -136,24 +149,36 @@ func (c *CLI) vitalsErrorsIssuesSearch(ctx context.Context, query, interval stri
 		searchCall = searchCall.PageToken(pageToken)
 	}
 
-	resp, err := searchCall.Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
-			fmt.Sprintf("failed to search error issues: %v", err)))
+	startToken := pageToken
+	nextToken := ""
+	var allIssues []*playdeveloperreporting.GooglePlayDeveloperReportingV1beta1ErrorIssue
+	for {
+		resp, err := searchCall.Context(ctx).Do()
+		if err != nil {
+			return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
+				fmt.Sprintf("failed to search error issues: %v", err)))
+		}
+		allIssues = append(allIssues, resp.ErrorIssues...)
+		nextToken = resp.NextPageToken
+		if nextToken == "" || !all {
+			break
+		}
+		searchCall = searchCall.PageToken(nextToken)
 	}
 
 	result := output.NewResult(map[string]interface{}{
 		"query":         query,
 		"interval":      interval,
 		"package":       c.packageName,
-		"issues":        resp.ErrorIssues,
-		"rowCount":      len(resp.ErrorIssues),
-		"nextPageToken": resp.NextPageToken,
+		"issues":        allIssues,
+		"rowCount":      len(allIssues),
+		"nextPageToken": nextToken,
 	})
+	result.WithPagination(startToken, nextToken)
 	return c.Output(result.WithServices("playdeveloperreporting"))
 }
 
-func (c *CLI) vitalsErrorsReportsSearch(ctx context.Context, query, interval string, pageSize int64, pageToken string, formatReport bool) error {
+func (c *CLI) vitalsErrorsReportsSearch(ctx context.Context, query, interval string, pageSize int64, pageToken string, all, formatReport bool) error {
 	if err := c.requirePackage(); err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
@@ -203,28 +228,39 @@ func (c *CLI) vitalsErrorsReportsSearch(ctx context.Context, query, interval str
 		searchCall = searchCall.PageToken(pageToken)
 	}
 
-	resp, err := searchCall.Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
-			fmt.Sprintf("failed to search error reports: %v", err)))
-	}
-
-	if formatReport {
-		for _, report := range resp.ErrorReports {
-			if report != nil && report.ReportText != "" {
-				report.ReportText = formatReportText(report.ReportText)
+	startToken := pageToken
+	nextToken := ""
+	var allReports []*playdeveloperreporting.GooglePlayDeveloperReportingV1beta1ErrorReport
+	for {
+		resp, err := searchCall.Context(ctx).Do()
+		if err != nil {
+			return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
+				fmt.Sprintf("failed to search error reports: %v", err)))
+		}
+		if formatReport {
+			for _, report := range resp.ErrorReports {
+				if report != nil && report.ReportText != "" {
+					report.ReportText = formatReportText(report.ReportText)
+				}
 			}
 		}
+		allReports = append(allReports, resp.ErrorReports...)
+		nextToken = resp.NextPageToken
+		if nextToken == "" || !all {
+			break
+		}
+		searchCall = searchCall.PageToken(nextToken)
 	}
 
 	result := output.NewResult(map[string]interface{}{
 		"query":         query,
 		"interval":      interval,
 		"package":       c.packageName,
-		"reports":       resp.ErrorReports,
-		"rowCount":      len(resp.ErrorReports),
-		"nextPageToken": resp.NextPageToken,
+		"reports":       allReports,
+		"rowCount":      len(allReports),
+		"nextPageToken": nextToken,
 	})
+	result.WithPagination(startToken, nextToken)
 	return c.Output(result.WithServices("playdeveloperreporting"))
 }
 
@@ -257,7 +293,7 @@ func (c *CLI) vitalsErrorsCountsGet(ctx context.Context) error {
 	return c.Output(result.WithServices("playdeveloperreporting"))
 }
 
-func (c *CLI) vitalsErrorsCountsQuery(ctx context.Context, startDate, endDate string, dimensions []string, pageSize int64, pageToken string) error {
+func (c *CLI) vitalsErrorsCountsQuery(ctx context.Context, startDate, endDate string, dimensions []string, pageSize int64, pageToken string, all bool) error {
 	if err := c.requirePackage(); err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
@@ -298,26 +334,34 @@ func (c *CLI) vitalsErrorsCountsQuery(ctx context.Context, startDate, endDate st
 		req.PageToken = pageToken
 	}
 
-	resp, err := reporting.Vitals.Errors.Counts.Query(appName, req).Context(ctx).Do()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
-			fmt.Sprintf("failed to query error counts: %v", err)))
-	}
-
+	startToken := pageToken
+	nextToken := ""
 	var rows []map[string]interface{}
-	for _, row := range resp.Rows {
-		rowData := map[string]interface{}{
-			"startTime": row.StartTime,
+	for {
+		resp, err := reporting.Vitals.Errors.Counts.Query(appName, req).Context(ctx).Do()
+		if err != nil {
+			return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
+				fmt.Sprintf("failed to query error counts: %v", err)))
 		}
-		for _, m := range row.Metrics {
-			if m.DecimalValue != nil {
-				rowData[m.Metric] = m.DecimalValue.Value
+		for _, row := range resp.Rows {
+			rowData := map[string]interface{}{
+				"startTime": row.StartTime,
 			}
+			for _, m := range row.Metrics {
+				if m.DecimalValue != nil {
+					rowData[m.Metric] = m.DecimalValue.Value
+				}
+			}
+			for _, d := range row.Dimensions {
+				rowData[d.Dimension] = d.StringValue
+			}
+			rows = append(rows, rowData)
 		}
-		for _, d := range row.Dimensions {
-			rowData[d.Dimension] = d.StringValue
+		nextToken = resp.NextPageToken
+		if nextToken == "" || !all {
+			break
 		}
-		rows = append(rows, rowData)
+		req.PageToken = nextToken
 	}
 
 	result := output.NewResult(map[string]interface{}{
@@ -327,7 +371,8 @@ func (c *CLI) vitalsErrorsCountsQuery(ctx context.Context, startDate, endDate st
 		"package":       c.packageName,
 		"rows":          rows,
 		"rowCount":      len(rows),
-		"nextPageToken": resp.NextPageToken,
+		"nextPageToken": nextToken,
 	})
+	result.WithPagination(startToken, nextToken)
 	return c.Output(result.WithServices("playdeveloperreporting"))
 }

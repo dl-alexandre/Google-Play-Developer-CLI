@@ -219,7 +219,7 @@ func (c *CLI) addApplicationsCommands(parent *cobra.Command) {
 	}
 	listHiddenCmd.Flags().Int64Var(&pageSize, "page-size", 100, "Results per page")
 	listHiddenCmd.Flags().StringVar(&pageToken, "page-token", "", "Pagination token")
-	listHiddenCmd.Flags().BoolVar(&all, "all", false, "Fetch all pages")
+	addPaginationFlags(listHiddenCmd, &all)
 
 	applicationsCmd.AddCommand(listHiddenCmd)
 	parent.AddCommand(applicationsCmd)
@@ -605,6 +605,8 @@ func (c *CLI) gamesApplicationsListHidden(ctx context.Context, applicationID str
 		req = req.PageToken(pageToken)
 	}
 
+	startToken := pageToken
+	nextToken := ""
 	var allPlayers []interface{}
 	for {
 		resp, err := req.Context(ctx).Do()
@@ -627,17 +629,15 @@ func (c *CLI) gamesApplicationsListHidden(ctx context.Context, applicationID str
 			allPlayers = append(allPlayers, player)
 		}
 
-		if resp.NextPageToken == "" || !all {
-			pageToken = resp.NextPageToken
+		nextToken = resp.NextPageToken
+		if nextToken == "" || !all {
 			break
 		}
-		req = req.PageToken(resp.NextPageToken)
+		req = req.PageToken(nextToken)
 	}
 
 	result := output.NewResult(allPlayers)
-	if pageToken != "" {
-		result.WithPagination("", pageToken)
-	}
+	result.WithPagination(startToken, nextToken)
 	return c.Output(result.WithServices("gamesmanagement"))
 }
 

@@ -72,6 +72,8 @@ func (c *CLI) monetizationOffersList(ctx context.Context, subscriptionID, basePl
 	if pageToken != "" {
 		req = req.PageToken(pageToken)
 	}
+	startToken := pageToken
+	nextToken := ""
 	var offers []interface{}
 	for {
 		resp, err := req.Context(ctx).Do()
@@ -81,16 +83,14 @@ func (c *CLI) monetizationOffersList(ctx context.Context, subscriptionID, basePl
 		for _, offer := range resp.SubscriptionOffers {
 			offers = append(offers, offer)
 		}
-		if resp.NextPageToken == "" || !all {
-			pageToken = resp.NextPageToken
+		nextToken = resp.NextPageToken
+		if nextToken == "" || !all {
 			break
 		}
-		req = req.PageToken(resp.NextPageToken)
+		req = req.PageToken(nextToken)
 	}
 	result := output.NewResult(offers)
-	if pageToken != "" {
-		result.WithPagination("", pageToken)
-	}
+	result.WithPagination(startToken, nextToken)
 	return c.Output(result.WithServices("androidpublisher"))
 }
 

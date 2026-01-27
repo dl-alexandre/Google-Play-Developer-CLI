@@ -49,7 +49,7 @@ func (c *CLI) addMonetizationProductsCommands(monetizationCmd *cobra.Command) {
 	}
 	productsListCmd.Flags().Int64Var(&pageSize, "page-size", 100, "Results per page")
 	productsListCmd.Flags().StringVar(&pageToken, "page-token", "", "Pagination token")
-	productsListCmd.Flags().BoolVar(&all, "all", false, "Fetch all pages")
+	addPaginationFlags(productsListCmd, &all)
 
 	productsGetCmd := &cobra.Command{
 		Use:   "get [product-id]",
@@ -126,7 +126,7 @@ func (c *CLI) addMonetizationSubscriptionsCommands(monetizationCmd *cobra.Comman
 	}
 	subscriptionsListCmd.Flags().Int64Var(&pageSize, "page-size", 100, "Results per page")
 	subscriptionsListCmd.Flags().StringVar(&pageToken, "page-token", "", "Pagination token")
-	subscriptionsListCmd.Flags().BoolVar(&all, "all", false, "Fetch all pages")
+	addPaginationFlags(subscriptionsListCmd, &all)
 	subscriptionsListCmd.Flags().BoolVar(&showArchived, "show-archived", false, "Include archived subscriptions")
 
 	subscriptionsGetCmd := &cobra.Command{
@@ -351,7 +351,7 @@ func (c *CLI) addMonetizationOffersCommands(monetizationCmd *cobra.Command) {
 	}
 	offersListCmd.Flags().Int64Var(&pageSize, "page-size", 100, "Results per page")
 	offersListCmd.Flags().StringVar(&pageToken, "page-token", "", "Pagination token")
-	offersListCmd.Flags().BoolVar(&all, "all", false, "Fetch all pages")
+	addPaginationFlags(offersListCmd, &all)
 
 	offersDeleteCmd := &cobra.Command{
 		Use:   "delete [subscription-id] [plan-id] [offer-id]",
@@ -448,7 +448,7 @@ func (c *CLI) addMonetizationOnetimeProductsCommands(monetizationCmd *cobra.Comm
 	}
 	onetimeProductsListCmd.Flags().Int64Var(&pageSize, "page-size", 100, "Results per page")
 	onetimeProductsListCmd.Flags().StringVar(&pageToken, "page-token", "", "Pagination token")
-	onetimeProductsListCmd.Flags().BoolVar(&all, "all", false, "Fetch all pages")
+	addPaginationFlags(onetimeProductsListCmd, &all)
 
 	onetimeProductsGetCmd := &cobra.Command{
 		Use:   "get [product-id]",

@@ -9,8 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dl-alexandre/gpd/internal/config"
 	"golang.org/x/oauth2"
+
+	"github.com/dl-alexandre/gpd/internal/config"
 )
 
 const (
@@ -69,13 +70,13 @@ func tokenStorageKey(profile, hash string) string {
 	return profile + tokenKeySeparator + hash
 }
 
-func clientIDHash(clientID string) (string, string) {
+func clientIDHash(clientID string) (hash, last4 string) {
 	if clientID == "" {
 		return "", ""
 	}
-	hash := sha256.Sum256([]byte(clientID))
-	hexHash := hex.EncodeToString(hash[:])
-	last4 := clientID
+	hashBytes := sha256.Sum256([]byte(clientID))
+	hexHash := hex.EncodeToString(hashBytes[:])
+	last4 = clientID
 	if len(clientID) > 4 {
 		last4 = clientID[len(clientID)-4:]
 	}

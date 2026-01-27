@@ -83,6 +83,18 @@ func TestResultWithPagination(t *testing.T) {
 	if result.Meta.NextPageToken != "token2" {
 		t.Errorf("NextPageToken = %q, want 'token2'", result.Meta.NextPageToken)
 	}
+	if result.Meta.HasMorePages == nil || !*result.Meta.HasMorePages {
+		t.Errorf("HasMorePages = %v, want true", result.Meta.HasMorePages)
+	}
+}
+
+func TestResultWithPaginationNoNext(t *testing.T) {
+	result := NewResult(nil)
+	result.WithPagination("token1", "")
+
+	if result.Meta.HasMorePages == nil || *result.Meta.HasMorePages {
+		t.Errorf("HasMorePages = %v, want false", result.Meta.HasMorePages)
+	}
 }
 
 func TestOutputManagerJSON(t *testing.T) {
@@ -246,5 +258,344 @@ func TestErrorEnvelopeStructure(t *testing.T) {
 	}
 	if envelope.Error.Hint != "check your parameters" {
 		t.Errorf("error.hint = %v, want 'check your parameters'", envelope.Error.Hint)
+	}
+}
+
+func TestTableFormat(t *testing.T) {
+	tests := []struct {
+		name     string
+		data     interface{}
+		expected []string // Strings that should appear in output
+	}{
+		{
+			name: "slice_of_maps",
+			data: []interface{}{
+				map[string]interface{}{"name": "app1", "version": 1},
+				map[string]interface{}{"name": "app2", "version": 2},
+			},
+			expected: []string{"name", "version", "app1", "app2"},
+		},
+		{
+			name:     "single_map",
+			data:     map[string]interface{}{"key1": "value1", "key2": "value2"},
+			expected: []string{"key1", "value1", "key2", "value2"},
+		},
+		{
+			name:     "empty_slice",
+			data:     []interface{}{},
+			expected: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			mgr := NewManager(&buf).SetFormat(FormatTable)
+
+			result := NewResult(tt.data)
+			if err := mgr.Write(result); err != nil {
+				t.Fatalf("Write() error = %v", err)
+			}
+
+			output := buf.String()
+			for _, expected := range tt.expected {
+				if !strings.Contains(output, expected) {
+					t.Errorf("Expected output to contain %q, got:\n%s", expected, output)
+				}
+			}
+		})
+	}
+}
+
+func TestTableFormatError(t *testing.T) {
+	var buf bytes.Buffer
+	mgr := NewManager(&buf).SetFormat(FormatTable)
+
+	err := errors.NewAPIError(errors.CodeValidationError, "test error")
+	result := NewErrorResult(err)
+
+	if err := mgr.Write(result); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	// Errors should fall back to JSON even in table mode
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(buf.Bytes(), &parsed); err != nil {
+		t.Fatalf("Error output should be valid JSON: %v", err)
+	}
+}
+
+func TestMarkdownFormat(t *testing.T) {
+	tests := []struct {
+		name     string
+		data     interface{}
+		expected []string
+	}{
+		{
+			name: "slice_of_maps",
+			data: []interface{}{
+				map[string]interface{}{"name": "app1", "version": 1},
+				map[string]interface{}{"name": "app2", "version": 2},
+			},
+			expected: []string{"|", "name", "version", "---", "app1", "app2"},
+		},
+		{
+			name:     "single_map",
+			data:     map[string]interface{}{"key": "value"},
+			expected: []string{"- **key:**", "value"},
+		},
+		{
+			name:     "empty_slice",
+			data:     []interface{}{},
+			expected: []string{"*No data*"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			mgr := NewManager(&buf).SetFormat(FormatMarkdown)
+
+			result := NewResult(tt.data)
+			if err := mgr.Write(result); err != nil {
+				t.Fatalf("Write() error = %v", err)
+			}
+
+			output := buf.String()
+			for _, expected := range tt.expected {
+				if !strings.Contains(output, expected) {
+					t.Errorf("Expected output to contain %q, got:\n%s", expected, output)
+				}
+			}
+		})
+	}
+}
+
+func TestMarkdownFormatError(t *testing.T) {
+	var buf bytes.Buffer
+	mgr := NewManager(&buf).SetFormat(FormatMarkdown)
+
+	err := errors.NewAPIError(errors.CodeValidationError, "test error").
+		WithHint("test hint")
+	result := NewErrorResult(err)
+
+	if err := mgr.Write(result); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "## Error") {
+		t.Error("Markdown error output should contain '## Error' header")
+	}
+	if !strings.Contains(output, "test error") {
+		t.Error("Markdown error output should contain error message")
+	}
+	if !strings.Contains(output, "test hint") {
+		t.Error("Markdown error output should contain hint")
+	}
+}
+
+func TestCSVFormat(t *testing.T) {
+	var buf bytes.Buffer
+	mgr := NewManager(&buf).SetFormat(FormatCSV)
+
+	data := []interface{}{
+		map[string]interface{}{"name": "app1", "count": 10},
+		map[string]interface{}{"name": "app2", "count": 20},
+	}
+	result := NewResult(data)
+
+	if err := mgr.Write(result); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	output := buf.String()
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("Expected at least 2 lines (header + data), got %d", len(lines))
+	}
+
+	// Check that it's comma-separated
+	if !strings.Contains(lines[0], ",") {
+		t.Error("CSV header should contain commas")
+	}
+}
+
+func TestCSVFormatWithSpecialCharacters(t *testing.T) {
+	var buf bytes.Buffer
+	mgr := NewManager(&buf).SetFormat(FormatCSV)
+
+	data := []interface{}{
+		map[string]interface{}{"name": "app, with comma", "desc": "contains \"quotes\""},
+	}
+	result := NewResult(data)
+
+	if err := mgr.Write(result); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	output := buf.String()
+	// Check that special characters are properly escaped
+	if !strings.Contains(output, "\"") {
+		t.Error("CSV should escape fields with special characters")
+	}
+}
+
+func TestCSVFormatEmpty(t *testing.T) {
+	var buf bytes.Buffer
+	mgr := NewManager(&buf).SetFormat(FormatCSV)
+
+	result := NewResult([]interface{}{})
+	if err := mgr.Write(result); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	output := buf.String()
+	if output != "" {
+		t.Error("CSV output for empty data should be empty")
+	}
+}
+
+func TestResultWithWarnings(t *testing.T) {
+	result := NewResult(nil)
+	result.WithWarnings("warning 1", "warning 2")
+
+	if len(result.Meta.Warnings) != 2 {
+		t.Errorf("Expected 2 warnings, got %d", len(result.Meta.Warnings))
+	}
+	if result.Meta.Warnings[0] != "warning 1" {
+		t.Errorf("First warning = %q, want 'warning 1'", result.Meta.Warnings[0])
+	}
+}
+
+func TestResultWithPartial(t *testing.T) {
+	result := NewResult(nil)
+	result.WithPartial(100, 50, 200)
+
+	if !result.Meta.Partial {
+		t.Error("Partial should be true")
+	}
+	if result.Meta.ScannedCount != 100 {
+		t.Errorf("ScannedCount = %d, want 100", result.Meta.ScannedCount)
+	}
+	if result.Meta.FilteredCount != 50 {
+		t.Errorf("FilteredCount = %d, want 50", result.Meta.FilteredCount)
+	}
+	if result.Meta.TotalAvailable != 200 {
+		t.Errorf("TotalAvailable = %d, want 200", result.Meta.TotalAvailable)
+	}
+}
+
+func TestResultWithRetries(t *testing.T) {
+	result := NewResult(nil)
+	result.WithRetries(3)
+
+	if result.Meta.Retries != 3 {
+		t.Errorf("Retries = %d, want 3", result.Meta.Retries)
+	}
+}
+
+func TestResultWithRequestID(t *testing.T) {
+	result := NewResult(nil)
+	result.WithRequestID("req-12345")
+
+	if result.Meta.RequestID != "req-12345" {
+		t.Errorf("RequestID = %q, want 'req-12345'", result.Meta.RequestID)
+	}
+}
+
+func TestNewEmptyResult(t *testing.T) {
+	result := NewEmptyResult()
+
+	if result.Data != nil {
+		t.Error("Data should be nil for empty result")
+	}
+	if result.Error != nil {
+		t.Error("Error should be nil for empty result")
+	}
+	if result.ExitCode != errors.ExitSuccess {
+		t.Errorf("ExitCode = %d, want %d", result.ExitCode, errors.ExitSuccess)
+	}
+}
+
+func TestResultChaining(t *testing.T) {
+	// Test that result methods return the result for chaining
+	result := NewResult(map[string]interface{}{"test": true}).
+		WithDuration(100*time.Millisecond).
+		WithServices("service1", "service2").
+		WithWarnings("warning1").
+		WithRetries(2)
+
+	if result.Meta.DurationMs != 100 {
+		t.Error("Duration not set correctly in chain")
+	}
+	if len(result.Meta.Services) != 2 {
+		t.Error("Services not set correctly in chain")
+	}
+	if len(result.Meta.Warnings) != 1 {
+		t.Error("Warnings not set correctly in chain")
+	}
+	if result.Meta.Retries != 2 {
+		t.Error("Retries not set correctly in chain")
+	}
+}
+
+func TestSetFormatAndPretty(t *testing.T) {
+	var buf bytes.Buffer
+	mgr := NewManager(&buf).SetFormat(FormatJSON).SetPretty(true)
+
+	result := NewResult(map[string]interface{}{"test": true})
+	if err := mgr.Write(result); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	output := buf.String()
+	// Should be pretty JSON
+	if !strings.Contains(output, "\n") {
+		t.Error("Should have newlines for pretty JSON")
+	}
+}
+
+func TestTableFormatNilData(t *testing.T) {
+	var buf bytes.Buffer
+	mgr := NewManager(&buf).SetFormat(FormatTable)
+
+	result := NewResult(nil)
+	if err := mgr.Write(result); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	// Should not panic - empty output is acceptable for nil data
+	_ = buf.String()
+}
+
+func TestMarkdownFormatNilData(t *testing.T) {
+	var buf bytes.Buffer
+	mgr := NewManager(&buf).SetFormat(FormatMarkdown)
+
+	result := NewResult(nil)
+	if err := mgr.Write(result); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	// Should not panic - empty output is acceptable for nil data
+	_ = buf.String()
+}
+
+func TestCSVFormatError(t *testing.T) {
+	var buf bytes.Buffer
+	mgr := NewManager(&buf).SetFormat(FormatCSV)
+
+	err := errors.NewAPIError(errors.CodeValidationError, "test error")
+	result := NewErrorResult(err)
+
+	if err := mgr.Write(result); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	// Errors should fall back to JSON even in CSV mode
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(buf.Bytes(), &parsed); err != nil {
+		t.Fatalf("Error output should be valid JSON: %v", err)
 	}
 }

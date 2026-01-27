@@ -19,7 +19,7 @@ type SecureStorage struct {
 
 // New creates a new SecureStorage instance.
 func New() *SecureStorage {
-	ring, err := keyring.Open(keyring.Config{
+	ring, err := openKeyring(keyring.Config{
 		ServiceName: serviceName,
 		// macOS specific
 		KeychainName:                   "gpd",
@@ -39,6 +39,15 @@ func New() *SecureStorage {
 		return &SecureStorage{available: false}
 	}
 
+	return NewWithKeyring(ring)
+}
+
+var openKeyring = keyring.Open
+
+func NewWithKeyring(ring keyring.Keyring) *SecureStorage {
+	if ring == nil {
+		return &SecureStorage{available: false}
+	}
 	return &SecureStorage{
 		ring:      ring,
 		available: true,

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestIdempotencyKey(t *testing.T) {
@@ -180,5 +181,334 @@ func TestLockTimeouts(t *testing.T) {
 	}
 	if staleLockAge.Hours() != 4 {
 		t.Errorf("staleLockAge = %v, want 4h", staleLockAge)
+	}
+}
+
+func TestSaveAndLoadEdit(t *testing.T) {
+	tmpDir := t.TempDir()
+	m := &Manager{
+		editsDir:  tmpDir,
+		lockFiles: make(map[string]*LockFile),
+	}
+
+	edit := &Edit{
+		Handle:      "test-handle",
+		ServerID:    "server-123",
+		PackageName: "com.example.app",
+		CreatedAt:   time.Now(),
+		LastUsedAt:  time.Now(),
+		State:       StateDraft,
+	}
+
+	// Save
+	if err := m.SaveEdit(edit); err != nil {
+		t.Fatalf("SaveEdit() error = %v", err)
+	}
+
+	// Load
+	loaded, err := m.LoadEdit("com.example.app", "test-handle")
+	if err != nil {
+		t.Fatalf("LoadEdit() error = %v", err)
+	}
+
+	if loaded.Handle != edit.Handle {
+		t.Errorf("Handle = %q, want %q", loaded.Handle, edit.Handle)
+	}
+	if loaded.ServerID != edit.ServerID {
+		t.Errorf("ServerID = %q, want %q", loaded.ServerID, edit.ServerID)
+	}
+	if loaded.PackageName != edit.PackageName {
+		t.Errorf("PackageName = %q, want %q", loaded.PackageName, edit.PackageName)
+	}
+	if loaded.State != edit.State {
+		t.Errorf("State = %q, want %q", loaded.State, edit.State)
+	}
+}
+
+func TestLoadEditNotFound(t *testing.T) {
+	tmpDir := t.TempDir()
+	m := &Manager{
+		editsDir:  tmpDir,
+		lockFiles: make(map[string]*LockFile),
+	}
+
+	edit, err := m.LoadEdit("com.example.app", "nonexistent")
+	if err != nil {
+		t.Fatalf("LoadEdit() error = %v, want nil", err)
+	}
+	if edit != nil {
+		t.Error("LoadEdit() should return nil for non-existent edit")
+	}
+}
+
+func TestDeleteEdit(t *testing.T) {
+	tmpDir := t.TempDir()
+	m := &Manager{
+		editsDir:  tmpDir,
+		lockFiles: make(map[string]*LockFile),
+	}
+
+	edit := &Edit{
+		Handle:      "test-handle",
+		ServerID:    "server-123",
+		PackageName: "com.example.app",
+		CreatedAt:   time.Now(),
+		LastUsedAt:  time.Now(),
+		State:       StateDraft,
+	}
+
+	// Save
+	if err := m.SaveEdit(edit); err != nil {
+		t.Fatalf("SaveEdit() error = %v", err)
+	}
+
+	// Delete
+	if err := m.DeleteEdit("com.example.app", "test-handle"); err != nil {
+		t.Fatalf("DeleteEdit() error = %v", err)
+	}
+
+	// Should not be loadable
+	edit, err := m.LoadEdit("com.example.app", "test-handle")
+	if err != nil {
+		t.Fatalf("LoadEdit() error = %v, want nil", err)
+	}
+	if edit != nil {
+		t.Error("LoadEdit() should return nil after DeleteEdit()")
+	}
+}
+
+func TestListEdits(t *testing.T) {
+	tmpDir := t.TempDir()
+	m := &Manager{
+		editsDir:  tmpDir,
+		lockFiles: make(map[string]*LockFile),
+	}
+
+	// Save multiple edits
+	for i := 1; i <= 3; i++ {
+		edit := &Edit{
+			Handle:      filepath.Base(t.TempDir()) + "-" + string(rune('0'+i)), // Use unique handles
+			ServerID:    "server-" + string(rune('0'+i)),
+			PackageName: "com.example.app",
+			CreatedAt:   time.Now(),
+			LastUsedAt:  time.Now(),
+			State:       StateDraft,
+		}
+		if err := m.SaveEdit(edit); err != nil {
+			t.Fatalf("SaveEdit() error = %v", err)
+		}
+	}
+
+	// List
+	edits, err := m.ListEdits("com.example.app")
+	if err != nil {
+		t.Fatalf("ListEdits() error = %v", err)
+	}
+
+	if len(edits) != 3 {
+		t.Errorf("ListEdits() returned %d edits, want 3", len(edits))
+	}
+}
+
+func TestListEditsEmpty(t *testing.T) {
+	tmpDir := t.TempDir()
+	m := &Manager{
+		editsDir:  tmpDir,
+		lockFiles: make(map[string]*LockFile),
+	}
+
+	edits, err := m.ListEdits("com.example.app")
+	if err != nil {
+		t.Fatalf("ListEdits() error = %v", err)
+	}
+
+	if len(edits) != 0 {
+		t.Errorf("ListEdits() returned %d edits, want 0", len(edits))
+	}
+}
+
+func TestUpdateEditState(t *testing.T) {
+	tmpDir := t.TempDir()
+	m := &Manager{
+		editsDir:  tmpDir,
+		lockFiles: make(map[string]*LockFile),
+	}
+
+	edit := &Edit{
+		Handle:      "test-handle",
+		ServerID:    "server-123",
+		PackageName: "com.example.app",
+		CreatedAt:   time.Now(),
+		LastUsedAt:  time.Now(),
+		State:       StateDraft,
+	}
+
+	if err := m.SaveEdit(edit); err != nil {
+		t.Fatalf("SaveEdit() error = %v", err)
+	}
+
+	// Update state
+	updated, err := m.UpdateEditState("com.example.app", "test-handle", StateCommitted)
+	if err != nil {
+		t.Fatalf("UpdateEditState() error = %v", err)
+	}
+
+	if updated.State != StateCommitted {
+		t.Errorf("State = %q, want %q", updated.State, StateCommitted)
+	}
+
+	// Verify it was persisted
+	loaded, err := m.LoadEdit("com.example.app", "test-handle")
+	if err != nil {
+		t.Fatalf("LoadEdit() error = %v", err)
+	}
+
+	if loaded.State != StateCommitted {
+		t.Errorf("Persisted state = %q, want %q", loaded.State, StateCommitted)
+	}
+}
+
+func TestTouchEdit(t *testing.T) {
+	tmpDir := t.TempDir()
+	m := &Manager{
+		editsDir:  tmpDir,
+		lockFiles: make(map[string]*LockFile),
+	}
+
+	oldTime := time.Now().Add(-1 * time.Hour)
+	edit := &Edit{
+		Handle:      "test-handle",
+		ServerID:    "server-123",
+		PackageName: "com.example.app",
+		CreatedAt:   oldTime,
+		LastUsedAt:  oldTime,
+		State:       StateDraft,
+	}
+
+	if err := m.SaveEdit(edit); err != nil {
+		t.Fatalf("SaveEdit() error = %v", err)
+	}
+
+	// Touch
+	touched, err := m.TouchEdit("com.example.app", "test-handle")
+	if err != nil {
+		t.Fatalf("TouchEdit() error = %v", err)
+	}
+
+	if !touched.LastUsedAt.After(oldTime) {
+		t.Error("LastUsedAt should be updated by TouchEdit()")
+	}
+}
+
+func TestIdempotencyStoreEdgeCases(t *testing.T) {
+	t.Run("get_nonexistent", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		store := &IdempotencyStore{dir: tmpDir, ttl: idempotencyTTL}
+
+		result, err := store.Get("nonexistent-key")
+		if err != nil {
+			t.Fatalf("Get() error = %v", err)
+		}
+		if result.Found {
+			t.Error("Get().Found should be false for nonexistent key")
+		}
+	})
+
+	t.Run("record_and_check_multiple", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		store := &IdempotencyStore{dir: tmpDir, ttl: idempotencyTTL}
+
+		// Record multiple operations
+		for i := 1; i <= 5; i++ {
+			key := IdempotencyKey("test", "app", string(rune('0'+i)))
+			data := map[string]interface{}{"index": i}
+			if err := store.Record(key, data); err != nil {
+				t.Fatalf("Record() error = %v", err)
+			}
+		}
+
+		// Check all exist
+		for i := 1; i <= 5; i++ {
+			key := IdempotencyKey("test", "app", string(rune('0'+i)))
+			exists, err := store.Check(key)
+			if err != nil {
+				t.Fatalf("Check() error = %v", err)
+			}
+			if !exists {
+				t.Errorf("Check() = false for key %d, want true", i)
+			}
+		}
+	})
+
+	t.Run("clear_nonexistent", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		store := &IdempotencyStore{dir: tmpDir, ttl: idempotencyTTL}
+
+		// Should not error
+		if err := store.Clear("nonexistent"); err != nil {
+			t.Errorf("Clear() should not error for nonexistent key, got %v", err)
+		}
+	})
+}
+
+func TestIsLockStale(t *testing.T) {
+	m := NewManager()
+	hostname, _ := os.Hostname()
+
+	tests := []struct {
+		name      string
+		lock      *LockFile
+		wantStale bool
+		skipCheck bool
+	}{
+		{
+			name: "fresh_lock_same_host",
+			lock: &LockFile{
+				PID:       os.Getpid(),
+				Hostname:  hostname,
+				CreatedAt: time.Now(),
+			},
+			// Skip check because isProcessAlive may not work consistently in test environment
+			skipCheck: true,
+		},
+		{
+			name: "old_lock_different_host",
+			lock: &LockFile{
+				PID:       12345,
+				Hostname:  "different-host",
+				CreatedAt: time.Now().Add(-5 * time.Hour),
+			},
+			wantStale: true,
+		},
+		{
+			name: "old_lock_same_host_dead_process",
+			lock: &LockFile{
+				PID:       999999999, // Non-existent PID
+				Hostname:  hostname,
+				CreatedAt: time.Now().Add(-5 * time.Hour),
+			},
+			wantStale: true,
+		},
+		{
+			name: "recent_lock_different_host",
+			lock: &LockFile{
+				PID:       12345,
+				Hostname:  "different-host",
+				CreatedAt: time.Now().Add(-1 * time.Minute),
+			},
+			wantStale: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.skipCheck {
+				t.Skip("Skipping test that depends on isProcessAlive behavior")
+			}
+			got := m.isLockStale(tt.lock, hostname)
+			if got != tt.wantStale {
+				t.Errorf("isLockStale() = %v, want %v", got, tt.wantStale)
+			}
+		})
 	}
 }

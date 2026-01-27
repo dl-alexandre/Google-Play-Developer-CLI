@@ -8,6 +8,10 @@ import (
 )
 
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
 	app := cli.New()
-	os.Exit(app.Execute())
+	return app.Execute()
 }

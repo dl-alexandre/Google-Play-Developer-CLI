@@ -69,11 +69,16 @@ func (c *CLI) authStatus(ctx context.Context) error {
 	// Try to authenticate
 	_, err := c.authMgr.Authenticate(ctx, c.keyPath)
 	if err != nil {
-		// Return unauthenticated status
-		result := output.NewResult(map[string]interface{}{
+		authErr := errors.ClassifyAuthError(err)
+		payload := map[string]interface{}{
 			"authenticated": false,
-			"error":         err.Error(),
-		})
+		}
+		if authErr != nil {
+			payload["error"] = authErr
+		} else {
+			payload["error"] = err.Error()
+		}
+		result := output.NewResult(payload)
 		return c.Output(result.WithServices("auth"))
 	}
 
@@ -187,10 +192,16 @@ func (c *CLI) authLogout(_ context.Context) error {
 func (c *CLI) authDiagnose(ctx context.Context, refreshCheck bool) error {
 	creds, err := c.authMgr.Authenticate(ctx, c.keyPath)
 	if err != nil {
-		result := output.NewResult(map[string]interface{}{
+		authErr := errors.ClassifyAuthError(err)
+		payload := map[string]interface{}{
 			"authenticated": false,
-			"error":         err.Error(),
-		})
+		}
+		if authErr != nil {
+			payload["error"] = authErr
+		} else {
+			payload["error"] = err.Error()
+		}
+		result := output.NewResult(payload)
 		return c.Output(result.WithServices("auth"))
 	}
 

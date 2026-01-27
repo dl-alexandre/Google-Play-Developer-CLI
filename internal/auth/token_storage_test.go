@@ -3,7 +3,10 @@ package auth
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"os"
 	"testing"
+	"time"
 )
 
 func TestTokenStorageKey(t *testing.T) {
@@ -32,5 +35,116 @@ func TestClientIDHash(t *testing.T) {
 	}
 	if last4 != expectedLast4 {
 		t.Fatalf("expected last4 %q, got %q", expectedLast4, last4)
+	}
+}
+
+func TestTokenMetadataReadWriteFind(t *testing.T) {
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+
+	meta := &TokenMetadata{
+		Profile:      "default",
+		ClientIDHash: "hash",
+		Origin:       "keyfile",
+		UpdatedAt:    time.Now().UTC().Format(time.RFC3339),
+	}
+	if err := writeTokenMetadata("key1", meta); err != nil {
+		t.Fatalf("writeTokenMetadata error: %v", err)
+	}
+	path := tokenMetadataPath("key1")
+	read, err := readTokenMetadata(path)
+	if err != nil {
+		t.Fatalf("readTokenMetadata error: %v", err)
+	}
+	if read.Profile != "default" || read.ClientIDHash != "hash" {
+		t.Fatalf("unexpected metadata: %+v", read)
+	}
+
+	if err := writeTokenMetadata("key2", meta); err != nil {
+		t.Fatalf("writeTokenMetadata error: %v", err)
+	}
+	if err := os.Chtimes(tokenMetadataPath("key1"), time.Now().Add(-time.Hour), time.Now().Add(-time.Hour)); err != nil {
+		t.Fatalf("chtimes error: %v", err)
+	}
+	found, key, err := findTokenMetadata("default")
+	if err != nil {
+		t.Fatalf("findTokenMetadata error: %v", err)
+	}
+	if found == nil || key != "key2" {
+		t.Fatalf("expected key2, got %q", key)
+	}
+}
+
+func TestLoadStoredToken(t *testing.T) {
+	storage := &memoryStorage{available: true}
+	m := NewManager(storage)
+	m.SetStoreTokens("auto")
+
+	token := StoredToken{
+		AccessToken: "token",
+		Expiry:      time.Now().Add(time.Hour).Format(time.RFC3339),
+	}
+	data, _ := json.Marshal(token)
+	if err := storage.Store("key", data); err != nil {
+		t.Fatalf("store error: %v", err)
+	}
+	loaded, err := m.loadStoredToken("key")
+	if err != nil || loaded == nil {
+		t.Fatalf("expected token, got %v %v", loaded, err)
+	}
+
+	token.Expiry = time.Now().Add(-time.Hour).Format(time.RFC3339)
+	data, _ = json.Marshal(token)
+	_ = storage.Store("key", data)
+	loaded, err = m.loadStoredToken("key")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if loaded != nil {
+		t.Fatalf("expected nil for expired token")
+	}
+}
+
+func TestStorageEnabledAndLocation(t *testing.T) {
+	m := NewManager(&memoryStorage{available: true})
+	if !m.storageEnabled() {
+		t.Fatalf("expected storage enabled")
+	}
+	if m.TokenLocation() != "secure-storage" {
+		t.Fatalf("expected secure-storage")
+	}
+	m.SetStoreTokens("never")
+	if m.storageEnabled() {
+		t.Fatalf("expected storage disabled")
+	}
+	if m.TokenLocation() != "memory" {
+		t.Fatalf("expected memory location")
+	}
+}
+
+func TestLoadTokenMetadata(t *testing.T) {
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+
+	meta := &TokenMetadata{Profile: "default", ClientIDHash: "hash", UpdatedAt: time.Now().UTC().Format(time.RFC3339)}
+	if err := writeTokenMetadata("key", meta); err != nil {
+		t.Fatalf("writeTokenMetadata error: %v", err)
+	}
+	m := NewManager(&memoryStorage{available: true})
+	got, err := m.LoadTokenMetadata("default")
+	if err != nil || got == nil {
+		t.Fatalf("LoadTokenMetadata error: %v", err)
+	}
+}
+
+func TestFindTokenMetadataMissingDir(t *testing.T) {
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+	meta, key, err := findTokenMetadata("default")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if meta != nil || key != "" {
+		t.Fatalf("expected nil metadata")
 	}
 }

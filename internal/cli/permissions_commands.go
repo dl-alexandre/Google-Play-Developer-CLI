@@ -103,7 +103,7 @@ func (c *CLI) addUsersCommands(parent *cobra.Command) {
 	usersListCmd.Flags().StringVar(&developerID, "developer-id", "", "Developer account ID (required)")
 	usersListCmd.Flags().Int64Var(&pageSize, "page-size", 100, "Results per page")
 	usersListCmd.Flags().StringVar(&pageToken, "page-token", "", "Pagination token")
-	usersListCmd.Flags().BoolVar(&all, "all", false, "Fetch all pages")
+	addPaginationFlags(usersListCmd, &all)
 	_ = usersListCmd.MarkFlagRequired("developer-id")
 
 	usersDeleteCmd := &cobra.Command{
@@ -300,6 +300,8 @@ func (c *CLI) permissionsUsersList(ctx context.Context, developerID string, page
 		req = req.PageToken(pageToken)
 	}
 
+	startToken := pageToken
+	nextToken := ""
 	var allUsers []interface{}
 	for {
 		resp, err := req.Context(ctx).Do()
@@ -318,17 +320,15 @@ func (c *CLI) permissionsUsersList(ctx context.Context, developerID string, page
 			})
 		}
 
-		if resp.NextPageToken == "" || !all {
-			pageToken = resp.NextPageToken
+		nextToken = resp.NextPageToken
+		if nextToken == "" || !all {
 			break
 		}
-		req = req.PageToken(resp.NextPageToken)
+		req = req.PageToken(nextToken)
 	}
 
 	result := output.NewResult(allUsers)
-	if pageToken != "" {
-		result.WithPagination("", pageToken)
-	}
+	result.WithPagination(startToken, nextToken)
 	return c.Output(result.WithServices("androidpublisher"))
 }
 

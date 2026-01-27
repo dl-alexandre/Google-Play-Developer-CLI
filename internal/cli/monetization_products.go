@@ -30,6 +30,8 @@ func (c *CLI) monetizationProductsList(ctx context.Context, _ int64, pageToken s
 		req = req.Token(pageToken)
 	}
 
+	startToken := pageToken
+	nextToken := ""
 	var allProducts []interface{}
 	for {
 		resp, err := req.Context(ctx).Do()
@@ -47,19 +49,18 @@ func (c *CLI) monetizationProductsList(ctx context.Context, _ int64, pageToken s
 			})
 		}
 
-		if resp.TokenPagination == nil || resp.TokenPagination.NextPageToken == "" || !all {
-			if resp.TokenPagination != nil {
-				pageToken = resp.TokenPagination.NextPageToken
-			}
+		nextToken = ""
+		if resp.TokenPagination != nil {
+			nextToken = resp.TokenPagination.NextPageToken
+		}
+		if nextToken == "" || !all {
 			break
 		}
-		req = req.Token(resp.TokenPagination.NextPageToken)
+		req = req.Token(nextToken)
 	}
 
 	result := output.NewResult(allProducts)
-	if pageToken != "" {
-		result.WithPagination("", pageToken)
-	}
+	result.WithPagination(startToken, nextToken)
 	return c.Output(result.WithServices("androidpublisher"))
 }
 

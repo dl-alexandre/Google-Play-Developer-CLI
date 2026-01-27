@@ -171,6 +171,129 @@ func (c *CLI) configInit(_ *cobra.Command) error {
 	return c.Output(result.WithServices("config"))
 }
 
+type doctorResult struct {
+	issues []string
+	check  map[string]interface{}
+}
+
+func checkCredentials(envKey, gacPath string, parsedConfig *config.Config, configLoaded bool) doctorResult {
+	result := doctorResult{
+		check: map[string]interface{}{},
+	}
+	credentialsChecks := result.check
+
+	// Check envServiceAccountKey
+	if envKey != "" {
+		valid, reason, fields := validateServiceAccountJSON([]byte(envKey))
+		entry := map[string]interface{}{
+			"set":   true,
+			"valid": valid,
+		}
+		if !valid {
+			entry["reason"] = reason
+			if len(fields) > 0 {
+				entry["missingFields"] = fields
+			}
+			result.issues = append(result.issues, "GPD_SERVICE_ACCOUNT_KEY is not a valid service account key")
+		}
+		credentialsChecks["envServiceAccountKey"] = entry
+	} else {
+		credentialsChecks["envServiceAccountKey"] = map[string]interface{}{"set": false}
+	}
+
+	// Check GOOGLE_APPLICATION_CREDENTIALS
+	gacEntry := map[string]interface{}{"set": gacPath != ""}
+	if gacPath != "" {
+		gacEntry["path"] = gacPath
+		if _, err := os.Stat(gacPath); err != nil {
+			gacEntry["exists"] = false
+			result.issues = append(result.issues, "GOOGLE_APPLICATION_CREDENTIALS points to a missing file")
+		} else {
+			gacEntry["exists"] = true
+			data, err := os.ReadFile(gacPath)
+			if err != nil {
+				gacEntry["readable"] = false
+				result.issues = append(result.issues, "GOOGLE_APPLICATION_CREDENTIALS file is not readable")
+			} else {
+				valid, reason, fields := validateServiceAccountJSON(data)
+				gacEntry["readable"] = true
+				gacEntry["valid"] = valid
+				if !valid {
+					gacEntry["reason"] = reason
+					if len(fields) > 0 {
+						gacEntry["missingFields"] = fields
+					}
+					result.issues = append(result.issues, "GOOGLE_APPLICATION_CREDENTIALS does not contain a valid service account key")
+				}
+			}
+		}
+	}
+	credentialsChecks["googleApplicationCredentials"] = gacEntry
+
+	// Check serviceAccountKeyPath from config
+	if configLoaded && parsedConfig.ServiceAccountKeyPath != "" {
+		keyEntry := map[string]interface{}{"path": parsedConfig.ServiceAccountKeyPath}
+		if _, err := os.Stat(parsedConfig.ServiceAccountKeyPath); err != nil {
+			keyEntry["exists"] = false
+			result.issues = append(result.issues, "serviceAccountKeyPath points to a missing file")
+		} else {
+			keyEntry["exists"] = true
+			data, err := os.ReadFile(parsedConfig.ServiceAccountKeyPath)
+			if err != nil {
+				keyEntry["readable"] = false
+				result.issues = append(result.issues, "serviceAccountKeyPath file is not readable")
+			} else {
+				valid, reason, fields := validateServiceAccountJSON(data)
+				keyEntry["readable"] = true
+				keyEntry["valid"] = valid
+				if !valid {
+					keyEntry["reason"] = reason
+					if len(fields) > 0 {
+						keyEntry["missingFields"] = fields
+					}
+					result.issues = append(result.issues, "serviceAccountKeyPath does not contain a valid service account key")
+				}
+			}
+		}
+		credentialsChecks["serviceAccountKeyPath"] = keyEntry
+	} else {
+		credentialsChecks["serviceAccountKeyPath"] = map[string]interface{}{"set": false}
+	}
+
+	return result
+}
+
+func checkConfigFile(path string) (config.Config, bool, doctorResult) {
+	var parsedConfig config.Config
+	result := doctorResult{
+		check: map[string]interface{}{"path": path},
+	}
+
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		result.issues = append(result.issues, "Config file does not exist (run 'gpd config init')")
+		result.check["exists"] = false
+		return parsedConfig, false, result
+	}
+
+	result.check["exists"] = true
+	data, err := os.ReadFile(path)
+	if err != nil {
+		result.issues = append(result.issues, "Config file is not readable")
+		result.check["readable"] = false
+		return parsedConfig, false, result
+	}
+
+	result.check["readable"] = true
+	if err := json.Unmarshal(data, &parsedConfig); err != nil {
+		result.issues = append(result.issues, "Config file contains invalid JSON")
+		result.check["valid"] = false
+		return parsedConfig, false, result
+	}
+
+	result.check["valid"] = true
+	return parsedConfig, true, result
+}
+
 func (c *CLI) configDoctor(_ *cobra.Command) error {
 	paths := config.GetPaths()
 	issues := []string{}
@@ -185,12 +308,9 @@ func (c *CLI) configDoctor(_ *cobra.Command) error {
 	}
 
 	// Check config file
-	if _, err := os.Stat(paths.ConfigFile); os.IsNotExist(err) {
-		issues = append(issues, "Config file does not exist (run 'gpd config init')")
-		checks["configFile"] = map[string]interface{}{"exists": false, "path": paths.ConfigFile}
-	} else {
-		checks["configFile"] = map[string]interface{}{"exists": true, "path": paths.ConfigFile}
-	}
+	parsedConfig, configLoaded, configFileIssues := checkConfigFile(paths.ConfigFile)
+	issues = append(issues, configFileIssues.issues...)
+	checks["configFile"] = configFileIssues.check
 
 	// Check cache directory
 	if _, err := os.Stat(paths.CacheDir); os.IsNotExist(err) {
@@ -209,9 +329,24 @@ func (c *CLI) configDoctor(_ *cobra.Command) error {
 		issues = append(issues, "Secure storage not available on this platform")
 	}
 
+	storeTokensValue := config.GetEnvStoreTokens()
+	if storeTokensValue == "" && configLoaded {
+		storeTokensValue = parsedConfig.StoreTokens
+	}
+	if storeTokensValue != "" {
+		checks["storeTokens"] = map[string]interface{}{
+			"value":                  storeTokensValue,
+			"secureStorageAvailable": secureStorage.Available(),
+		}
+		if storeTokensValue == "secure" && !secureStorage.Available() {
+			issues = append(issues, "Store tokens is set to secure but secure storage is unavailable")
+		}
+	}
+
 	// Check environment variables
 	envChecks := map[string]interface{}{}
-	if key := config.GetEnvServiceAccountKey(); key != "" {
+	envKey := config.GetEnvServiceAccountKey()
+	if envKey != "" {
 		envChecks["GPD_SERVICE_ACCOUNT_KEY"] = "set (value hidden)"
 	} else {
 		envChecks["GPD_SERVICE_ACCOUNT_KEY"] = "not set"
@@ -221,8 +356,13 @@ func (c *CLI) configDoctor(_ *cobra.Command) error {
 	} else {
 		envChecks["GPD_PACKAGE"] = "not set"
 	}
-	envChecks["GOOGLE_APPLICATION_CREDENTIALS"] = os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
+	gacPath := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
+	envChecks["GOOGLE_APPLICATION_CREDENTIALS"] = gacPath
 	checks["environment"] = envChecks
+
+	credentialsResult := checkCredentials(envKey, gacPath, &parsedConfig, configLoaded)
+	issues = append(issues, credentialsResult.issues...)
+	checks["credentials"] = credentialsResult.check
 
 	// Check CI detection
 	checks["ci"] = map[string]interface{}{
@@ -264,6 +404,39 @@ func findGPDBinaries() []string {
 		}
 	}
 	return binaries
+}
+
+func validateServiceAccountJSON(data []byte) (valid bool, email string, scopes []string) {
+	var keyData struct {
+		Type        string `json:"type"`
+		ClientEmail string `json:"client_email"`
+		ClientID    string `json:"client_id"`
+		PrivateKey  string `json:"private_key"`
+		TokenURI    string `json:"token_uri"`
+	}
+	if err := json.Unmarshal(data, &keyData); err != nil {
+		return false, "invalid_json", nil
+	}
+	if keyData.Type != "service_account" {
+		return false, "invalid_type", nil
+	}
+	missing := []string{}
+	if keyData.ClientEmail == "" {
+		missing = append(missing, "client_email")
+	}
+	if keyData.ClientID == "" {
+		missing = append(missing, "client_id")
+	}
+	if keyData.PrivateKey == "" {
+		missing = append(missing, "private_key")
+	}
+	if keyData.TokenURI == "" {
+		missing = append(missing, "token_uri")
+	}
+	if len(missing) > 0 {
+		return false, "missing_fields", missing
+	}
+	return true, "", nil
 }
 
 func (c *CLI) configPath(_ *cobra.Command) error {

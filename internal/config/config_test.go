@@ -286,12 +286,16 @@ func TestConfigSaveWriteError(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	paths := GetPaths()
-	if err := os.MkdirAll(paths.ConfigDir, 0700); err != nil {
-		t.Fatalf("MkdirAll failed: %v", err)
+	orig := osWriteFile
+	osWriteFile = func(path string, data []byte, perm os.FileMode) error {
+		if path == paths.ConfigFile {
+			return os.ErrPermission
+		}
+		return orig(path, data, perm)
 	}
-	if err := os.WriteFile(paths.ConfigFile, []byte("{}"), 0400); err != nil {
-		t.Fatalf("WriteFile failed: %v", err)
-	}
+	t.Cleanup(func() {
+		osWriteFile = orig
+	})
 	cfg := &Config{DefaultPackage: "com.example.app"}
 	if err := cfg.Save(); err == nil {
 		t.Fatal("expected error")
@@ -301,9 +305,17 @@ func TestConfigSaveWriteError(t *testing.T) {
 func TestConfigSaveMkdirError(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	if err := os.WriteFile(filepath.Join(home, "Library"), []byte("file"), 0600); err != nil {
-		t.Fatalf("WriteFile failed: %v", err)
+	paths := GetPaths()
+	orig := osMkdirAll
+	osMkdirAll = func(path string, perm os.FileMode) error {
+		if path == paths.ConfigDir {
+			return os.ErrPermission
+		}
+		return orig(path, perm)
 	}
+	t.Cleanup(func() {
+		osMkdirAll = orig
+	})
 	cfg := &Config{DefaultPackage: "com.example.app"}
 	if err := cfg.Save(); err == nil {
 		t.Fatal("expected error")
@@ -372,12 +384,16 @@ func TestInitProjectConfigDirError(t *testing.T) {
 	project := t.TempDir()
 	t.Setenv("HOME", home)
 	paths := GetPaths()
-	if err := os.MkdirAll(filepath.Dir(paths.ConfigDir), 0700); err != nil {
-		t.Fatalf("MkdirAll failed: %v", err)
+	orig := osMkdirAll
+	osMkdirAll = func(path string, perm os.FileMode) error {
+		if path == paths.ConfigDir {
+			return os.ErrPermission
+		}
+		return orig(path, perm)
 	}
-	if err := os.WriteFile(paths.ConfigDir, []byte("file"), 0600); err != nil {
-		t.Fatalf("WriteFile failed: %v", err)
-	}
+	t.Cleanup(func() {
+		osMkdirAll = orig
+	})
 	if err := InitProject(project); err == nil {
 		t.Fatal("expected error")
 	}
@@ -388,12 +404,16 @@ func TestInitProjectCacheDirError(t *testing.T) {
 	project := t.TempDir()
 	t.Setenv("HOME", home)
 	paths := GetPaths()
-	if err := os.MkdirAll(filepath.Dir(paths.CacheDir), 0700); err != nil {
-		t.Fatalf("MkdirAll failed: %v", err)
+	orig := osMkdirAll
+	osMkdirAll = func(path string, perm os.FileMode) error {
+		if path == paths.CacheDir {
+			return os.ErrPermission
+		}
+		return orig(path, perm)
 	}
-	if err := os.WriteFile(paths.CacheDir, []byte("file"), 0600); err != nil {
-		t.Fatalf("WriteFile failed: %v", err)
-	}
+	t.Cleanup(func() {
+		osMkdirAll = orig
+	})
 	if err := InitProject(project); err == nil {
 		t.Fatal("expected error")
 	}
@@ -404,12 +424,16 @@ func TestInitProjectSaveError(t *testing.T) {
 	project := t.TempDir()
 	t.Setenv("HOME", home)
 	paths := GetPaths()
-	if err := os.MkdirAll(paths.ConfigDir, 0700); err != nil {
-		t.Fatalf("MkdirAll failed: %v", err)
+	orig := osWriteFile
+	osWriteFile = func(path string, data []byte, perm os.FileMode) error {
+		if path == paths.ConfigFile {
+			return os.ErrPermission
+		}
+		return orig(path, data, perm)
 	}
-	if err := os.WriteFile(paths.ConfigFile, []byte("{}"), 0400); err != nil {
-		t.Fatalf("WriteFile failed: %v", err)
-	}
+	t.Cleanup(func() {
+		osWriteFile = orig
+	})
 	if err := InitProject(project); err == nil {
 		t.Fatal("expected error")
 	}

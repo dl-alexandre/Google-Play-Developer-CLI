@@ -206,6 +206,9 @@ func readChangelogs(localeDir string) (map[string]string, error) {
 	entries, err := os.ReadDir(changelogDir)
 	if err != nil {
 		if os.IsNotExist(err) {
+			if info, statErr := os.Stat(changelogDir); statErr == nil && !info.IsDir() {
+				return nil, err
+			}
 			return nil, nil
 		}
 		return nil, err
@@ -237,6 +240,9 @@ func readImages(localeDir string) (map[string][]string, error) {
 	entries, err := os.ReadDir(imagesDir)
 	if err != nil {
 		if os.IsNotExist(err) {
+			if info, statErr := os.Stat(imagesDir); statErr == nil && !info.IsDir() {
+				return nil, err
+			}
 			return nil, nil
 		}
 		return nil, err

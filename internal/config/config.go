@@ -46,6 +46,24 @@ type Paths struct {
 
 var runtimeGOOS = runtime.GOOS
 var jsonMarshalIndent = json.MarshalIndent
+var osMkdirAll = os.MkdirAll
+var osWriteFile = os.WriteFile
+
+func getHomeDirForOS(goos string) string {
+	if home := os.Getenv("HOME"); home != "" {
+		return home
+	}
+	if goos == "windows" {
+		if home := os.Getenv("USERPROFILE"); home != "" {
+			return home
+		}
+		if drive, path := os.Getenv("HOMEDRIVE"), os.Getenv("HOMEPATH"); drive != "" && path != "" {
+			return drive + path
+		}
+	}
+	home, _ := os.UserHomeDir()
+	return home
+}
 
 // GetPaths returns the OS-appropriate configuration paths.
 func GetPaths() Paths {
@@ -57,14 +75,25 @@ func getPathsForOS(goos string) Paths {
 
 	switch goos {
 	case "darwin":
-		home, _ := os.UserHomeDir()
+		home := getHomeDirForOS(goos)
 		configDir = filepath.Join(home, "Library", "Application Support", "gpd")
 		cacheDir = filepath.Join(home, "Library", "Caches", "gpd")
 	case "windows":
-		configDir = filepath.Join(os.Getenv("APPDATA"), "gpd")
-		cacheDir = filepath.Join(os.Getenv("LOCALAPPDATA"), "gpd")
+		appData := os.Getenv("APPDATA")
+		localAppData := os.Getenv("LOCALAPPDATA")
+		if appData == "" || localAppData == "" {
+			home := getHomeDirForOS(goos)
+			if appData == "" && home != "" {
+				appData = filepath.Join(home, "AppData", "Roaming")
+			}
+			if localAppData == "" && home != "" {
+				localAppData = filepath.Join(home, "AppData", "Local")
+			}
+		}
+		configDir = filepath.Join(appData, "gpd")
+		cacheDir = filepath.Join(localAppData, "gpd")
 	default:
-		home, _ := os.UserHomeDir()
+		home := getHomeDirForOS(goos)
 		if xdgConfig := os.Getenv("XDG_CONFIG_HOME"); xdgConfig != "" {
 			configDir = filepath.Join(xdgConfig, "gpd")
 		} else {
@@ -86,7 +115,7 @@ func getPathsForOS(goos string) Paths {
 
 // GetLegacyConfigDir returns the legacy ~/.gpd directory path.
 func GetLegacyConfigDir() string {
-	home, _ := os.UserHomeDir()
+	home := getHomeDirForOS(runtimeGOOS)
 	return filepath.Join(home, ".gpd")
 }
 
@@ -130,7 +159,7 @@ func (c *Config) Save() error {
 	paths := GetPaths()
 
 	// Ensure config directory exists
-	if err := os.MkdirAll(paths.ConfigDir, 0700); err != nil {
+	if err := osMkdirAll(paths.ConfigDir, 0700); err != nil {
 		return err
 	}
 
@@ -139,7 +168,7 @@ func (c *Config) Save() error {
 		return err
 	}
 
-	return os.WriteFile(paths.ConfigFile, data, 0600)
+	return osWriteFile(paths.ConfigFile, data, 0600)
 }
 
 // DefaultConfig returns the default configuration.
@@ -230,12 +259,12 @@ func InitProject(dir string) error {
 	paths := GetPaths()
 
 	// Create config directory
-	if err := os.MkdirAll(paths.ConfigDir, 0700); err != nil {
+	if err := osMkdirAll(paths.ConfigDir, 0700); err != nil {
 		return err
 	}
 
 	// Create cache directory
-	if err := os.MkdirAll(paths.CacheDir, 0700); err != nil {
+	if err := osMkdirAll(paths.CacheDir, 0700); err != nil {
 		return err
 	}
 
@@ -250,7 +279,7 @@ func InitProject(dir string) error {
 	for _, locale := range []string{"en-US"} {
 		for _, category := range []string{"phone", "tablet", "tv", "wear"} {
 			catDir := filepath.Join(assetsDir, locale, category)
-			if err := os.MkdirAll(catDir, 0755); err != nil {
+	if err := osMkdirAll(catDir, 0755); err != nil {
 				return err
 			}
 		}
@@ -261,7 +290,7 @@ func InitProject(dir string) error {
 		"en-US": "Bug fixes and improvements.",
 	}
 	rnData, _ := json.MarshalIndent(releaseNotes, "", "  ")
-	if err := os.WriteFile(filepath.Join(dir, "release-notes.json"), rnData, 0644); err != nil {
+	if err := osWriteFile(filepath.Join(dir, "release-notes.json"), rnData, 0644); err != nil {
 		return err
 	}
 
@@ -271,7 +300,7 @@ func InitProject(dir string) error {
 service-account*.json
 .gpd/
 `
-	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(gitignore), 0644); err != nil {
+	if err := osWriteFile(filepath.Join(dir, ".gitignore"), []byte(gitignore), 0644); err != nil {
 		return err
 	}
 

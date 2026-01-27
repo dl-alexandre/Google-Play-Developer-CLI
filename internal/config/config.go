@@ -279,7 +279,7 @@ func InitProject(dir string) error {
 	for _, locale := range []string{"en-US"} {
 		for _, category := range []string{"phone", "tablet", "tv", "wear"} {
 			catDir := filepath.Join(assetsDir, locale, category)
-	if err := osMkdirAll(catDir, 0755); err != nil {
+			if err := osMkdirAll(catDir, 0755); err != nil {
 				return err
 			}
 		}

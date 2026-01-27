@@ -202,6 +202,7 @@ func TestGetPathsForOSDefaultXDG(t *testing.T) {
 func TestLoadPrimaryConfig(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdgconfig"))
 	paths := GetPaths()
 	if err := os.MkdirAll(paths.ConfigDir, 0700); err != nil {
 		t.Fatalf("MkdirAll failed: %v", err)
@@ -223,6 +224,7 @@ func TestLoadPrimaryConfig(t *testing.T) {
 func TestLoadLegacyConfig(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdgconfig"))
 	legacyDir := GetLegacyConfigDir()
 	if err := os.MkdirAll(legacyDir, 0700); err != nil {
 		t.Fatalf("MkdirAll failed: %v", err)

@@ -5,9 +5,22 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"os"
+	"runtime"
 	"testing"
 	"time"
 )
+
+func setConfigEnv(t *testing.T, tempHome string) {
+	t.Setenv("HOME", tempHome)
+	switch runtime.GOOS {
+	case "windows":
+		t.Setenv("APPDATA", tempHome)
+		t.Setenv("LOCALAPPDATA", tempHome)
+	default:
+		t.Setenv("XDG_CONFIG_HOME", tempHome)
+		t.Setenv("XDG_CACHE_HOME", tempHome)
+	}
+}
 
 func TestTokenStorageKey(t *testing.T) {
 	if got := tokenStorageKey("default", ""); got != "default" {
@@ -40,7 +53,7 @@ func TestClientIDHash(t *testing.T) {
 
 func TestTokenMetadataReadWriteFind(t *testing.T) {
 	tempHome := t.TempDir()
-	t.Setenv("HOME", tempHome)
+	setConfigEnv(t, tempHome)
 
 	meta := &TokenMetadata{
 		Profile:      "default",
@@ -124,7 +137,7 @@ func TestStorageEnabledAndLocation(t *testing.T) {
 
 func TestLoadTokenMetadata(t *testing.T) {
 	tempHome := t.TempDir()
-	t.Setenv("HOME", tempHome)
+	setConfigEnv(t, tempHome)
 
 	meta := &TokenMetadata{Profile: "default", ClientIDHash: "hash", UpdatedAt: time.Now().UTC().Format(time.RFC3339)}
 	if err := writeTokenMetadata("key", meta); err != nil {
@@ -139,7 +152,7 @@ func TestLoadTokenMetadata(t *testing.T) {
 
 func TestFindTokenMetadataMissingDir(t *testing.T) {
 	tempHome := t.TempDir()
-	t.Setenv("HOME", tempHome)
+	setConfigEnv(t, tempHome)
 	meta, key, err := findTokenMetadata("default")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

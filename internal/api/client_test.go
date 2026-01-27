@@ -38,6 +38,19 @@ func TestAcquireRelease(t *testing.T) {
 	}
 }
 
+func TestAcquireCanceled(t *testing.T) {
+	client := &Client{semaphore: make(chan struct{}, 1)}
+	client.semaphore <- struct{}{}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := client.Acquire(ctx); err == nil {
+		t.Fatalf("expected error")
+	}
+	if len(client.semaphore) != 1 {
+		t.Fatalf("expected semaphore unchanged, got %d", len(client.semaphore))
+	}
+}
+
 func TestNewClientAndServices(t *testing.T) {
 	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "token", Expiry: time.Now().Add(time.Hour)})
 	client, err := NewClient(context.Background(), ts, WithTimeout(2*time.Second), WithMaxRetryAttempts(5), WithConcurrentCalls(2))
@@ -55,6 +68,18 @@ func TestNewClientAndServices(t *testing.T) {
 	}
 	if _, err := client.GamesManagement(); err != nil {
 		t.Fatalf("GamesManagement error: %v", err)
+	}
+}
+
+func TestWithRetryConfig(t *testing.T) {
+	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "token", Expiry: time.Now().Add(time.Hour)})
+	cfg := RetryConfig{MaxAttempts: 4, InitialDelay: time.Millisecond, MaxDelay: time.Second}
+	client, err := NewClient(context.Background(), ts, WithRetryConfig(cfg))
+	if err != nil {
+		t.Fatalf("NewClient error: %v", err)
+	}
+	if client.retryConfig.MaxAttempts != 4 {
+		t.Fatalf("unexpected retry config")
 	}
 }
 
@@ -83,6 +108,26 @@ func TestAcquireForUploadCanceled(t *testing.T) {
 	}
 	if len(client.semaphore) != 1 {
 		t.Fatalf("expected semaphore unchanged, got %d", len(client.semaphore))
+	}
+}
+
+func TestAcquireForUploadPartialCancel(t *testing.T) {
+	client := &Client{semaphore: make(chan struct{}, 2)}
+	client.semaphore <- struct{}{}
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		result <- client.AcquireForUpload(ctx)
+	}()
+	for len(client.semaphore) < 2 {
+		time.Sleep(time.Millisecond)
+	}
+	cancel()
+	if err := <-result; err == nil {
+		t.Fatalf("expected error")
+	}
+	if len(client.semaphore) != 1 {
+		t.Fatalf("expected one slot released, got %d", len(client.semaphore))
 	}
 }
 
@@ -121,12 +166,44 @@ func TestDoWithRetryNonRetryable(t *testing.T) {
 	}
 }
 
+func TestDoWithRetryMaxAttempts(t *testing.T) {
+	client := &Client{retryConfig: RetryConfig{MaxAttempts: 2, InitialDelay: time.Millisecond, MaxDelay: time.Millisecond}}
+	ctx := context.Background()
+	calls := 0
+	err := client.DoWithRetry(ctx, func() error {
+		calls++
+		return &googleapi.Error{Code: http.StatusInternalServerError}
+	})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if calls != 2 {
+		t.Fatalf("expected 2 calls, got %d", calls)
+	}
+}
+
 func TestDoWithRetryCanceled(t *testing.T) {
 	client := &Client{retryConfig: RetryConfig{MaxAttempts: 2, InitialDelay: time.Millisecond, MaxDelay: time.Millisecond}}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if err := client.DoWithRetry(ctx, func() error { return nil }); err == nil {
 		t.Fatalf("expected context error")
+	}
+}
+
+func TestDoWithRetryCanceledDuringWait(t *testing.T) {
+	client := &Client{retryConfig: RetryConfig{MaxAttempts: 3, InitialDelay: time.Millisecond, MaxDelay: time.Millisecond}}
+	ctx, cancel := context.WithCancel(context.Background())
+	calls := 0
+	err := client.DoWithRetry(ctx, func() error {
+		calls++
+		if calls == 1 {
+			cancel()
+		}
+		return &googleapi.Error{Code: http.StatusInternalServerError}
+	})
+	if err == nil {
+		t.Fatalf("expected error")
 	}
 }
 
@@ -155,6 +232,31 @@ func TestCalculateDelayWithConfig(t *testing.T) {
 	delay = calculateDelayWithConfig(cfg, 1, apiErr)
 	if delay != 2*time.Second {
 		t.Fatalf("expected capped delay 2s, got %v", delay)
+	}
+}
+
+func TestCalculateDelayWithConfigRetryAfterUnderMax(t *testing.T) {
+	cfg := RetryConfig{MaxAttempts: 3, InitialDelay: time.Second, MaxDelay: 5 * time.Second}
+	apiErr := &googleapi.Error{Header: http.Header{"Retry-After": []string{"2"}}}
+	delay := calculateDelayWithConfig(cfg, 1, apiErr)
+	if delay != 2*time.Second {
+		t.Fatalf("expected 2s, got %v", delay)
+	}
+}
+
+func TestCalculateDelayWithConfigLargeAttempt(t *testing.T) {
+	cfg := RetryConfig{MaxAttempts: 3, InitialDelay: time.Second, MaxDelay: 2 * time.Second}
+	delay := calculateDelayWithConfig(cfg, 100, nil)
+	if delay < 0 || delay > 2*time.Second {
+		t.Fatalf("unexpected delay: %v", delay)
+	}
+}
+
+func TestCalculateDelayWithConfigCapsDelay(t *testing.T) {
+	cfg := RetryConfig{MaxAttempts: 3, InitialDelay: time.Second, MaxDelay: 2 * time.Second}
+	delay := calculateDelayWithConfig(cfg, 3, nil)
+	if delay < 2*time.Second || delay > 2600*time.Millisecond {
+		t.Fatalf("unexpected delay: %v", delay)
 	}
 }
 

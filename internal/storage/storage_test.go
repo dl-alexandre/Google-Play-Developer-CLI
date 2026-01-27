@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -56,5 +57,45 @@ func TestNewKeyringOpenError(t *testing.T) {
 	s := New()
 	if s.Available() {
 		t.Fatalf("expected unavailable storage")
+	}
+}
+
+func TestNewKeyringSuccess(t *testing.T) {
+	orig := openKeyring
+	openKeyring = func(cfg keyring.Config) (keyring.Keyring, error) {
+		return keyring.NewArrayKeyring(nil), nil
+	}
+	t.Cleanup(func() { openKeyring = orig })
+	s := New()
+	if !s.Available() {
+		t.Fatalf("expected available storage")
+	}
+}
+
+type errKeyring struct {
+	keyring.Keyring
+	getErr error
+}
+
+func (e *errKeyring) Get(key string) (keyring.Item, error) {
+	return keyring.Item{}, e.getErr
+}
+
+func TestRetrieveReturnsUnderlyingError(t *testing.T) {
+	s := NewWithKeyring(&errKeyring{
+		Keyring: keyring.NewArrayKeyring(nil),
+		getErr:  errors.New("boom"),
+	})
+	if _, err := s.Retrieve("key"); err == nil || err.Error() != "boom" {
+		t.Fatalf("expected underlying error")
+	}
+}
+
+func TestErrorMessage(t *testing.T) {
+	if ErrStorageUnavailable.Error() == "" {
+		t.Fatalf("expected error message")
+	}
+	if ErrKeyNotFound.Error() == "" {
+		t.Fatalf("expected error message")
 	}
 }

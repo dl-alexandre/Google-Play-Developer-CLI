@@ -1,7 +1,10 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -133,5 +136,319 @@ func TestValidTracks(t *testing.T) {
 		if !expected[track] {
 			t.Errorf("Unexpected track: %q", track)
 		}
+	}
+}
+
+func TestDefaultTesterLimits(t *testing.T) {
+	limits := DefaultTesterLimits()
+	if limits.Internal != 200 || limits.Alpha != -1 || limits.Beta != -1 {
+		t.Fatalf("unexpected limits: %+v", limits)
+	}
+}
+
+func TestGetPathsAndLegacyDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	paths := GetPaths()
+	if paths.ConfigDir == "" || paths.CacheDir == "" || paths.ConfigFile == "" {
+		t.Fatal("expected non-empty paths")
+	}
+	if filepath.Dir(paths.ConfigFile) != paths.ConfigDir {
+		t.Fatal("expected config file under config dir")
+	}
+	if GetLegacyConfigDir() != filepath.Join(home, ".gpd") {
+		t.Fatal("unexpected legacy config dir")
+	}
+}
+
+func TestGetPathsForOS(t *testing.T) {
+	t.Setenv("APPDATA", filepath.Join(t.TempDir(), "appdata"))
+	t.Setenv("LOCALAPPDATA", filepath.Join(t.TempDir(), "localappdata"))
+	winPaths := getPathsForOS("windows")
+	if !strings.Contains(winPaths.ConfigDir, "appdata") {
+		t.Fatal("expected windows config dir from APPDATA")
+	}
+	if !strings.Contains(winPaths.CacheDir, "localappdata") {
+		t.Fatal("expected windows cache dir from LOCALAPPDATA")
+	}
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdgconfig"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "xdgcache"))
+	linuxPaths := getPathsForOS("linux")
+	if !strings.Contains(linuxPaths.ConfigDir, "xdgconfig") {
+		t.Fatal("expected linux config dir from XDG_CONFIG_HOME")
+	}
+	if !strings.Contains(linuxPaths.CacheDir, "xdgcache") {
+		t.Fatal("expected linux cache dir from XDG_CACHE_HOME")
+	}
+}
+
+func TestGetPathsForOSDefaultXDG(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("XDG_CACHE_HOME", "")
+	paths := getPathsForOS("linux")
+	if !strings.Contains(paths.ConfigDir, filepath.Join(home, ".config")) {
+		t.Fatal("expected default config dir")
+	}
+	if !strings.Contains(paths.CacheDir, filepath.Join(home, ".cache")) {
+		t.Fatal("expected default cache dir")
+	}
+}
+
+func TestLoadPrimaryConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	paths := GetPaths()
+	if err := os.MkdirAll(paths.ConfigDir, 0700); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+	cfg := &Config{DefaultPackage: "com.example.app", OutputFormat: "json"}
+	data, _ := json.Marshal(cfg)
+	if err := os.WriteFile(paths.ConfigFile, data, 0600); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if loaded.DefaultPackage != "com.example.app" {
+		t.Fatalf("unexpected package: %q", loaded.DefaultPackage)
+	}
+}
+
+func TestLoadLegacyConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	legacyDir := GetLegacyConfigDir()
+	if err := os.MkdirAll(legacyDir, 0700); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+	cfg := &Config{DefaultPackage: "legacy.app", OutputFormat: "json"}
+	data, _ := json.Marshal(cfg)
+	legacyFile := filepath.Join(legacyDir, "config.json")
+	if err := os.WriteFile(legacyFile, data, 0600); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if loaded.DefaultPackage != "legacy.app" {
+		t.Fatalf("unexpected package: %q", loaded.DefaultPackage)
+	}
+}
+
+func TestLoadDefaultConfigWhenMissing(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if loaded.OutputFormat != "json" {
+		t.Fatalf("unexpected output format: %q", loaded.OutputFormat)
+	}
+}
+
+func TestLoadFromFileInvalidJSON(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(path, []byte("not json"), 0600); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	if _, err := loadFromFile(path); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestConfigSaveWritesFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cfg := &Config{DefaultPackage: "com.example.app"}
+	if err := cfg.Save(); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+	paths := GetPaths()
+	data, err := os.ReadFile(paths.ConfigFile)
+	if err != nil {
+		t.Fatalf("ReadFile failed: %v", err)
+	}
+	if !json.Valid(data) {
+		t.Fatal("expected valid json")
+	}
+}
+
+func TestConfigSaveWriteError(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	paths := GetPaths()
+	if err := os.MkdirAll(paths.ConfigDir, 0700); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+	if err := os.WriteFile(paths.ConfigFile, []byte("{}"), 0400); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	cfg := &Config{DefaultPackage: "com.example.app"}
+	if err := cfg.Save(); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestConfigSaveMkdirError(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.WriteFile(filepath.Join(home, "Library"), []byte("file"), 0600); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	cfg := &Config{DefaultPackage: "com.example.app"}
+	if err := cfg.Save(); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestConfigSaveMarshalError(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	orig := jsonMarshalIndent
+	jsonMarshalIndent = func(v interface{}, prefix, indent string) ([]byte, error) {
+		return nil, os.ErrInvalid
+	}
+	defer func() {
+		jsonMarshalIndent = orig
+	}()
+	cfg := &Config{DefaultPackage: "com.example.app"}
+	if err := cfg.Save(); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestEnvAccessors(t *testing.T) {
+	t.Setenv(EnvServiceAccountKey, "key")
+	t.Setenv(EnvPackage, "pkg")
+	t.Setenv(EnvTimeout, "10")
+	t.Setenv(EnvStoreTokens, "auto")
+	if GetEnvServiceAccountKey() != "key" {
+		t.Fatal("unexpected service account key")
+	}
+	if GetEnvPackage() != "pkg" {
+		t.Fatal("unexpected package")
+	}
+	if GetEnvTimeout() != "10" {
+		t.Fatal("unexpected timeout")
+	}
+	if GetEnvStoreTokens() != "auto" {
+		t.Fatal("unexpected store tokens")
+	}
+}
+
+func TestInitProjectCreatesFiles(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := InitProject(project); err != nil {
+		t.Fatalf("InitProject failed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(project, "assets", "en-US", "phone")); err != nil {
+		t.Fatalf("assets dir missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(project, "release-notes.json")); err != nil {
+		t.Fatalf("release-notes.json missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(project, ".gitignore")); err != nil {
+		t.Fatalf(".gitignore missing: %v", err)
+	}
+	paths := GetPaths()
+	if _, err := os.Stat(paths.ConfigFile); err != nil {
+		t.Fatalf("config file missing: %v", err)
+	}
+}
+
+func TestInitProjectConfigDirError(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	t.Setenv("HOME", home)
+	paths := GetPaths()
+	if err := os.MkdirAll(filepath.Dir(paths.ConfigDir), 0700); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+	if err := os.WriteFile(paths.ConfigDir, []byte("file"), 0600); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	if err := InitProject(project); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestInitProjectCacheDirError(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	t.Setenv("HOME", home)
+	paths := GetPaths()
+	if err := os.MkdirAll(filepath.Dir(paths.CacheDir), 0700); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+	if err := os.WriteFile(paths.CacheDir, []byte("file"), 0600); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	if err := InitProject(project); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestInitProjectSaveError(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	t.Setenv("HOME", home)
+	paths := GetPaths()
+	if err := os.MkdirAll(paths.ConfigDir, 0700); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+	if err := os.WriteFile(paths.ConfigFile, []byte("{}"), 0400); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	if err := InitProject(project); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestInitProjectAssetsError(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.WriteFile(filepath.Join(project, "assets"), []byte("file"), 0600); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	if err := InitProject(project); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestInitProjectReleaseNotesError(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	t.Setenv("HOME", home)
+	path := filepath.Join(project, "release-notes.json")
+	if err := os.WriteFile(path, []byte("existing"), 0400); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	if err := InitProject(project); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestInitProjectGitignoreError(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	t.Setenv("HOME", home)
+	path := filepath.Join(project, ".gitignore")
+	if err := os.WriteFile(path, []byte("existing"), 0400); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	if err := InitProject(project); err == nil {
+		t.Fatal("expected error")
 	}
 }

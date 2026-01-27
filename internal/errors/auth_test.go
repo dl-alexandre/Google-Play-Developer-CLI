@@ -228,6 +228,27 @@ func TestClockSkewNoDateHeader(t *testing.T) {
 	}
 }
 
+func TestClockSkewNilHeader(t *testing.T) {
+	details := map[string]interface{}{}
+	if addClockSkew(details, nil) {
+		t.Fatal("expected no skew with nil header")
+	}
+	if _, ok := details["clockSkewSeconds"]; ok {
+		t.Fatal("did not expect clockSkewSeconds")
+	}
+}
+
+func TestClockSkewInvalidDate(t *testing.T) {
+	details := map[string]interface{}{}
+	header := http.Header{"Date": []string{"not a date"}}
+	if addClockSkew(details, header) {
+		t.Fatal("expected no skew with invalid date")
+	}
+	if _, ok := details["clockSkewSeconds"]; ok {
+		t.Fatal("did not expect clockSkewSeconds")
+	}
+}
+
 func TestGoogleAPIErrorForbidden(t *testing.T) {
 	gapiErr := &googleapi.Error{
 		Code:    http.StatusForbidden,
@@ -349,6 +370,81 @@ func TestOAuthErrorInvalidJSON(t *testing.T) {
 	}
 	if apiErr.Code != CodeAuthFailure {
 		t.Errorf("expected auth failure, got %s", apiErr.Code)
+	}
+}
+
+func TestOAuthErrorBodyNil(t *testing.T) {
+	retrieveErr := &oauth2.RetrieveError{
+		Response: &http.Response{
+			StatusCode: http.StatusBadRequest,
+			Header:     http.Header{},
+		},
+		Body: nil,
+	}
+	apiErr := ClassifyAuthError(retrieveErr)
+	if apiErr == nil {
+		t.Fatalf("expected APIError")
+	}
+	details, ok := apiErr.Details.(map[string]interface{})
+	if !ok {
+		t.Fatal("expected details to be map")
+	}
+	if _, ok := details["oauthError"]; ok {
+		t.Fatal("did not expect oauthError")
+	}
+}
+
+func TestOAuthErrorSkewedInvalidClient(t *testing.T) {
+	skewedTime := time.Now().Add(-10 * time.Minute)
+	retrieveErr := &oauth2.RetrieveError{
+		Response: &http.Response{
+			StatusCode: http.StatusBadRequest,
+			Header:     http.Header{"Date": []string{skewedTime.UTC().Format(http.TimeFormat)}},
+		},
+		Body: []byte(`{"error":"invalid_client"}`),
+	}
+	apiErr := ClassifyAuthError(retrieveErr)
+	if apiErr == nil {
+		t.Fatalf("expected APIError")
+	}
+	if !contains(apiErr.Hint, "clock") {
+		t.Fatal("expected clock skew hint")
+	}
+}
+
+func TestOAuthErrorSkewedAccessDenied(t *testing.T) {
+	skewedTime := time.Now().Add(-10 * time.Minute)
+	retrieveErr := &oauth2.RetrieveError{
+		Response: &http.Response{
+			StatusCode: http.StatusBadRequest,
+			Header:     http.Header{"Date": []string{skewedTime.UTC().Format(http.TimeFormat)}},
+		},
+		Body: []byte(`{"error":"access_denied"}`),
+	}
+	apiErr := ClassifyAuthError(retrieveErr)
+	if apiErr == nil {
+		t.Fatalf("expected APIError")
+	}
+	if !contains(apiErr.Hint, "clock") {
+		t.Fatal("expected clock skew hint")
+	}
+}
+
+func TestOAuthErrorSkewedDefault(t *testing.T) {
+	skewedTime := time.Now().Add(-10 * time.Minute)
+	retrieveErr := &oauth2.RetrieveError{
+		Response: &http.Response{
+			StatusCode: http.StatusBadRequest,
+			Header:     http.Header{"Date": []string{skewedTime.UTC().Format(http.TimeFormat)}},
+		},
+		Body: []byte(`{"error":"unknown_error"}`),
+	}
+	apiErr := ClassifyAuthError(retrieveErr)
+	if apiErr == nil {
+		t.Fatalf("expected APIError")
+	}
+	if !contains(apiErr.Hint, "clock") {
+		t.Fatal("expected clock skew hint")
 	}
 }
 

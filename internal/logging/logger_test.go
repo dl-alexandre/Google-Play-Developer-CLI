@@ -2,8 +2,11 @@ package logging
 
 import (
 	"bytes"
+	"encoding/json"
+	stdErrors "errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestPIIRedactorAllowlistedFields(t *testing.T) {
@@ -167,10 +170,38 @@ func TestFieldCreators(t *testing.T) {
 		}
 	})
 
+	t.Run("Int64", func(t *testing.T) {
+		f := Int64("count", int64(99))
+		if f.Key != "count" || f.Value != int64(99) {
+			t.Error("Int64 field not created correctly")
+		}
+	})
+
 	t.Run("Bool", func(t *testing.T) {
 		f := Bool("enabled", true)
 		if f.Key != "enabled" || f.Value != true {
 			t.Error("Bool field not created correctly")
+		}
+	})
+
+	t.Run("Duration", func(t *testing.T) {
+		f := Duration("elapsed", 2*time.Second)
+		if f.Key != "elapsed" || f.Value != "2s" {
+			t.Error("Duration field not created correctly")
+		}
+	})
+
+	t.Run("ErrNil", func(t *testing.T) {
+		f := Err(nil)
+		if f.Key != "error" || f.Value != nil {
+			t.Error("Err field not created correctly for nil")
+		}
+	})
+
+	t.Run("ErrNonNil", func(t *testing.T) {
+		f := Err(stdErrors.New("boom"))
+		if f.Key != "error" || f.Value != "boom" {
+			t.Error("Err field not created correctly for error")
 		}
 	})
 
@@ -180,4 +211,190 @@ func TestFieldCreators(t *testing.T) {
 			t.Error("Sensitive field not marked as PII")
 		}
 	})
+}
+
+func TestLevelString(t *testing.T) {
+	tests := []struct {
+		level    Level
+		expected string
+	}{
+		{LevelDebug, "DEBUG"},
+		{LevelInfo, "INFO"},
+		{LevelWarn, "WARN"},
+		{LevelError, "ERROR"},
+		{Level(99), "UNKNOWN"},
+	}
+	for _, tt := range tests {
+		if got := tt.level.String(); got != tt.expected {
+			t.Errorf("String() = %q, want %q", got, tt.expected)
+		}
+	}
+}
+
+type errWriter struct{}
+
+func (errWriter) Write(p []byte) (int, error) {
+	return 0, stdErrors.New("write error")
+}
+
+func TestLoggerVerboseJSONWriteError(t *testing.T) {
+	logger := NewLogger(errWriter{}, true)
+	logger.Info("test", String("package", "com.example.app"))
+}
+
+func TestLoggerVerboseJSONMarshalError(t *testing.T) {
+	var buf bytes.Buffer
+	logger := NewLogger(&buf, true)
+	logger.Info("test", Field{Key: "bad", Value: func() {}})
+	if buf.Len() != 0 {
+		t.Fatal("Expected no output on marshal error")
+	}
+}
+
+func TestLoggerPlainWriteError(t *testing.T) {
+	logger := NewLogger(errWriter{}, false)
+	logger.Info("test", String("package", "com.example.app"))
+}
+
+func TestPIIRedactorRedactNil(t *testing.T) {
+	redactor := NewPIIRedactor()
+	if redactor.Redact("email", nil) != nil {
+		t.Fatal("Expected nil")
+	}
+}
+
+func TestPIIRedactorRedactSlice(t *testing.T) {
+	redactor := NewPIIRedactor()
+	result := redactor.Redact("email", []string{"user@example.com"})
+	list, ok := result.([]string)
+	if !ok || len(list) != 1 {
+		t.Fatal("Expected string slice")
+	}
+	if !strings.Contains(list[0], "REDACTED") {
+		t.Fatal("Expected redacted value")
+	}
+}
+
+func TestPIIRedactorRedactMap(t *testing.T) {
+	redactor := NewPIIRedactor()
+	result := redactor.Redact("payload", map[string]interface{}{
+		"email":   "user@example.com",
+		"package": "com.example.app",
+	})
+	m, ok := result.(map[string]interface{})
+	if !ok {
+		t.Fatal("Expected map")
+	}
+	if strings.Contains(m["email"].(string), "user@example.com") {
+		t.Fatal("Expected email to be redacted")
+	}
+	if m["package"] != "com.example.app" {
+		t.Fatal("Expected package to be preserved")
+	}
+}
+
+func TestPIIRedactorRedactOtherType(t *testing.T) {
+	redactor := NewPIIRedactor()
+	if redactor.Redact("token", 123) != "[REDACTED]" {
+		t.Fatal("Expected placeholder")
+	}
+}
+
+func TestPIIRedactorRedactStringEmpty(t *testing.T) {
+	redactor := NewPIIRedactor()
+	if redactor.Redact("email", "") != "" {
+		t.Fatal("Expected empty string")
+	}
+}
+
+func TestPIIRedactorRedactStringShortSensitive(t *testing.T) {
+	redactor := NewPIIRedactor()
+	if redactor.Redact("token", "abc") != "[REDACTED]" {
+		t.Fatal("Expected redacted short token")
+	}
+}
+
+func TestPIIRedactorRedactStringLongSensitive(t *testing.T) {
+	redactor := NewPIIRedactor()
+	result := redactor.Redact("token", "abcdefgh")
+	s, ok := result.(string)
+	if !ok || !strings.Contains(s, "[REDACTED]") {
+		t.Fatal("Expected redacted long token")
+	}
+}
+
+func TestPIIRedactorRedactMapFunction(t *testing.T) {
+	redactor := NewPIIRedactor()
+	result := redactor.RedactMap(map[string]interface{}{
+		"email":      "user@example.com",
+		"package":    "com.example.app",
+		"custom":     "user@example.com",
+		"customNon":  123,
+		"pageToken":  "safe",
+		"secretKey":  "abc",
+		"credential": "xyz",
+	})
+	if strings.Contains(result["email"].(string), "user@example.com") {
+		t.Fatal("Expected email redacted")
+	}
+	if result["package"] != "com.example.app" {
+		t.Fatal("Expected allowed field preserved")
+	}
+	if !strings.Contains(result["custom"].(string), "REDACTED") {
+		t.Fatal("Expected custom string redacted")
+	}
+	if result["customNon"].(int) != 123 {
+		t.Fatal("Expected custom non-string preserved")
+	}
+}
+
+func TestDefaultLoggerHelpers(t *testing.T) {
+	var buf bytes.Buffer
+	_ = getDefaultLogger()
+	logger := NewLogger(&buf, false)
+	logger.SetLevel(LevelDebug)
+	SetDefault(logger)
+	Debug("debug", String("package", "com.example.app"))
+	Info("info", String("package", "com.example.app"))
+	Warn("warn", String("package", "com.example.app"))
+	Error("error", String("package", "com.example.app"))
+	output := buf.String()
+	if !strings.Contains(output, "debug") {
+		t.Fatal("Expected debug output")
+	}
+	if !strings.Contains(output, "info") {
+		t.Fatal("Expected info output")
+	}
+	if !strings.Contains(output, "warn") {
+		t.Fatal("Expected warn output")
+	}
+	if !strings.Contains(output, "error") {
+		t.Fatal("Expected error output")
+	}
+}
+
+func TestLoggerRedactsPIIFlag(t *testing.T) {
+	var buf bytes.Buffer
+	logger := NewLogger(&buf, false)
+	logger.Info("test", Sensitive("token", "secret"))
+	output := buf.String()
+	if !strings.Contains(output, "REDACTED") {
+		t.Fatal("Expected redacted value")
+	}
+}
+
+func TestLoggerVerboseJSONStructure(t *testing.T) {
+	var buf bytes.Buffer
+	logger := NewLogger(&buf, true)
+	logger.Info("test", String("package", "com.example.app"))
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(buf.Bytes(), &parsed); err != nil {
+		t.Fatalf("Expected JSON output: %v", err)
+	}
+	if parsed["message"] != "test" {
+		t.Fatal("Expected message field")
+	}
+	if parsed["level"] != "INFO" {
+		t.Fatal("Expected level field")
+	}
 }

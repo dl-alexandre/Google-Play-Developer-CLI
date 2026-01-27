@@ -3,6 +3,7 @@ package output
 import (
 	"bytes"
 	"encoding/json"
+	stdErrors "errors"
 	"strings"
 	"testing"
 	"time"
@@ -597,5 +598,382 @@ func TestCSVFormatError(t *testing.T) {
 	var parsed map[string]interface{}
 	if err := json.Unmarshal(buf.Bytes(), &parsed); err != nil {
 		t.Fatalf("Error output should be valid JSON: %v", err)
+	}
+}
+
+func TestSetFieldsAppliesProjection(t *testing.T) {
+	var buf bytes.Buffer
+	mgr := NewManager(&buf).SetFields([]string{"data.key"})
+	result := NewResult(map[string]interface{}{"key": "value"})
+	if err := mgr.Write(result); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(buf.Bytes(), &parsed); err != nil {
+		t.Fatalf("Output is not valid JSON: %v", err)
+	}
+	if _, ok := parsed["data"]; !ok {
+		t.Error("Output missing data field")
+	}
+}
+
+func TestTableFormatSliceWithNonMapFallbacksToJSON(t *testing.T) {
+	var buf bytes.Buffer
+	mgr := NewManager(&buf).SetFormat(FormatTable)
+	result := NewResult([]interface{}{"value"})
+	if err := mgr.Write(result); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(buf.Bytes(), &parsed); err != nil {
+		t.Fatalf("Fallback output should be JSON: %v", err)
+	}
+}
+
+func TestTableFormatUnsupportedTypeFallbacksToJSON(t *testing.T) {
+	var buf bytes.Buffer
+	mgr := NewManager(&buf).SetFormat(FormatTable)
+	result := NewResult(42)
+	if err := mgr.Write(result); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(buf.Bytes(), &parsed); err != nil {
+		t.Fatalf("Fallback output should be JSON: %v", err)
+	}
+}
+
+func TestMarkdownFormatUnsupportedTypeFallbacksToJSON(t *testing.T) {
+	var buf bytes.Buffer
+	mgr := NewManager(&buf).SetFormat(FormatMarkdown)
+	result := NewResult(42)
+	if err := mgr.Write(result); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(buf.Bytes(), &parsed); err != nil {
+		t.Fatalf("Fallback output should be JSON: %v", err)
+	}
+}
+
+func TestMarkdownFormatErrorWithoutHint(t *testing.T) {
+	var buf bytes.Buffer
+	mgr := NewManager(&buf).SetFormat(FormatMarkdown)
+	err := errors.NewAPIError(errors.CodeValidationError, "test error")
+	result := NewErrorResult(err)
+	if err := mgr.Write(result); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	output := buf.String()
+	if strings.Contains(output, "Hint") {
+		t.Error("Markdown error output should not include hint")
+	}
+}
+
+func TestCSVFormatNonSliceFallbacksToJSON(t *testing.T) {
+	var buf bytes.Buffer
+	mgr := NewManager(&buf).SetFormat(FormatCSV)
+	result := NewResult(map[string]interface{}{"key": "value"})
+	if err := mgr.Write(result); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(buf.Bytes(), &parsed); err != nil {
+		t.Fatalf("Fallback output should be JSON: %v", err)
+	}
+}
+
+func TestCSVFormatSliceWithNonMapFallbacksToJSON(t *testing.T) {
+	var buf bytes.Buffer
+	mgr := NewManager(&buf).SetFormat(FormatCSV)
+	result := NewResult([]interface{}{"value"})
+	if err := mgr.Write(result); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(buf.Bytes(), &parsed); err != nil {
+		t.Fatalf("Fallback output should be JSON: %v", err)
+	}
+}
+
+func TestWriteUnknownFormatDefaultsToJSON(t *testing.T) {
+	var buf bytes.Buffer
+	mgr := NewManager(&buf).SetFormat(Format("unknown"))
+	result := NewResult(map[string]interface{}{"key": "value"})
+	if err := mgr.Write(result); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(buf.Bytes(), &parsed); err != nil {
+		t.Fatalf("Output should be JSON: %v", err)
+	}
+}
+
+func TestWriteJSONReturnsErrorOnInvalidData(t *testing.T) {
+	var buf bytes.Buffer
+	mgr := NewManager(&buf)
+	result := &Result{Data: func() {}, Meta: &Metadata{}}
+	if err := mgr.Write(result); err == nil {
+		t.Fatal("Expected error from JSON marshal")
+	}
+}
+
+func TestWithMetaNilPaths(t *testing.T) {
+	r1 := &Result{}
+	r1.WithDuration(5 * time.Millisecond)
+	if r1.Meta == nil || r1.Meta.DurationMs != 5 {
+		t.Fatal("WithDuration should initialize meta")
+	}
+
+	r2 := &Result{}
+	r2.WithServices("a", "b")
+	if r2.Meta == nil || len(r2.Meta.Services) != 2 {
+		t.Fatal("WithServices should initialize meta")
+	}
+
+	r3 := &Result{}
+	r3.WithNoOp("reason")
+	if r3.Meta == nil || !r3.Meta.NoOp || r3.Meta.NoOpReason != "reason" {
+		t.Fatal("WithNoOp should initialize meta")
+	}
+
+	r4 := &Result{}
+	r4.WithPagination("p", "n")
+	if r4.Meta == nil || r4.Meta.PageToken != "p" || r4.Meta.NextPageToken != "n" {
+		t.Fatal("WithPagination should initialize meta")
+	}
+
+	r5 := &Result{}
+	r5.WithWarnings("w1", "w2")
+	if r5.Meta == nil || len(r5.Meta.Warnings) != 2 {
+		t.Fatal("WithWarnings should initialize meta")
+	}
+
+	r6 := &Result{}
+	r6.WithPartial(1, 2, 3)
+	if r6.Meta == nil || !r6.Meta.Partial {
+		t.Fatal("WithPartial should initialize meta")
+	}
+
+	r7 := &Result{}
+	r7.WithRetries(2)
+	if r7.Meta == nil || r7.Meta.Retries != 2 {
+		t.Fatal("WithRetries should initialize meta")
+	}
+
+	r8 := &Result{}
+	r8.WithRequestID("req")
+	if r8.Meta == nil || r8.Meta.RequestID != "req" {
+		t.Fatal("WithRequestID should initialize meta")
+	}
+}
+
+type errWriter struct{}
+
+func (errWriter) Write(p []byte) (int, error) {
+	return 0, stdErrors.New("write error")
+}
+
+type failAfterWriter struct {
+	writes int
+	limit  int
+}
+
+func (w *failAfterWriter) Write(p []byte) (int, error) {
+	w.writes++
+	if w.writes > w.limit {
+		return 0, stdErrors.New("write error")
+	}
+	return len(p), nil
+}
+
+func TestWriteTableSliceWriteError(t *testing.T) {
+	mgr := NewManager(errWriter{}).SetFormat(FormatTable)
+	err := mgr.writeTableSlice([]interface{}{map[string]interface{}{"a": "b"}})
+	if err == nil {
+		t.Fatal("Expected error")
+	}
+}
+
+func TestWriteTableSliceSeparatorWriteError(t *testing.T) {
+	writer := &failAfterWriter{limit: 1}
+	mgr := NewManager(writer).SetFormat(FormatTable)
+	err := mgr.writeTableSlice([]interface{}{map[string]interface{}{"a": "b"}})
+	if err == nil {
+		t.Fatal("Expected error")
+	}
+}
+
+func TestWriteTableSliceRowWriteError(t *testing.T) {
+	writer := &failAfterWriter{limit: 2}
+	mgr := NewManager(writer).SetFormat(FormatTable)
+	err := mgr.writeTableSlice([]interface{}{map[string]interface{}{"a": "b"}})
+	if err == nil {
+		t.Fatal("Expected error")
+	}
+}
+
+func TestWriteTableSliceSkipsInvalidRows(t *testing.T) {
+	var buf bytes.Buffer
+	mgr := NewManager(&buf).SetFormat(FormatTable)
+	err := mgr.writeTableSlice([]interface{}{map[string]interface{}{"a": "b"}, "skip"})
+	if err != nil {
+		t.Fatalf("writeTableSlice() error = %v", err)
+	}
+	output := buf.String()
+	if !strings.Contains(output, "a") {
+		t.Fatal("Expected output to include header")
+	}
+}
+
+func TestWriteTableMapWriteError(t *testing.T) {
+	mgr := NewManager(errWriter{}).SetFormat(FormatTable)
+	err := mgr.writeTableMap(map[string]interface{}{"a": "b"})
+	if err == nil {
+		t.Fatal("Expected error")
+	}
+}
+
+func TestWriteMarkdownTableWriteError(t *testing.T) {
+	mgr := NewManager(errWriter{}).SetFormat(FormatMarkdown)
+	err := mgr.writeMarkdownTable([]interface{}{map[string]interface{}{"a": "b"}})
+	if err == nil {
+		t.Fatal("Expected error")
+	}
+}
+
+func TestWriteMarkdownTableSeparatorWriteError(t *testing.T) {
+	writer := &failAfterWriter{limit: 1}
+	mgr := NewManager(writer).SetFormat(FormatMarkdown)
+	err := mgr.writeMarkdownTable([]interface{}{map[string]interface{}{"a": "b"}})
+	if err == nil {
+		t.Fatal("Expected error")
+	}
+}
+
+func TestWriteMarkdownTableRowWriteError(t *testing.T) {
+	writer := &failAfterWriter{limit: 2}
+	mgr := NewManager(writer).SetFormat(FormatMarkdown)
+	err := mgr.writeMarkdownTable([]interface{}{map[string]interface{}{"a": "b"}})
+	if err == nil {
+		t.Fatal("Expected error")
+	}
+}
+
+func TestWriteMarkdownTableFallbacksToJSON(t *testing.T) {
+	var buf bytes.Buffer
+	mgr := NewManager(&buf).SetFormat(FormatMarkdown)
+	err := mgr.writeMarkdownTable([]interface{}{"value"})
+	if err != nil {
+		t.Fatalf("writeMarkdownTable() error = %v", err)
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(buf.Bytes(), &parsed); err != nil {
+		t.Fatalf("Fallback output should be JSON: %v", err)
+	}
+}
+
+func TestWriteMarkdownTableEmptyWriteError(t *testing.T) {
+	mgr := NewManager(errWriter{}).SetFormat(FormatMarkdown)
+	err := mgr.writeMarkdownTable([]interface{}{})
+	if err == nil {
+		t.Fatal("Expected error")
+	}
+}
+
+func TestWriteMarkdownTableSkipsInvalidRows(t *testing.T) {
+	var buf bytes.Buffer
+	mgr := NewManager(&buf).SetFormat(FormatMarkdown)
+	err := mgr.writeMarkdownTable([]interface{}{
+		map[string]interface{}{"a": "b"},
+		"skip",
+	})
+	if err != nil {
+		t.Fatalf("writeMarkdownTable() error = %v", err)
+	}
+	output := buf.String()
+	if !strings.Contains(output, "| a |") {
+		t.Fatal("Expected markdown table output")
+	}
+}
+
+func TestWriteMarkdownMapWriteError(t *testing.T) {
+	mgr := NewManager(errWriter{}).SetFormat(FormatMarkdown)
+	err := mgr.writeMarkdownMap(map[string]interface{}{"a": "b"})
+	if err == nil {
+		t.Fatal("Expected error")
+	}
+}
+
+func TestWriteMarkdownErrorWriteFailure(t *testing.T) {
+	mgr := NewManager(errWriter{}).SetFormat(FormatMarkdown)
+	err := mgr.writeMarkdown(NewErrorResult(errors.NewAPIError(errors.CodeValidationError, "bad")))
+	if err == nil {
+		t.Fatal("Expected error")
+	}
+}
+
+func TestWriteMarkdownErrorHintWriteFailure(t *testing.T) {
+	writer := &failAfterWriter{limit: 1}
+	mgr := NewManager(writer).SetFormat(FormatMarkdown)
+	err := mgr.writeMarkdown(NewErrorResult(errors.NewAPIError(errors.CodeValidationError, "bad").WithHint("hint")))
+	if err == nil {
+		t.Fatal("Expected error")
+	}
+}
+
+func TestWriteCSVWriteErrorOnHeader(t *testing.T) {
+	mgr := NewManager(errWriter{}).SetFormat(FormatCSV)
+	err := mgr.writeCSV(NewResult([]interface{}{map[string]interface{}{"a": "b"}}))
+	if err == nil {
+		t.Fatal("Expected error")
+	}
+}
+
+func TestWriteCSVWriteErrorOnRow(t *testing.T) {
+	writer := &failAfterWriter{limit: 1}
+	mgr := NewManager(writer).SetFormat(FormatCSV)
+	err := mgr.writeCSV(NewResult([]interface{}{
+		map[string]interface{}{"a": "b"},
+	}))
+	if err == nil {
+		t.Fatal("Expected error")
+	}
+}
+
+func TestWriteCSVSkipsInvalidRows(t *testing.T) {
+	var buf bytes.Buffer
+	mgr := NewManager(&buf).SetFormat(FormatCSV)
+	err := mgr.writeCSV(NewResult([]interface{}{
+		map[string]interface{}{"a": "b"},
+		"skip",
+	}))
+	if err != nil {
+		t.Fatalf("writeCSV() error = %v", err)
+	}
+	output := buf.String()
+	if !strings.Contains(output, "a") {
+		t.Fatal("Expected CSV header")
+	}
+}
+
+func TestWriteCSVNilData(t *testing.T) {
+	var buf bytes.Buffer
+	mgr := NewManager(&buf).SetFormat(FormatCSV)
+	err := mgr.writeCSV(NewResult(nil))
+	if err != nil {
+		t.Fatalf("writeCSV() error = %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatal("Expected empty output")
 	}
 }

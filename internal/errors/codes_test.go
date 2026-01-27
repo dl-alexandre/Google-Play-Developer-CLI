@@ -75,7 +75,8 @@ func TestAPIErrorChaining(t *testing.T) {
 		WithDetails(map[string]string{"field": "package"}).
 		WithHTTPStatus(http.StatusBadRequest).
 		WithService("androidpublisher").
-		WithOperation("edits.insert")
+		WithOperation("edits.insert").
+		WithRetryAfter(30)
 
 	if err.Code != CodeValidationError {
 		t.Errorf("Code = %v, want %v", err.Code, CodeValidationError)
@@ -94,5 +95,8 @@ func TestAPIErrorChaining(t *testing.T) {
 	}
 	if err.Operation != "edits.insert" {
 		t.Errorf("Operation = %v, want 'edits.insert'", err.Operation)
+	}
+	if err.RetryAfterSeconds != 30 {
+		t.Errorf("RetryAfterSeconds = %v, want 30", err.RetryAfterSeconds)
 	}
 }

@@ -44,11 +44,18 @@ type Paths struct {
 	ConfigFile string
 }
 
+var runtimeGOOS = runtime.GOOS
+var jsonMarshalIndent = json.MarshalIndent
+
 // GetPaths returns the OS-appropriate configuration paths.
 func GetPaths() Paths {
+	return getPathsForOS(runtimeGOOS)
+}
+
+func getPathsForOS(goos string) Paths {
 	var configDir, cacheDir string
 
-	switch runtime.GOOS {
+	switch goos {
 	case "darwin":
 		home, _ := os.UserHomeDir()
 		configDir = filepath.Join(home, "Library", "Application Support", "gpd")
@@ -56,7 +63,7 @@ func GetPaths() Paths {
 	case "windows":
 		configDir = filepath.Join(os.Getenv("APPDATA"), "gpd")
 		cacheDir = filepath.Join(os.Getenv("LOCALAPPDATA"), "gpd")
-	default: // Linux and others
+	default:
 		home, _ := os.UserHomeDir()
 		if xdgConfig := os.Getenv("XDG_CONFIG_HOME"); xdgConfig != "" {
 			configDir = filepath.Join(xdgConfig, "gpd")
@@ -127,7 +134,7 @@ func (c *Config) Save() error {
 		return err
 	}
 
-	data, err := json.MarshalIndent(c, "", "  ")
+	data, err := jsonMarshalIndent(c, "", "  ")
 	if err != nil {
 		return err
 	}

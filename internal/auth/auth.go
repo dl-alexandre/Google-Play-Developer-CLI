@@ -26,6 +26,14 @@ const (
 	// Used for: analytics, vitals
 	ScopePlayReporting = "https://www.googleapis.com/auth/playdeveloperreporting"
 
+	// ScopeGames is the scope for Play Games Services APIs
+	// Used for: games management, play grouping tokens
+	ScopeGames = "https://www.googleapis.com/auth/games"
+
+	// ScopePlayIntegrity is the scope for Play Integrity API
+	// Used for: integrity token decoding
+	ScopePlayIntegrity = "https://www.googleapis.com/auth/playintegrity"
+
 	// Origin string constants
 	originADCString         = "adc"
 	originKeyfileString     = "keyfile"
@@ -93,7 +101,12 @@ func (m *Manager) Authenticate(ctx context.Context, keyPath string) (*Credential
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	scopes := []string{ScopeAndroidPublisher, ScopePlayReporting}
+	scopes := []string{
+		ScopeAndroidPublisher,
+		ScopePlayReporting,
+		ScopeGames,
+		ScopePlayIntegrity,
+	}
 
 	// Priority 1: Explicit key path
 	if keyPath != "" {

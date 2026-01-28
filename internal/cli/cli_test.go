@@ -20,7 +20,7 @@ func TestCommandRegistration(t *testing.T) {
 		commands[cmd.Use] = true
 	}
 
-	requiredCommands := []string{"permissions", "recovery", "games"}
+	requiredCommands := []string{"permissions", "recovery", "games", "customapp", "integrity", "grouping"}
 	for _, cmdName := range requiredCommands {
 		if !commands[cmdName] {
 			t.Errorf("Command %q not found in root commands", cmdName)
@@ -145,6 +145,30 @@ func TestGamesCommandsExist(t *testing.T) {
 
 	applicationsCmd := requireCommand(t, gamesCmd, "applications")
 	checkSubcommandExists(t, getSubcommandNames(applicationsCmd), "list-hidden", "Applications")
+}
+
+func TestCustomAppCommandsExist(t *testing.T) {
+	cli := New()
+	rootCmd := cli.rootCmd
+
+	customAppCmd := requireCommand(t, rootCmd, "customapp")
+	checkSubcommandExists(t, getSubcommandNames(customAppCmd), "create", "CustomApp")
+}
+
+func TestIntegrityCommandsExist(t *testing.T) {
+	cli := New()
+	rootCmd := cli.rootCmd
+
+	integrityCmd := requireCommand(t, rootCmd, "integrity")
+	checkRequiredSubcommands(t, getSubcommandNames(integrityCmd), []string{"decode"}, "Integrity")
+}
+
+func TestGroupingCommandsExist(t *testing.T) {
+	cli := New()
+	rootCmd := cli.rootCmd
+
+	groupingCmd := requireCommand(t, rootCmd, "grouping")
+	checkRequiredSubcommands(t, getSubcommandNames(groupingCmd), []string{"token", "token-recall"}, "Grouping")
 }
 
 func TestPermissionsFlags(t *testing.T) {

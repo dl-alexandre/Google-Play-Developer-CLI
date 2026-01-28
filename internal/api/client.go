@@ -14,10 +14,13 @@ import (
 
 	"golang.org/x/oauth2"
 	"google.golang.org/api/androidpublisher/v3"
+	"google.golang.org/api/games/v1"
 	gamesmanagement "google.golang.org/api/gamesmanagement/v1management"
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/option"
+	"google.golang.org/api/playcustomapp/v1"
 	playdeveloperreporting "google.golang.org/api/playdeveloperreporting/v1beta1"
+	"google.golang.org/api/playintegrity/v1"
 )
 
 type RetryConfig struct {
@@ -50,6 +53,18 @@ type Client struct {
 	gamesManagementOnce sync.Once
 	gamesManagementSvc  *gamesmanagement.Service
 	gamesManagementErr  error
+
+	gamesOnce sync.Once
+	gamesSvc  *games.Service
+	gamesErr  error
+
+	playIntegrityOnce sync.Once
+	playIntegritySvc  *playintegrity.Service
+	playIntegrityErr  error
+
+	customAppOnce sync.Once
+	customAppSvc  *playcustomapp.Service
+	customAppErr  error
 
 	semaphore chan struct{}
 }
@@ -144,6 +159,39 @@ func (c *Client) GamesManagement() (*gamesmanagement.Service, error) {
 		)
 	})
 	return c.gamesManagementSvc, c.gamesManagementErr
+}
+
+// Games returns the Play Games Services API service.
+func (c *Client) Games() (*games.Service, error) {
+	c.gamesOnce.Do(func() {
+		c.gamesSvc, c.gamesErr = games.NewService(
+			context.Background(),
+			option.WithHTTPClient(c.httpClient),
+		)
+	})
+	return c.gamesSvc, c.gamesErr
+}
+
+// PlayIntegrity returns the Play Integrity API service.
+func (c *Client) PlayIntegrity() (*playintegrity.Service, error) {
+	c.playIntegrityOnce.Do(func() {
+		c.playIntegritySvc, c.playIntegrityErr = playintegrity.NewService(
+			context.Background(),
+			option.WithHTTPClient(c.httpClient),
+		)
+	})
+	return c.playIntegritySvc, c.playIntegrityErr
+}
+
+// PlayCustomApp returns the Play Custom App Publishing API service.
+func (c *Client) PlayCustomApp() (*playcustomapp.Service, error) {
+	c.customAppOnce.Do(func() {
+		c.customAppSvc, c.customAppErr = playcustomapp.NewService(
+			context.Background(),
+			option.WithHTTPClient(c.httpClient),
+		)
+	})
+	return c.customAppSvc, c.customAppErr
 }
 
 // Acquire acquires a semaphore slot for concurrent API calls.

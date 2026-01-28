@@ -13,6 +13,8 @@ jobs:
   test:
     name: Test
     runs-on: ${{ matrix.os }}
+    env:
+      GPD_REQUIRE_CUSTOM_OAUTH: "1"
     strategy:
       fail-fast: false
       matrix:
@@ -57,6 +59,8 @@ jobs:
     name: Build
     runs-on: ubuntu-latest
     needs: test
+    env:
+      GPD_REQUIRE_CUSTOM_OAUTH: "1"
 
     steps:
       - name: Checkout code
@@ -86,6 +90,8 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    env:
+      GPD_REQUIRE_CUSTOM_OAUTH: "1"
 
     steps:
       - name: Checkout code
@@ -107,6 +113,8 @@ jobs:
   security:
     name: Security Scan
     runs-on: ubuntu-latest
+    env:
+      GPD_REQUIRE_CUSTOM_OAUTH: "1"
 
     steps:
       - name: Checkout code

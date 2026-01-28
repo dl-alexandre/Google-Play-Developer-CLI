@@ -18,6 +18,9 @@ A fast, lightweight command-line interface for the Google Play Developer Console
 - **Monetization**: Complete subscriptions management with base plans, offers, batch operations, and regional pricing conversion
 - **Purchase Management**: Voided purchases tracking, product/subscription acknowledge, consume, cancel, defer, refund, and revoke
 - **Access Control**: Users and grants management for developer accounts and apps
+- **Play Integrity**: Decode integrity tokens for mobile and Play Games on PC
+- **Play Grouping**: Generate Play Grouping API tokens via Play Games Services
+- **Custom App Publishing**: Create and publish custom apps for managed Play distribution
 
 ## Installation
 
@@ -69,6 +72,8 @@ gpd --key /path/to/service-account.json auth status
 export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
 gpd auth status
 ```
+
+**Note:** gpd uses service account authentication only. OAuth user sign-in is not supported.
 
 ### OAuth Testing-Mode Limits
 If you use OAuth credentials in testing mode, refresh tokens expire after 7 days and Google enforces a 100 refresh-token issuance cap per client. If you see repeated `invalid_grant` errors, re-authenticate and revoke unused tokens in Google Cloud Console or move the app to production to avoid the testing-mode limits.
@@ -199,6 +204,16 @@ gpd publish testers list --package ... --track internal
 gpd publish testers add --package ... --track internal --group testers@example.com
 ```
 
+#### `gpd customapp` - Custom App Publishing
+
+```bash
+# Create a custom app (APK required)
+gpd customapp create --account 1234567890 --title "My Custom App" --language en-US --apk app.apk
+
+# Restrict access to specific organizations
+gpd customapp create --account 1234567890 --title "My App" --language en-US --apk app.apk --org-id 0123456789
+```
+
 #### `gpd migrate` - Metadata Migration
 
 ```bash
@@ -265,6 +280,23 @@ gpd analytics query --package ... --start-date 2024-01-01 --end-date 2024-01-31
 
 # View capabilities
 gpd analytics capabilities
+```
+
+#### `gpd integrity` - Play Integrity
+
+```bash
+# Decode a standard integrity token
+gpd integrity decode --package ... --token <token>
+```
+
+#### `gpd grouping` - Play Grouping
+
+```bash
+# Generate a Play Grouping API token
+gpd grouping token --package ... --persona user-123
+
+# Generate a Play Grouping API token using Recall
+gpd grouping token-recall --package ... --persona user-123 --recall-session-id <session-id>
 ```
 
 #### `gpd permissions` - Access Control

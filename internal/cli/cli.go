@@ -101,6 +101,7 @@ for automating Android app publishing and management tasks.`,
 	c.addAuthCommands()
 	c.addConfigCommands()
 	c.addPublishCommands()
+	c.addCustomAppCommands()
 	c.addMigrateCommands()
 	c.addReviewsCommands()
 	c.addPurchasesCommands()
@@ -109,6 +110,8 @@ for automating Android app publishing and management tasks.`,
 	c.addMonetizationCommands()
 	c.addPermissionsCommands()
 	c.addGamesCommands()
+	c.addGroupingCommands()
+	c.addIntegrityCommands()
 	c.addRecoveryCommands()
 	c.addHelpCommands()
 }

@@ -30,13 +30,14 @@ func (c *CLI) addGroupingCommands() {
 				return c.OutputError(err.(*errors.APIError))
 			}
 			if strings.TrimSpace(persona) == "" {
-				return c.OutputError(errors.NewAPIError(errors.CodeValidationError, "--persona is required"))
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError, "--persona is required")).
+					WithServices("games")
+				return c.Output(result)
 			}
 			return c.groupingToken(cmd.Context(), c.packageName, persona)
 		},
 	}
 	tokenCmd.Flags().StringVar(&persona, "persona", "", "Persona identifier for the user (required)")
-	_ = tokenCmd.MarkFlagRequired("persona")
 
 	tokenRecallCmd := &cobra.Command{
 		Use:   "token-recall",
@@ -47,18 +48,20 @@ func (c *CLI) addGroupingCommands() {
 				return c.OutputError(err.(*errors.APIError))
 			}
 			if strings.TrimSpace(persona) == "" {
-				return c.OutputError(errors.NewAPIError(errors.CodeValidationError, "--persona is required"))
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError, "--persona is required")).
+					WithServices("games")
+				return c.Output(result)
 			}
 			if strings.TrimSpace(recallSessionID) == "" {
-				return c.OutputError(errors.NewAPIError(errors.CodeValidationError, "--recall-session-id is required"))
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError, "--recall-session-id is required")).
+					WithServices("games")
+				return c.Output(result)
 			}
 			return c.groupingTokenRecall(cmd.Context(), c.packageName, persona, recallSessionID)
 		},
 	}
 	tokenRecallCmd.Flags().StringVar(&persona, "persona", "", "Persona identifier for the user (required)")
 	tokenRecallCmd.Flags().StringVar(&recallSessionID, "recall-session-id", "", "Recall session ID (required)")
-	_ = tokenRecallCmd.MarkFlagRequired("persona")
-	_ = tokenRecallCmd.MarkFlagRequired("recall-session-id")
 
 	groupingCmd.AddCommand(tokenCmd, tokenRecallCmd)
 	c.rootCmd.AddCommand(groupingCmd)
@@ -79,7 +82,8 @@ func (c *CLI) getGamesService(ctx context.Context) (*games.Service, error) {
 func (c *CLI) groupingToken(ctx context.Context, packageName, persona string) error {
 	svc, err := c.getGamesService(ctx)
 	if err != nil {
-		return c.OutputError(err.(*errors.APIError))
+		result := output.NewErrorResult(err.(*errors.APIError)).WithServices("games")
+		return c.Output(result)
 	}
 
 	resp, err := svc.Accesstokens.GeneratePlayGroupingApiToken().
@@ -88,7 +92,15 @@ func (c *CLI) groupingToken(ctx context.Context, packageName, persona string) er
 		Context(ctx).
 		Do()
 	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+		apiErr := errors.ClassifyAuthError(err)
+		if apiErr == nil {
+			apiErr = errors.NewAPIError(errors.CodeGeneralError, err.Error())
+		}
+		if strings.Contains(apiErr.Message, "has not been used") || strings.Contains(apiErr.Message, "disabled") {
+			apiErr = apiErr.WithHint("Enable the Google Play Games Services API in Google Cloud Console and retry.")
+		}
+		result := output.NewErrorResult(apiErr).WithServices("games")
+		return c.Output(result)
 	}
 
 	return c.Output(output.NewResult(resp).WithServices("games"))
@@ -97,7 +109,8 @@ func (c *CLI) groupingToken(ctx context.Context, packageName, persona string) er
 func (c *CLI) groupingTokenRecall(ctx context.Context, packageName, persona, recallSessionID string) error {
 	svc, err := c.getGamesService(ctx)
 	if err != nil {
-		return c.OutputError(err.(*errors.APIError))
+		result := output.NewErrorResult(err.(*errors.APIError)).WithServices("games")
+		return c.Output(result)
 	}
 
 	resp, err := svc.Accesstokens.GenerateRecallPlayGroupingApiToken().
@@ -107,7 +120,15 @@ func (c *CLI) groupingTokenRecall(ctx context.Context, packageName, persona, rec
 		Context(ctx).
 		Do()
 	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+		apiErr := errors.ClassifyAuthError(err)
+		if apiErr == nil {
+			apiErr = errors.NewAPIError(errors.CodeGeneralError, err.Error())
+		}
+		if strings.Contains(apiErr.Message, "has not been used") || strings.Contains(apiErr.Message, "disabled") {
+			apiErr = apiErr.WithHint("Enable the Google Play Games Services API in Google Cloud Console and retry.")
+		}
+		result := output.NewErrorResult(apiErr).WithServices("games")
+		return c.Output(result)
 	}
 
 	return c.Output(output.NewResult(resp).WithServices("games"))

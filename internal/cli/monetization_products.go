@@ -2,9 +2,13 @@ package cli
 
 import (
 	"context"
+	stdErrors "errors"
+	"net/http"
 	"strconv"
+	"strings"
 
 	"google.golang.org/api/androidpublisher/v3"
+	"google.golang.org/api/googleapi"
 
 	"github.com/dl-alexandre/gpd/internal/errors"
 	"github.com/dl-alexandre/gpd/internal/output"
@@ -36,7 +40,17 @@ func (c *CLI) monetizationProductsList(ctx context.Context, _ int64, pageToken s
 	for {
 		resp, err := req.Context(ctx).Do()
 		if err != nil {
-			return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+			apiErr := errors.ClassifyAuthError(err)
+			if apiErr == nil {
+				apiErr = errors.NewAPIError(errors.CodeGeneralError, err.Error())
+			}
+			var gapiErr *googleapi.Error
+			if stdErrors.As(err, &gapiErr) && gapiErr.Code == http.StatusForbidden &&
+				strings.Contains(gapiErr.Message, "Please migrate to the new publishing API") {
+				apiErr = apiErr.WithHint("This endpoint is legacy. Migrate to the new Play Publishing APIs or use monetization subscriptions/baseplans if applicable.")
+			}
+			result := output.NewErrorResult(apiErr).WithServices("androidpublisher")
+			return c.Output(result)
 		}
 
 		for _, product := range resp.Inappproduct {

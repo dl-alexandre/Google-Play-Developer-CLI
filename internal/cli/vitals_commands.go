@@ -46,8 +46,6 @@ func (c *CLI) addVitalsMetricsCommands(vitalsCmd *cobra.Command) {
 	crashesCmd.Flags().Int64Var(&pageSize, "page-size", 100, "Results per page")
 	crashesCmd.Flags().StringVar(&pageToken, "page-token", "", "Pagination token")
 	addPaginationFlags(crashesCmd, &all)
-	_ = crashesCmd.MarkFlagRequired("start-date")
-	_ = crashesCmd.MarkFlagRequired("end-date")
 
 	anrsCmd := &cobra.Command{
 		Use:   "anrs",
@@ -64,8 +62,6 @@ func (c *CLI) addVitalsMetricsCommands(vitalsCmd *cobra.Command) {
 	anrsCmd.Flags().Int64Var(&pageSize, "page-size", 100, "Results per page")
 	anrsCmd.Flags().StringVar(&pageToken, "page-token", "", "Pagination token")
 	addPaginationFlags(anrsCmd, &all)
-	_ = anrsCmd.MarkFlagRequired("start-date")
-	_ = anrsCmd.MarkFlagRequired("end-date")
 
 	queryCmd := &cobra.Command{
 		Use:   "query",
@@ -83,8 +79,6 @@ func (c *CLI) addVitalsMetricsCommands(vitalsCmd *cobra.Command) {
 	queryCmd.Flags().Int64Var(&pageSize, "page-size", 100, "Results per page")
 	queryCmd.Flags().StringVar(&pageToken, "page-token", "", "Pagination token")
 	addPaginationFlags(queryCmd, &all)
-	_ = queryCmd.MarkFlagRequired("start-date")
-	_ = queryCmd.MarkFlagRequired("end-date")
 
 	vitalsCmd.AddCommand(crashesCmd, anrsCmd, queryCmd)
 	c.addVitalsPerformanceCommands(vitalsCmd)
@@ -115,8 +109,6 @@ func (c *CLI) addVitalsPerformanceCommands(vitalsCmd *cobra.Command) {
 	excessiveWakeupsCmd.Flags().Int64Var(&pageSize, "page-size", 100, "Results per page")
 	excessiveWakeupsCmd.Flags().StringVar(&pageToken, "page-token", "", "Pagination token")
 	addPaginationFlags(excessiveWakeupsCmd, &all)
-	_ = excessiveWakeupsCmd.MarkFlagRequired("start-date")
-	_ = excessiveWakeupsCmd.MarkFlagRequired("end-date")
 
 	lmkRateCmd := &cobra.Command{
 		Use:   "lmk-rate",
@@ -132,8 +124,6 @@ func (c *CLI) addVitalsPerformanceCommands(vitalsCmd *cobra.Command) {
 	lmkRateCmd.Flags().Int64Var(&pageSize, "page-size", 100, "Results per page")
 	lmkRateCmd.Flags().StringVar(&pageToken, "page-token", "", "Pagination token")
 	addPaginationFlags(lmkRateCmd, &all)
-	_ = lmkRateCmd.MarkFlagRequired("start-date")
-	_ = lmkRateCmd.MarkFlagRequired("end-date")
 
 	slowRenderingCmd := &cobra.Command{
 		Use:   "slow-rendering",
@@ -149,8 +139,6 @@ func (c *CLI) addVitalsPerformanceCommands(vitalsCmd *cobra.Command) {
 	slowRenderingCmd.Flags().Int64Var(&pageSize, "page-size", 100, "Results per page")
 	slowRenderingCmd.Flags().StringVar(&pageToken, "page-token", "", "Pagination token")
 	addPaginationFlags(slowRenderingCmd, &all)
-	_ = slowRenderingCmd.MarkFlagRequired("start-date")
-	_ = slowRenderingCmd.MarkFlagRequired("end-date")
 
 	slowStartCmd := &cobra.Command{
 		Use:   "slow-start",
@@ -166,8 +154,6 @@ func (c *CLI) addVitalsPerformanceCommands(vitalsCmd *cobra.Command) {
 	slowStartCmd.Flags().Int64Var(&pageSize, "page-size", 100, "Results per page")
 	slowStartCmd.Flags().StringVar(&pageToken, "page-token", "", "Pagination token")
 	addPaginationFlags(slowStartCmd, &all)
-	_ = slowStartCmd.MarkFlagRequired("start-date")
-	_ = slowStartCmd.MarkFlagRequired("end-date")
 
 	stuckWakelocksCmd := &cobra.Command{
 		Use:   "stuck-wakelocks",
@@ -183,8 +169,6 @@ func (c *CLI) addVitalsPerformanceCommands(vitalsCmd *cobra.Command) {
 	stuckWakelocksCmd.Flags().Int64Var(&pageSize, "page-size", 100, "Results per page")
 	stuckWakelocksCmd.Flags().StringVar(&pageToken, "page-token", "", "Pagination token")
 	addPaginationFlags(stuckWakelocksCmd, &all)
-	_ = stuckWakelocksCmd.MarkFlagRequired("start-date")
-	_ = stuckWakelocksCmd.MarkFlagRequired("end-date")
 
 	vitalsCmd.AddCommand(excessiveWakeupsCmd, lmkRateCmd, slowRenderingCmd, slowStartCmd, stuckWakelocksCmd)
 }
@@ -238,6 +222,11 @@ func (c *CLI) addVitalsErrorsCommands(vitalsCmd *cobra.Command) {
 }
 
 func (c *CLI) addVitalsErrorsCountsCommands(errorsCmd *cobra.Command) {
+	countsCmd := &cobra.Command{
+		Use:   "counts",
+		Short: "Error count metrics",
+	}
+
 	var (
 		countsStartDate string
 		countsEndDate   string
@@ -248,7 +237,7 @@ func (c *CLI) addVitalsErrorsCountsCommands(errorsCmd *cobra.Command) {
 	)
 
 	errorsCountsGetCmd := &cobra.Command{
-		Use:   "counts get",
+		Use:   "get",
 		Short: "Get error count metrics",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return c.vitalsErrorsCountsGet(cmd.Context())
@@ -256,7 +245,7 @@ func (c *CLI) addVitalsErrorsCountsCommands(errorsCmd *cobra.Command) {
 	}
 
 	errorsCountsQueryCmd := &cobra.Command{
-		Use:   "counts query",
+		Use:   "query",
 		Short: "Query error counts over time",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return c.vitalsErrorsCountsQuery(cmd.Context(), countsStartDate, countsEndDate, countsDims, errorPageSize, errorPageToken, errorAll)
@@ -268,10 +257,9 @@ func (c *CLI) addVitalsErrorsCountsCommands(errorsCmd *cobra.Command) {
 	errorsCountsQueryCmd.Flags().Int64Var(&errorPageSize, "page-size", 100, "Results per page")
 	errorsCountsQueryCmd.Flags().StringVar(&errorPageToken, "page-token", "", "Pagination token")
 	addPaginationFlags(errorsCountsQueryCmd, &errorAll)
-	_ = errorsCountsQueryCmd.MarkFlagRequired("start-date")
-	_ = errorsCountsQueryCmd.MarkFlagRequired("end-date")
 
-	errorsCmd.AddCommand(errorsCountsGetCmd, errorsCountsQueryCmd)
+	countsCmd.AddCommand(errorsCountsGetCmd, errorsCountsQueryCmd)
+	errorsCmd.AddCommand(countsCmd)
 }
 
 func (c *CLI) addVitalsAnomaliesCommands(vitalsCmd *cobra.Command) {

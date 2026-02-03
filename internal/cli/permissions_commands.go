@@ -3,11 +3,14 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	stdErrors "errors"
+	"net/http"
 	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"google.golang.org/api/androidpublisher/v3"
+	"google.golang.org/api/googleapi"
 
 	"github.com/dl-alexandre/gpd/internal/errors"
 	"github.com/dl-alexandre/gpd/internal/output"
@@ -71,12 +74,14 @@ func (c *CLI) addUsersCommands(parent *cobra.Command) {
 		Long:  "Grants access for a user to the developer account by email.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if developerID == "" {
-				return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
-					"--developer-id is required"))
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--developer-id is required")).WithServices("androidpublisher")
+				return c.Output(result)
 			}
 			if email == "" {
-				return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
-					"--email is required"))
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--email is required")).WithServices("androidpublisher")
+				return c.Output(result)
 			}
 			return c.permissionsUsersCreate(cmd.Context(), developerID, email, developerPermissions, expirationTime)
 		},
@@ -85,8 +90,6 @@ func (c *CLI) addUsersCommands(parent *cobra.Command) {
 	usersCreateCmd.Flags().StringVar(&email, "email", "", "User email address (required)")
 	usersCreateCmd.Flags().StringSliceVar(&developerPermissions, "developer-permissions", nil, "Developer-level permissions (comma-separated)")
 	usersCreateCmd.Flags().StringVar(&expirationTime, "expiration-time", "", "Access expiration time (RFC3339 format)")
-	_ = usersCreateCmd.MarkFlagRequired("developer-id")
-	_ = usersCreateCmd.MarkFlagRequired("email")
 
 	usersListCmd := &cobra.Command{
 		Use:   "list",
@@ -94,8 +97,9 @@ func (c *CLI) addUsersCommands(parent *cobra.Command) {
 		Long:  "Lists all users with access to the developer account with pagination support.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if developerID == "" {
-				return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
-					"--developer-id is required"))
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--developer-id is required")).WithServices("androidpublisher")
+				return c.Output(result)
 			}
 			return c.permissionsUsersList(cmd.Context(), developerID, pageSize, pageToken, all)
 		},
@@ -104,7 +108,6 @@ func (c *CLI) addUsersCommands(parent *cobra.Command) {
 	usersListCmd.Flags().Int64Var(&pageSize, "page-size", 100, "Results per page")
 	usersListCmd.Flags().StringVar(&pageToken, "page-token", "", "Pagination token")
 	addPaginationFlags(usersListCmd, &all)
-	_ = usersListCmd.MarkFlagRequired("developer-id")
 
 	usersDeleteCmd := &cobra.Command{
 		Use:   "delete [name]",
@@ -123,8 +126,10 @@ func (c *CLI) addUsersCommands(parent *cobra.Command) {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if userFile == "" && len(developerPermissions) == 0 && expirationTime == "" {
-				return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
-					"at least one of --developer-permissions, --expiration-time, or --file is required"))
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"at least one of --developer-permissions, --expiration-time, or --file is required")).
+					WithServices("androidpublisher")
+				return c.Output(result)
 			}
 			return c.permissionsUsersPatch(cmd.Context(), args[0], developerPermissions, expirationTime, userFile)
 		},
@@ -170,11 +175,13 @@ func (c *CLI) addGrantsCommands(parent *cobra.Command) {
 				return c.permissionsListAvailable(cmd.Context())
 			}
 			if err := c.requirePackage(); err != nil {
-				return c.OutputError(err.(*errors.APIError))
+				result := output.NewErrorResult(err.(*errors.APIError)).WithServices("androidpublisher")
+				return c.Output(result)
 			}
 			if email == "" {
-				return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
-					"--email is required"))
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--email is required")).WithServices("androidpublisher")
+				return c.Output(result)
 			}
 			return c.permissionsGrantsCreate(cmd.Context(), email, appPermissions)
 		},
@@ -182,7 +189,6 @@ func (c *CLI) addGrantsCommands(parent *cobra.Command) {
 	grantsCreateCmd.Flags().StringVar(&email, "email", "", "User email address (required)")
 	grantsCreateCmd.Flags().StringSliceVar(&appPermissions, "app-permissions", nil, "App-level permissions (comma-separated)")
 	grantsCreateCmd.Flags().BoolVar(&listPermissions, "list-permissions", false, "List available app-level permission names")
-	_ = grantsCreateCmd.MarkFlagRequired("email")
 
 	grantsDeleteCmd := &cobra.Command{
 		Use:   "delete [name]",
@@ -204,12 +210,14 @@ func (c *CLI) addGrantsCommands(parent *cobra.Command) {
 				return c.permissionsListAvailable(cmd.Context())
 			}
 			if len(args) == 0 {
-				return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
-					"grant name argument is required"))
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"grant name argument is required")).WithServices("androidpublisher")
+				return c.Output(result)
 			}
 			if grantFile == "" && len(appPermissions) == 0 {
-				return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
-					"at least one of --app-permissions or --file is required"))
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"at least one of --app-permissions or --file is required")).WithServices("androidpublisher")
+				return c.Output(result)
 			}
 			return c.permissionsGrantsPatch(cmd.Context(), args[0], appPermissions, grantFile)
 		},
@@ -306,7 +314,17 @@ func (c *CLI) permissionsUsersList(ctx context.Context, developerID string, page
 	for {
 		resp, err := req.Context(ctx).Do()
 		if err != nil {
-			return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+			apiErr := errors.ClassifyAuthError(err)
+			if apiErr == nil {
+				apiErr = errors.NewAPIError(errors.CodeGeneralError, err.Error())
+			}
+			var gapiErr *googleapi.Error
+			if stdErrors.As(err, &gapiErr) && gapiErr.Code == http.StatusBadRequest &&
+				strings.Contains(gapiErr.Message, "Invalid Developer ID") {
+				apiErr = apiErr.WithHint("Developer ID is in the Play Console URL: https://play.google.com/console/u/0/developers/<id>")
+			}
+			result := output.NewErrorResult(apiErr).WithServices("androidpublisher")
+			return c.Output(result)
 		}
 
 		for _, user := range resp.Users {

@@ -4,7 +4,18 @@ A fast, lightweight command-line interface for the Google Play Developer Console
 
 [![CI](https://github.com/dl-alexandre/gpd/actions/workflows/ci.yml/badge.svg)](https://github.com/dl-alexandre/gpd/actions/workflows/ci.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/dl-alexandre/gpd)](https://goreportcard.com/report/github.com/dl-alexandre/gpd)
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+## Test Coverage
+
+- Current statement coverage: 31.5% (from `coverage.out`)
+- Lowest coverage areas:
+  - `internal/cli` (~22%)
+  - `cmd/gpd` (~50%)
+  - `internal/edits` (~64%)
+  - `internal/migrate/fastlane` (~82%)
+  - `internal/api` (~89%)
+- Gaps to fill next: CLI command handlers, edit lock/content flows, API client edge conditions
 
 ## Features
 
@@ -110,9 +121,14 @@ gpd reviews list --package com.example.app --min-rating 1 --max-rating 3
 #### `gpd auth` - Authentication
 
 ```bash
+gpd auth login              # OAuth device login (uses GPD_CLIENT_ID)
+gpd auth init               # Alias for auth login
+gpd auth switch <profile>   # Switch active profile
+gpd auth list               # List stored profiles
 gpd auth status              # Check authentication status
 gpd auth check --package ... # Validate permissions
 gpd auth logout              # Clear stored credentials
+gpd auth doctor              # Diagnose authentication setup
 ```
 
 #### `gpd config` - Configuration
@@ -126,11 +142,27 @@ gpd config set <key> <value> # Set a configuration value
 gpd config completion bash   # Generate shell completions
 ```
 
+#### `gpd apps` - App Discovery
+
+```bash
+# List apps in the developer account
+gpd apps list
+
+# Get app details by package
+gpd apps get com.example.app
+```
+
 #### `gpd publish` - App Publishing
 
 ```bash
 # Upload artifacts
 gpd publish upload app.aab --package com.example.app
+
+# List and inspect builds
+gpd publish builds list --package ...
+gpd publish builds get 123 --package ...
+gpd publish builds expire 123 --package ... --confirm
+gpd publish builds expire-all --package ... --confirm
 
 # Create/update releases
 gpd publish release --package ... --track internal --status draft
@@ -150,6 +182,8 @@ gpd publish capabilities
 # Store listing
 gpd publish listing update --package ... --locale en-US --title "My App"
 gpd publish listing get --package ...
+gpd publish listing delete --package ... --locale en-US --confirm
+gpd publish listing delete-all --package ... --confirm
 
 # Assets
 gpd publish assets upload ./assets --package ...
@@ -158,6 +192,7 @@ gpd publish assets spec
 # Testers
 gpd publish testers list --package ... --track internal
 gpd publish testers add --package ... --track internal --group testers@example.com
+gpd publish testers get --package ... --track internal
 ```
 
 #### `gpd reviews` - Review Management
@@ -170,6 +205,13 @@ gpd reviews list --package ... --include-review-text --scan-limit 200
 # Reply to reviews
 gpd reviews reply --package ... --review-id abc123 --text "Thank you!"
 gpd reviews reply --package ... --review-id abc123 --template-file reply.txt
+
+# Get a review
+gpd reviews get --review-id abc123
+
+# Get the developer response for a review
+gpd reviews response get --review-id abc123
+gpd reviews response for-review --review-id abc123
 
 # View capabilities
 gpd reviews capabilities
@@ -188,8 +230,8 @@ gpd purchases capabilities
 #### `gpd analytics` - App Analytics
 
 ```bash
-# Query analytics data
-gpd analytics query --package ... --start-date 2024-01-01 --end-date 2024-01-31
+# Query analytics data (vitals metrics)
+gpd analytics query --package ... --metrics crashRate --start-date 2024-01-01 --end-date 2024-01-31
 
 # View capabilities
 gpd analytics capabilities
@@ -326,3 +368,7 @@ Apache License 2.0 - see [LICENSE](LICENSE) for details.
 - [App Store Connect CLI](https://github.com/ittybittyapps/appstoreconnect-cli) - Similar tool for iOS/macOS apps
 - [fastlane](https://fastlane.tools/) - Automation for iOS and Android
 - [gradle-play-publisher](https://github.com/Triple-T/gradle-play-publisher) - Gradle plugin for Android publishing
+
+## App Store Connect CLI Parity
+
+See the parity matrix in [docs/asc-parity.md](docs/asc-parity.md).

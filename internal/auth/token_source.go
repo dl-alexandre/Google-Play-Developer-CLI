@@ -29,9 +29,20 @@ func (s *PersistedTokenSource) Token() (*oauth2.Token, error) {
 		return token, nil
 	}
 
+	if token.RefreshToken == "" {
+		if existing, err := s.storage.Retrieve(s.storageKey); err == nil && len(existing) > 0 {
+			var storedToken StoredToken
+			if err := json.Unmarshal(existing, &storedToken); err == nil && storedToken.RefreshToken != "" {
+				token.RefreshToken = storedToken.RefreshToken
+			}
+		}
+	}
+
 	stored := StoredToken{
-		AccessToken: token.AccessToken,
-		Expiry:      token.Expiry.Format(time.RFC3339),
+		AccessToken:  token.AccessToken,
+		RefreshToken: token.RefreshToken,
+		TokenType:    token.TokenType,
+		Expiry:       token.Expiry.Format(time.RFC3339),
 	}
 	if s.metadata != nil {
 		stored.Origin = s.metadata.Origin

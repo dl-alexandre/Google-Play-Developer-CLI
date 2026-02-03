@@ -839,30 +839,37 @@ func (c *CLI) updateTrackWithRollback(ctx context.Context, publisher *androidpub
 
 func (c *CLI) publishStatus(ctx context.Context, track string) error {
 	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
+		result := output.NewErrorResult(err.(*errors.APIError)).WithServices("androidpublisher")
+		return c.Output(result)
 	}
 
 	client, err := c.getAPIClient(ctx)
 	if err != nil {
-		return c.OutputError(err.(*errors.APIError))
+		result := output.NewErrorResult(err.(*errors.APIError)).WithServices("androidpublisher")
+		return c.Output(result)
 	}
 
 	publisher, err := client.AndroidPublisher()
 	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+		result := output.NewErrorResult(errors.NewAPIError(errors.CodeGeneralError, err.Error())).
+			WithServices("androidpublisher")
+		return c.Output(result)
 	}
 
 	edit, err := publisher.Edits.Insert(c.packageName, nil).Context(ctx).Do()
 	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+		result := output.NewErrorResult(errors.NewAPIError(errors.CodeGeneralError, err.Error())).
+			WithServices("androidpublisher")
+		return c.Output(result)
 	}
 	defer func() { _ = publisher.Edits.Delete(c.packageName, edit.Id).Context(ctx).Do() }()
 
 	if track != "" {
 		trackInfo, err := publisher.Edits.Tracks.Get(c.packageName, edit.Id, track).Context(ctx).Do()
 		if err != nil {
-			return c.OutputError(errors.NewAPIError(errors.CodeNotFound,
-				fmt.Sprintf("track not found: %s", track)))
+			result := output.NewErrorResult(errors.NewAPIError(errors.CodeNotFound,
+				fmt.Sprintf("track not found: %s", track))).WithServices("androidpublisher")
+			return c.Output(result)
 		}
 		result := output.NewResult(trackInfo)
 		return c.Output(result.WithServices("androidpublisher"))
@@ -870,7 +877,9 @@ func (c *CLI) publishStatus(ctx context.Context, track string) error {
 
 	tracks, err := publisher.Edits.Tracks.List(c.packageName, edit.Id).Context(ctx).Do()
 	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+		result := output.NewErrorResult(errors.NewAPIError(errors.CodeGeneralError, err.Error())).
+			WithServices("androidpublisher")
+		return c.Output(result)
 	}
 
 	result := output.NewResult(tracks.Tracks)
@@ -879,7 +888,8 @@ func (c *CLI) publishStatus(ctx context.Context, track string) error {
 
 func (c *CLI) publishTracks(ctx context.Context) error {
 	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
+		result := output.NewErrorResult(err.(*errors.APIError)).WithServices("androidpublisher")
+		return c.Output(result)
 	}
 
 	return c.publishStatus(ctx, "")

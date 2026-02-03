@@ -79,9 +79,10 @@ func (c *CLI) addConfigCommands() {
 
 	// config print
 	printCmd := &cobra.Command{
-		Use:   "print",
-		Short: "Print resolved configuration",
-		Long:  "Print the fully resolved configuration showing precedence.",
+		Use:     "print",
+		Short:   "Print resolved configuration",
+		Long:    "Print the fully resolved configuration showing precedence.",
+		Aliases: []string{"show"},
 	}
 	printCmd.Flags().Bool("resolved", false, "Show precedence resolution")
 	printCmd.RunE = func(cmd *cobra.Command, args []string) error {

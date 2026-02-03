@@ -136,6 +136,7 @@ func (c *CLI) vitalsQuery(ctx context.Context, startDate, endDate string, metric
 
 func (c *CLI) vitalsCapabilities(_ context.Context) error {
 	result := output.NewResult(map[string]interface{}{
+		"requiredScopes": []string{"https://www.googleapis.com/auth/playdeveloperreporting"},
 		"metrics": []map[string]interface{}{
 			{"name": "crashRate", "description": "Crash rate per 1000 sessions", "unit": "percentage"},
 			{"name": "anrRate", "description": "ANR rate per 1000 sessions", "unit": "percentage"},

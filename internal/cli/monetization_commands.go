@@ -4,6 +4,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/dl-alexandre/gpd/internal/errors"
+	"github.com/dl-alexandre/gpd/internal/output"
 )
 
 func (c *CLI) addMonetizationCommands() {
@@ -64,6 +65,11 @@ func (c *CLI) addMonetizationProductsCommands(monetizationCmd *cobra.Command) {
 		Use:   "create",
 		Short: "Create an in-app product",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if productID == "" {
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--product-id is required")).WithServices("androidpublisher")
+				return c.Output(result)
+			}
 			return c.monetizationProductsCreate(cmd.Context(), productID, productType, defaultPrice, status)
 		},
 	}
@@ -71,7 +77,6 @@ func (c *CLI) addMonetizationProductsCommands(monetizationCmd *cobra.Command) {
 	productsCreateCmd.Flags().StringVar(&productType, "type", "managed", "Product type: managed, consumable")
 	productsCreateCmd.Flags().StringVar(&defaultPrice, "default-price", "", "Default price in micros (e.g., 990000 for $0.99)")
 	productsCreateCmd.Flags().StringVar(&status, "status", "active", "Product status: active, inactive")
-	_ = productsCreateCmd.MarkFlagRequired("product-id")
 
 	productsUpdateCmd := &cobra.Command{
 		Use:   "update [product-id]",
@@ -142,37 +147,48 @@ func (c *CLI) addMonetizationSubscriptionsCommands(monetizationCmd *cobra.Comman
 		Use:   "create",
 		Short: "Create a subscription",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if subscriptionID == "" || subscriptionFile == "" {
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--product-id and --file are required")).WithServices("androidpublisher")
+				return c.Output(result)
+			}
 			return c.monetizationSubscriptionsCreate(cmd.Context(), subscriptionID, subscriptionFile)
 		},
 	}
 	subscriptionsCreateCmd.Flags().StringVar(&subscriptionID, "product-id", "", "Subscription product ID")
 	subscriptionsCreateCmd.Flags().StringVar(&subscriptionFile, "file", "", "Subscription JSON file")
-	_ = subscriptionsCreateCmd.MarkFlagRequired("product-id")
-	_ = subscriptionsCreateCmd.MarkFlagRequired("file")
 
 	subscriptionsUpdateCmd := &cobra.Command{
 		Use:   "update [subscription-id]",
 		Short: "Update a subscription",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if subscriptionFile == "" {
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--file is required")).WithServices("androidpublisher")
+				return c.Output(result)
+			}
 			return c.monetizationSubscriptionsUpdate(cmd.Context(), args[0], subscriptionFile)
 		},
 	}
 	subscriptionsUpdateCmd.Flags().StringVar(&subscriptionFile, "file", "", "Subscription JSON file")
-	_ = subscriptionsUpdateCmd.MarkFlagRequired("file")
 
 	subscriptionsPatchCmd := &cobra.Command{
 		Use:   "patch [subscription-id]",
 		Short: "Patch a subscription",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if subscriptionFile == "" {
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--file is required")).WithServices("androidpublisher")
+				return c.Output(result)
+			}
 			return c.monetizationSubscriptionsPatch(cmd.Context(), args[0], subscriptionFile, updateMask, allowMissing)
 		},
 	}
 	subscriptionsPatchCmd.Flags().StringVar(&subscriptionFile, "file", "", "Subscription JSON file")
 	subscriptionsPatchCmd.Flags().StringVar(&updateMask, "update-mask", "", "Fields to update (comma-separated)")
 	subscriptionsPatchCmd.Flags().BoolVar(&allowMissing, "allow-missing", false, "Create if missing")
-	_ = subscriptionsPatchCmd.MarkFlagRequired("file")
 
 	subscriptionsDeleteCmd := &cobra.Command{
 		Use:   "delete [subscription-id]",
@@ -180,8 +196,9 @@ func (c *CLI) addMonetizationSubscriptionsCommands(monetizationCmd *cobra.Comman
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !confirm {
-				return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
-					"--confirm flag required for destructive operations"))
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--confirm flag required for destructive operations")).WithServices("androidpublisher")
+				return c.Output(result)
 			}
 			return c.monetizationSubscriptionsDelete(cmd.Context(), args[0])
 		},
@@ -201,21 +218,29 @@ func (c *CLI) addMonetizationSubscriptionsCommands(monetizationCmd *cobra.Comman
 		Use:   "batchGet",
 		Short: "Batch get subscriptions",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(ids) == 0 {
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--ids is required")).WithServices("androidpublisher")
+				return c.Output(result)
+			}
 			return c.monetizationSubscriptionsBatchGet(cmd.Context(), ids)
 		},
 	}
 	subscriptionsBatchGetCmd.Flags().StringSliceVar(&ids, "ids", nil, "Subscription IDs")
-	_ = subscriptionsBatchGetCmd.MarkFlagRequired("ids")
 
 	subscriptionsBatchUpdateCmd := &cobra.Command{
 		Use:   "batchUpdate",
 		Short: "Batch update subscriptions",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if batchFile == "" {
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--file is required")).WithServices("androidpublisher")
+				return c.Output(result)
+			}
 			return c.monetizationSubscriptionsBatchUpdate(cmd.Context(), batchFile)
 		},
 	}
 	subscriptionsBatchUpdateCmd.Flags().StringVar(&batchFile, "file", "", "Batch update JSON file")
-	_ = subscriptionsBatchUpdateCmd.MarkFlagRequired("file")
 
 	subscriptionsCmd.AddCommand(subscriptionsListCmd, subscriptionsGetCmd, subscriptionsCreateCmd, subscriptionsUpdateCmd,
 		subscriptionsPatchCmd, subscriptionsDeleteCmd, subscriptionsArchiveCmd, subscriptionsBatchGetCmd, subscriptionsBatchUpdateCmd)
@@ -256,8 +281,9 @@ func (c *CLI) addMonetizationBasePlansCommands(monetizationCmd *cobra.Command) {
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !confirm {
-				return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
-					"--confirm flag required for destructive operations"))
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--confirm flag required for destructive operations")).WithServices("androidpublisher")
+				return c.Output(result)
 			}
 			return c.monetizationBasePlansDelete(cmd.Context(), args[0], args[1])
 		},
@@ -269,35 +295,46 @@ func (c *CLI) addMonetizationBasePlansCommands(monetizationCmd *cobra.Command) {
 		Short: "Migrate base plan prices",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if basePlanRegion == "" || basePlanPriceMicros <= 0 {
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--region-code and --price-micros are required")).WithServices("androidpublisher")
+				return c.Output(result)
+			}
 			return c.monetizationBasePlansMigratePrices(cmd.Context(), args[0], args[1], basePlanRegion, basePlanPriceMicros)
 		},
 	}
 	basePlansMigratePricesCmd.Flags().StringVar(&basePlanRegion, "region-code", "", "Region code")
 	basePlansMigratePricesCmd.Flags().Int64Var(&basePlanPriceMicros, "price-micros", 0, "Price in micros")
-	_ = basePlansMigratePricesCmd.MarkFlagRequired("region-code")
-	_ = basePlansMigratePricesCmd.MarkFlagRequired("price-micros")
 
 	basePlansBatchMigrateCmd := &cobra.Command{
 		Use:   "batch-migrate-prices [subscription-id]",
 		Short: "Batch migrate base plan prices",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if basePlanFile == "" {
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--file is required")).WithServices("androidpublisher")
+				return c.Output(result)
+			}
 			return c.monetizationBasePlansBatchMigratePrices(cmd.Context(), args[0], basePlanFile)
 		},
 	}
 	basePlansBatchMigrateCmd.Flags().StringVar(&basePlanFile, "file", "", "Batch migrate JSON file")
-	_ = basePlansBatchMigrateCmd.MarkFlagRequired("file")
 
 	basePlansBatchUpdateStatesCmd := &cobra.Command{
 		Use:   "batch-update-states [subscription-id]",
 		Short: "Batch update base plan states",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if basePlanFile == "" {
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--file is required")).WithServices("androidpublisher")
+				return c.Output(result)
+			}
 			return c.monetizationBasePlansBatchUpdateStates(cmd.Context(), args[0], basePlanFile)
 		},
 	}
 	basePlansBatchUpdateStatesCmd.Flags().StringVar(&basePlanFile, "file", "", "Batch update JSON file")
-	_ = basePlansBatchUpdateStatesCmd.MarkFlagRequired("file")
 
 	basePlansCmd.AddCommand(basePlansActivateCmd, basePlansDeactivateCmd, basePlansDeleteCmd, basePlansMigratePricesCmd,
 		basePlansBatchMigrateCmd, basePlansBatchUpdateStatesCmd)
@@ -324,13 +361,16 @@ func (c *CLI) addMonetizationOffersCommands(monetizationCmd *cobra.Command) {
 		Short: "Create an offer",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if offerID == "" || offerFile == "" {
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--offer-id and --file are required")).WithServices("androidpublisher")
+				return c.Output(result)
+			}
 			return c.monetizationOffersCreate(cmd.Context(), args[0], args[1], offerID, offerFile)
 		},
 	}
 	offersCreateCmd.Flags().StringVar(&offerID, "offer-id", "", "Offer ID")
 	offersCreateCmd.Flags().StringVar(&offerFile, "file", "", "Offer JSON file")
-	_ = offersCreateCmd.MarkFlagRequired("offer-id")
-	_ = offersCreateCmd.MarkFlagRequired("file")
 
 	offersGetCmd := &cobra.Command{
 		Use:   "get [subscription-id] [plan-id] [offer-id]",
@@ -344,8 +384,13 @@ func (c *CLI) addMonetizationOffersCommands(monetizationCmd *cobra.Command) {
 	offersListCmd := &cobra.Command{
 		Use:   "list [subscription-id] [plan-id]",
 		Short: "List offers",
-		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) != 2 {
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"subscription-id and plan-id are required").
+					WithHint("Usage: gpd monetization offers list <subscription-id> <plan-id>"))
+				return c.Output(result.WithServices("androidpublisher"))
+			}
 			return c.monetizationOffersList(cmd.Context(), args[0], args[1], pageSize, pageToken, all)
 		},
 	}
@@ -359,8 +404,9 @@ func (c *CLI) addMonetizationOffersCommands(monetizationCmd *cobra.Command) {
 		Args:  cobra.ExactArgs(3),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !confirm {
-				return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
-					"--confirm flag required for destructive operations"))
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--confirm flag required for destructive operations")).WithServices("androidpublisher")
+				return c.Output(result)
 			}
 			return c.monetizationOffersDelete(cmd.Context(), args[0], args[1], args[2])
 		},
@@ -390,33 +436,45 @@ func (c *CLI) addMonetizationOffersCommands(monetizationCmd *cobra.Command) {
 		Short: "Batch get offers",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(offerIDs) == 0 {
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--offer-ids is required")).WithServices("androidpublisher")
+				return c.Output(result)
+			}
 			return c.monetizationOffersBatchGet(cmd.Context(), args[0], args[1], offerIDs)
 		},
 	}
 	offersBatchGetCmd.Flags().StringSliceVar(&offerIDs, "offer-ids", nil, "Offer IDs")
-	_ = offersBatchGetCmd.MarkFlagRequired("offer-ids")
 
 	offersBatchUpdateCmd := &cobra.Command{
 		Use:   "batchUpdate [subscription-id] [plan-id]",
 		Short: "Batch update offers",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if offerFile == "" {
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--file is required")).WithServices("androidpublisher")
+				return c.Output(result)
+			}
 			return c.monetizationOffersBatchUpdate(cmd.Context(), args[0], args[1], offerFile)
 		},
 	}
 	offersBatchUpdateCmd.Flags().StringVar(&offerFile, "file", "", "Batch update JSON file")
-	_ = offersBatchUpdateCmd.MarkFlagRequired("file")
 
 	offersBatchUpdateStatesCmd := &cobra.Command{
 		Use:   "batchUpdateStates [subscription-id] [plan-id]",
 		Short: "Batch update offer states",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if offerFile == "" {
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--file is required")).WithServices("androidpublisher")
+				return c.Output(result)
+			}
 			return c.monetizationOffersBatchUpdateStates(cmd.Context(), args[0], args[1], offerFile)
 		},
 	}
 	offersBatchUpdateStatesCmd.Flags().StringVar(&offerFile, "file", "", "Batch update states JSON file")
-	_ = offersBatchUpdateStatesCmd.MarkFlagRequired("file")
 
 	offersCmd.AddCommand(offersCreateCmd, offersGetCmd, offersListCmd, offersDeleteCmd, offersActivateCmd, offersDeactivateCmd,
 		offersBatchGetCmd, offersBatchUpdateCmd, offersBatchUpdateStatesCmd)
@@ -463,6 +521,11 @@ func (c *CLI) addMonetizationOnetimeProductsCommands(monetizationCmd *cobra.Comm
 		Use:   "create",
 		Short: "Create a one-time product",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if productID == "" {
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--product-id is required")).WithServices("androidpublisher")
+				return c.Output(result)
+			}
 			return c.monetizationProductsCreate(cmd.Context(), productID, productType, defaultPrice, status)
 		},
 	}
@@ -470,7 +533,6 @@ func (c *CLI) addMonetizationOnetimeProductsCommands(monetizationCmd *cobra.Comm
 	onetimeProductsCreateCmd.Flags().StringVar(&productType, "type", "managed", "Product type: managed, consumable")
 	onetimeProductsCreateCmd.Flags().StringVar(&defaultPrice, "default-price", "", "Default price in micros (e.g., 990000 for $0.99)")
 	onetimeProductsCreateCmd.Flags().StringVar(&status, "status", "active", "Product status: active, inactive")
-	_ = onetimeProductsCreateCmd.MarkFlagRequired("product-id")
 
 	onetimeProductsUpdateCmd := &cobra.Command{
 		Use:   "update [product-id]",
@@ -507,13 +569,17 @@ func (c *CLI) addMonetizationUtilityCommands(monetizationCmd *cobra.Command) {
 		Use:   "convert-region-prices",
 		Short: "Convert region prices",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if priceMicros == 0 {
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--price-micros is required")).WithServices("androidpublisher")
+				return c.Output(result)
+			}
 			return c.monetizationConvertRegionPrices(cmd.Context(), priceMicros, currencyCode, regionFilter)
 		},
 	}
 	convertCmd.Flags().Int64Var(&priceMicros, "price-micros", 0, "Price in micros")
 	convertCmd.Flags().StringVar(&currencyCode, "currency", "USD", "Currency code")
 	convertCmd.Flags().StringSliceVar(&regionFilter, "to-regions", nil, "Region codes to include")
-	_ = convertCmd.MarkFlagRequired("price-micros")
 
 	capabilitiesCmd := &cobra.Command{
 		Use:   "capabilities",

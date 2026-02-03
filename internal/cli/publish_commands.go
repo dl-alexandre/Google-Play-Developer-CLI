@@ -4,6 +4,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/dl-alexandre/gpd/internal/errors"
+	"github.com/dl-alexandre/gpd/internal/output"
 )
 
 func (c *CLI) addPublishCommands() {
@@ -14,6 +15,7 @@ func (c *CLI) addPublishCommands() {
 	}
 
 	c.addPublishUploadCommands(publishCmd)
+	c.addPublishBuildsCommands(publishCmd)
 	c.addPublishReleaseCommands(publishCmd)
 	c.addPublishStatusCommands(publishCmd)
 	c.addPublishListingCommands(publishCmd)
@@ -90,6 +92,11 @@ func (c *CLI) addPublishReleaseCommands(publishCmd *cobra.Command) {
 		Short: "Create or update a release",
 		Long:  "Create a new release on a track with specified version codes.",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if track == "" {
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--track is required")).WithServices("androidpublisher")
+				return c.Output(result)
+			}
 			return c.publishRelease(cmd.Context(), track, name, status, versionCodes, retainVersionCodes, inAppUpdatePriority, releaseNotesFile, editID, noAutoCommit, dryRun, wait, waitTimeout)
 		},
 	}
@@ -105,13 +112,17 @@ func (c *CLI) addPublishReleaseCommands(publishCmd *cobra.Command) {
 	releaseCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show intended actions without executing")
 	releaseCmd.Flags().BoolVar(&wait, "wait", false, "Wait for release to complete")
 	releaseCmd.Flags().StringVar(&waitTimeout, "wait-timeout", "30m", "Maximum time to wait (e.g., 30m, 1h)")
-	_ = releaseCmd.MarkFlagRequired("track")
 
 	rolloutCmd := &cobra.Command{
 		Use:   "rollout",
 		Short: "Update rollout percentage",
 		Long:  "Update the staged rollout percentage for a production release.",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if percentage <= 0 {
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--percentage is required")).WithServices("androidpublisher")
+				return c.Output(result)
+			}
 			return c.publishRollout(cmd.Context(), track, percentage, editID, noAutoCommit, dryRun)
 		},
 	}
@@ -120,13 +131,17 @@ func (c *CLI) addPublishReleaseCommands(publishCmd *cobra.Command) {
 	rolloutCmd.Flags().StringVar(&editID, "edit-id", "", "Explicit edit transaction ID")
 	rolloutCmd.Flags().BoolVar(&noAutoCommit, "no-auto-commit", false, "Keep edit open for manual commit")
 	rolloutCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show intended actions without executing")
-	_ = rolloutCmd.MarkFlagRequired("percentage")
 
 	promoteCmd := &cobra.Command{
 		Use:   "promote",
 		Short: "Promote a release between tracks",
 		Long:  "Copy a release from one track to another.",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if fromTrack == "" || toTrack == "" {
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--from-track and --to-track are required")).WithServices("androidpublisher")
+				return c.Output(result)
+			}
 			return c.publishPromote(cmd.Context(), fromTrack, toTrack, percentage, editID, noAutoCommit, dryRun)
 		},
 	}
@@ -136,8 +151,6 @@ func (c *CLI) addPublishReleaseCommands(publishCmd *cobra.Command) {
 	promoteCmd.Flags().StringVar(&editID, "edit-id", "", "Explicit edit transaction ID")
 	promoteCmd.Flags().BoolVar(&noAutoCommit, "no-auto-commit", false, "Keep edit open for manual commit")
 	promoteCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show intended actions without executing")
-	_ = promoteCmd.MarkFlagRequired("from-track")
-	_ = promoteCmd.MarkFlagRequired("to-track")
 
 	haltCmd := &cobra.Command{
 		Use:   "halt",
@@ -145,8 +158,9 @@ func (c *CLI) addPublishReleaseCommands(publishCmd *cobra.Command) {
 		Long:  "Halt an in-progress production rollout.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !confirm {
-				return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
-					"--confirm flag required for destructive operations"))
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--confirm flag required for destructive operations")).WithServices("androidpublisher")
+				return c.Output(result)
 			}
 			return c.publishHalt(cmd.Context(), track, editID, noAutoCommit, dryRun)
 		},
@@ -163,8 +177,14 @@ func (c *CLI) addPublishReleaseCommands(publishCmd *cobra.Command) {
 		Long:  "Rollback to a previous version from track history.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !confirm {
-				return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
-					"--confirm flag required for destructive operations"))
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--confirm flag required for destructive operations")).WithServices("androidpublisher")
+				return c.Output(result)
+			}
+			if track == "" {
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--track is required")).WithServices("androidpublisher")
+				return c.Output(result)
 			}
 			return c.publishRollback(cmd.Context(), track, rollbackVersionCode, editID, noAutoCommit, dryRun)
 		},
@@ -175,7 +195,6 @@ func (c *CLI) addPublishReleaseCommands(publishCmd *cobra.Command) {
 	rollbackCmd.Flags().BoolVar(&noAutoCommit, "no-auto-commit", false, "Keep edit open for manual commit")
 	rollbackCmd.Flags().BoolVar(&confirm, "confirm", false, "Confirm destructive operation")
 	rollbackCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show intended actions without executing")
-	_ = rollbackCmd.MarkFlagRequired("track")
 
 	publishCmd.AddCommand(releaseCmd, rolloutCmd, promoteCmd, haltCmd, rollbackCmd)
 }
@@ -229,6 +248,7 @@ func (c *CLI) addPublishListingCommands(publishCmd *cobra.Command) {
 		editID       string
 		noAutoCommit bool
 		dryRun       bool
+		confirm      bool
 	)
 
 	listingUpdateCmd := &cobra.Command{
@@ -254,8 +274,35 @@ func (c *CLI) addPublishListingCommands(publishCmd *cobra.Command) {
 		},
 	}
 	listingGetCmd.Flags().StringVar(&locale, "locale", "", "Locale code (leave empty for all)")
+	listingGetCmd.Flags().StringVar(&locale, "language", "", "Alias for --locale")
+	_ = listingGetCmd.Flags().MarkDeprecated("language", "use --locale instead")
 
-	listingCmd.AddCommand(listingUpdateCmd, listingGetCmd)
+	listingDeleteCmd := &cobra.Command{
+		Use:   "delete",
+		Short: "Delete store listing",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return c.publishListingDelete(cmd.Context(), locale, editID, noAutoCommit, dryRun, confirm)
+		},
+	}
+	listingDeleteCmd.Flags().StringVar(&locale, "locale", "", "Locale code (required)")
+	listingDeleteCmd.Flags().StringVar(&editID, "edit-id", "", "Explicit edit transaction ID")
+	listingDeleteCmd.Flags().BoolVar(&noAutoCommit, "no-auto-commit", false, "Keep edit open for manual commit")
+	listingDeleteCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show intended actions without executing")
+	listingDeleteCmd.Flags().BoolVar(&confirm, "confirm", false, "Confirm destructive operation")
+
+	listingDeleteAllCmd := &cobra.Command{
+		Use:   "delete-all",
+		Short: "Delete all store listings",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return c.publishListingDeleteAll(cmd.Context(), editID, noAutoCommit, dryRun, confirm)
+		},
+	}
+	listingDeleteAllCmd.Flags().StringVar(&editID, "edit-id", "", "Explicit edit transaction ID")
+	listingDeleteAllCmd.Flags().BoolVar(&noAutoCommit, "no-auto-commit", false, "Keep edit open for manual commit")
+	listingDeleteAllCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show intended actions without executing")
+	listingDeleteAllCmd.Flags().BoolVar(&confirm, "confirm", false, "Confirm destructive operation")
+
+	listingCmd.AddCommand(listingUpdateCmd, listingGetCmd, listingDeleteCmd, listingDeleteAllCmd)
 	publishCmd.AddCommand(listingCmd)
 }
 
@@ -350,7 +397,9 @@ func (c *CLI) addPublishAssetsCommands(publishCmd *cobra.Command) {
 		},
 	}
 	assetsUploadCmd.Flags().StringVar(&assetsDir, "dir", "assets", "Assets directory")
-	assetsUploadCmd.Flags().StringVar(&category, "replace", "", "Category to replace (phone, tablet, tv, wear)")
+	assetsUploadCmd.Flags().StringVar(&category, "category", "", "Category to replace (phone, tablet, tv, wear)")
+	assetsUploadCmd.Flags().StringVar(&category, "replace", "", "Alias for --category")
+	_ = assetsUploadCmd.Flags().MarkDeprecated("replace", "use --category instead")
 	assetsUploadCmd.Flags().BoolVar(&replace, "replace-all", false, "Replace all existing assets")
 	assetsUploadCmd.Flags().StringVar(&editID, "edit-id", "", "Explicit edit transaction ID")
 	assetsUploadCmd.Flags().BoolVar(&noAutoCommit, "no-auto-commit", false, "Keep edit open for manual commit")
@@ -460,6 +509,16 @@ func (c *CLI) addPublishDeobfuscationCommands(publishCmd *cobra.Command) {
 		Short: "Upload deobfuscation file",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if deobfuscationType == "" {
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--type is required")).WithServices("androidpublisher")
+				return c.Output(result)
+			}
+			if deobfuscationVersionCode <= 0 {
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--version-code is required")).WithServices("androidpublisher")
+				return c.Output(result)
+			}
 			return c.publishDeobfuscationUpload(cmd.Context(), args[0], deobfuscationType, deobfuscationVersionCode, editID, deobfuscationChunkSize, noAutoCommit, dryRun)
 		},
 	}
@@ -469,8 +528,6 @@ func (c *CLI) addPublishDeobfuscationCommands(publishCmd *cobra.Command) {
 	deobfuscationUploadCmd.Flags().Int64Var(&deobfuscationChunkSize, "chunk-size", 10*1024*1024, "Upload chunk size in bytes")
 	deobfuscationUploadCmd.Flags().BoolVar(&noAutoCommit, "no-auto-commit", false, "Keep edit open for manual commit")
 	deobfuscationUploadCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show intended actions without executing")
-	_ = deobfuscationUploadCmd.MarkFlagRequired("type")
-	_ = deobfuscationUploadCmd.MarkFlagRequired("version-code")
 
 	deobfuscationCmd.AddCommand(deobfuscationUploadCmd)
 	publishCmd.AddCommand(deobfuscationCmd)
@@ -550,6 +607,20 @@ func (c *CLI) addPublishTestersCommands(publishCmd *cobra.Command) {
 	}
 	testersListCmd.Flags().StringVar(&testersTrack, "track", "", "Track to list testers for (empty for all)")
 
-	testersCmd.AddCommand(testersAddCmd, testersRemoveCmd, testersListCmd)
+	testersGetCmd := &cobra.Command{
+		Use:   "get",
+		Short: "Get tester groups for a track",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if testersTrack == "" {
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--track is required")).WithServices("androidpublisher")
+				return c.Output(result)
+			}
+			return c.publishTestersList(cmd.Context(), testersTrack)
+		},
+	}
+	testersGetCmd.Flags().StringVar(&testersTrack, "track", "", "Track to get testers for")
+
+	testersCmd.AddCommand(testersAddCmd, testersRemoveCmd, testersListCmd, testersGetCmd)
 	publishCmd.AddCommand(testersCmd)
 }

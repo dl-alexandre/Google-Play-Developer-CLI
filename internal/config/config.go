@@ -19,6 +19,7 @@ type Config struct {
 	StoreTokens           string            `json:"storeTokens,omitempty"` // "auto", "never", "secure"
 	RateLimits            map[string]string `json:"rateLimits,omitempty"`
 	TesterLimits          *TesterLimits     `json:"testerLimits,omitempty"`
+	ActiveProfile         string            `json:"activeProfile,omitempty"`
 }
 
 // TesterLimits defines limits for different tester types.
@@ -207,7 +208,10 @@ func DetectCI() bool {
 // Environment variable names for gpd configuration.
 const (
 	EnvServiceAccountKey = "GPD_SERVICE_ACCOUNT_KEY"
+	EnvOAuthClientID     = "GPD_CLIENT_ID"
+	EnvOAuthClientSecret = "GPD_CLIENT_SECRET"
 	EnvPackage           = "GPD_PACKAGE"
+	EnvAuthProfile       = "GPD_AUTH_PROFILE"
 	EnvTimeout           = "GPD_TIMEOUT"
 	EnvStoreTokens       = "GPD_STORE_TOKENS" //nolint:gosec // G101: This is an env var name, not credentials
 	EnvCI                = "GPD_CI"
@@ -218,9 +222,21 @@ func GetEnvServiceAccountKey() string {
 	return os.Getenv(EnvServiceAccountKey)
 }
 
+func GetEnvOAuthClientID() string {
+	return os.Getenv(EnvOAuthClientID)
+}
+
+func GetEnvOAuthClientSecret() string {
+	return os.Getenv(EnvOAuthClientSecret)
+}
+
 // GetEnvPackage returns the default package from environment.
 func GetEnvPackage() string {
 	return os.Getenv(EnvPackage)
+}
+
+func GetEnvAuthProfile() string {
+	return os.Getenv(EnvAuthProfile)
 }
 
 // GetEnvTimeout returns the timeout from environment.

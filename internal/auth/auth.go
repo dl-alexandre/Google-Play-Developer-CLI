@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"sync"
 	"time"
@@ -38,6 +39,7 @@ const (
 	originADCString         = "adc"
 	originKeyfileString     = "keyfile"
 	originEnvironmentString = "environment"
+	originOAuthString       = "oauth"
 	originUnknownString     = "unknown"
 )
 
@@ -48,6 +50,7 @@ const (
 	OriginADC CredentialOrigin = iota
 	OriginKeyfile
 	OriginEnvironment
+	OriginOAuth
 )
 
 func (o CredentialOrigin) String() string {
@@ -58,6 +61,8 @@ func (o CredentialOrigin) String() string {
 		return originKeyfileString
 	case OriginEnvironment:
 		return originEnvironmentString
+	case OriginOAuth:
+		return originOAuthString
 	default:
 		return originUnknownString
 	}
@@ -79,6 +84,7 @@ type Manager struct {
 	mu              sync.Mutex
 	storage         SecureStorage
 	storeTokensMode string
+	activeProfile   string
 }
 
 // NewManager creates a new authentication manager.
@@ -86,6 +92,7 @@ func NewManager(storage SecureStorage) *Manager {
 	return &Manager{
 		storage:         storage,
 		storeTokensMode: "auto",
+		activeProfile:   defaultAuthProfile,
 	}
 }
 
@@ -96,11 +103,26 @@ func (m *Manager) SetStoreTokens(mode string) {
 	m.storeTokensMode = mode
 }
 
-// Authenticate attempts to obtain credentials from various sources.
-func (m *Manager) Authenticate(ctx context.Context, keyPath string) (*Credentials, error) {
+func (m *Manager) SetActiveProfile(profile string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if profile == "" {
+		profile = defaultAuthProfile
+	}
+	m.activeProfile = profile
+}
 
+func (m *Manager) GetActiveProfile() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.activeProfile == "" {
+		return defaultAuthProfile
+	}
+	return m.activeProfile
+}
+
+// Authenticate attempts to obtain credentials from various sources.
+func (m *Manager) Authenticate(ctx context.Context, keyPath string) (*Credentials, error) {
 	scopes := []string{
 		ScopeAndroidPublisher,
 		ScopePlayReporting,
@@ -114,7 +136,9 @@ func (m *Manager) Authenticate(ctx context.Context, keyPath string) (*Credential
 		if err != nil {
 			return nil, err
 		}
+		m.mu.Lock()
 		m.creds = creds
+		m.mu.Unlock()
 		return creds, nil
 	}
 
@@ -126,7 +150,9 @@ func (m *Manager) Authenticate(ctx context.Context, keyPath string) (*Credential
 			return nil, err
 		}
 		creds.Origin = OriginEnvironment
+		m.mu.Lock()
 		m.creds = creds
+		m.mu.Unlock()
 		return creds, nil
 	}
 
@@ -137,7 +163,9 @@ func (m *Manager) Authenticate(ctx context.Context, keyPath string) (*Credential
 		if err != nil {
 			return nil, err
 		}
+		m.mu.Lock()
 		m.creds = creds
+		m.mu.Unlock()
 		return creds, nil
 	}
 
@@ -158,7 +186,9 @@ func (m *Manager) Authenticate(ctx context.Context, keyPath string) (*Credential
 			WithHint("Provide --key, set GPD_SERVICE_ACCOUNT_KEY, or set GOOGLE_APPLICATION_CREDENTIALS").
 			WithDetails(details)
 	}
+	m.mu.Lock()
 	m.creds = creds
+	m.mu.Unlock()
 	return creds, nil
 }
 
@@ -257,11 +287,57 @@ func (m *Manager) authenticateFromADC(ctx context.Context, scopes []string) (*Cr
 	}, nil
 }
 
+func (m *Manager) AuthenticateWithDeviceCode(ctx context.Context, clientID, clientSecret string, scopes []string, promptWriter io.Writer) (*Credentials, error) {
+	if clientID == "" {
+		return nil, errors.NewAPIError(errors.CodeAuthFailure, "OAuth client ID is required").
+			WithHint("Provide --client-id or set GPD_CLIENT_ID")
+	}
+	if len(scopes) == 0 {
+		return nil, errors.NewAPIError(errors.CodeAuthFailure, "OAuth scopes are required")
+	}
+
+	config := &oauth2.Config{
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
+		Scopes:       scopes,
+		Endpoint:     google.Endpoint,
+	}
+
+	flow := NewDeviceCodeFlow(config)
+	deviceResp, err := flow.RequestDeviceCode(ctx)
+	if err != nil {
+		return nil, errors.NewAPIError(errors.CodeAuthFailure,
+			fmt.Sprintf("failed to request device code: %v", err))
+	}
+	displayDeviceCodePrompt(promptWriter, deviceResp)
+
+	token, err := flow.PollForToken(ctx)
+	if err != nil {
+		return nil, errors.NewAPIError(errors.CodeAuthFailure,
+			fmt.Sprintf("device code authentication failed: %v", err))
+	}
+
+	baseTokenSource := config.TokenSource(ctx, token)
+	wrappedTokenSource := m.wrapTokenSource(baseTokenSource, OriginOAuth, "", clientID, scopes)
+
+	creds := &Credentials{
+		TokenSource: wrappedTokenSource,
+		Origin:      OriginOAuth,
+		ClientID:    clientID,
+		Scopes:      scopes,
+	}
+	m.mu.Lock()
+	m.creds = creds
+	m.mu.Unlock()
+	return creds, nil
+}
+
 func (m *Manager) wrapTokenSource(base oauth2.TokenSource, origin CredentialOrigin, email, clientID string, scopes []string) oauth2.TokenSource {
 	tokenSource := base
 	if m.storageEnabled() {
 		hash, last4 := clientIDHash(clientID)
-		key := tokenStorageKey(defaultAuthProfile, hash)
+		profile := m.GetActiveProfile()
+		key := tokenStorageKey(profile, hash)
 		if storedToken, err := m.loadStoredToken(key); err == nil && storedToken != nil {
 			tokenSource = oauth2.ReuseTokenSource(storedToken, tokenSource)
 		}
@@ -271,7 +347,7 @@ func (m *Manager) wrapTokenSource(base oauth2.TokenSource, origin CredentialOrig
 			clockSkew:     30 * time.Second,
 		}
 		metadata := &TokenMetadata{
-			Profile:       defaultAuthProfile,
+			Profile:       profile,
 			ClientIDHash:  hash,
 			ClientIDLast4: last4,
 			Origin:        origin.String(),

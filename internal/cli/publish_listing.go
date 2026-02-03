@@ -150,6 +150,122 @@ func (c *CLI) publishListingGet(ctx context.Context, locale string) error {
 	return c.Output(result.WithServices("androidpublisher"))
 }
 
+func (c *CLI) publishListingDelete(ctx context.Context, locale, editID string, noAutoCommit, dryRun, confirm bool) error {
+	if err := c.requirePackage(); err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+	if !confirm {
+		return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
+			"--confirm flag required for destructive operations"))
+	}
+	if locale == "" {
+		return c.OutputError(errors.NewAPIError(errors.CodeValidationError, "locale is required"))
+	}
+	locale = config.NormalizeLocale(locale)
+
+	if dryRun {
+		result := output.NewResult(map[string]interface{}{
+			"dryRun":  true,
+			"action":  "delete_listing",
+			"locale":  locale,
+			"package": c.packageName,
+		})
+		return c.Output(result.WithServices("androidpublisher"))
+	}
+
+	client, err := c.getAPIClient(ctx)
+	if err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+
+	publisher, err := client.AndroidPublisher()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+
+	editMgr, edit, created, err := c.prepareEdit(ctx, publisher, editID)
+	if err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+	defer func() { _ = editMgr.ReleaseLock(c.packageName) }()
+
+	if err := publisher.Edits.Listings.Delete(c.packageName, edit.ServerID, locale).Context(ctx).Do(); err != nil {
+		if created {
+			_ = publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+		}
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
+			fmt.Sprintf("failed to delete listing: %v", err)))
+	}
+
+	if err := c.finalizeEdit(ctx, publisher, editMgr, edit, !noAutoCommit); err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+
+	result := output.NewResult(map[string]interface{}{
+		"success":   true,
+		"locale":    locale,
+		"package":   c.packageName,
+		"editId":    edit.ServerID,
+		"committed": !noAutoCommit,
+	})
+	return c.Output(result.WithServices("androidpublisher"))
+}
+
+func (c *CLI) publishListingDeleteAll(ctx context.Context, editID string, noAutoCommit, dryRun, confirm bool) error {
+	if err := c.requirePackage(); err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+	if !confirm {
+		return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
+			"--confirm flag required for destructive operations"))
+	}
+
+	if dryRun {
+		result := output.NewResult(map[string]interface{}{
+			"dryRun":  true,
+			"action":  "delete_all_listings",
+			"package": c.packageName,
+		})
+		return c.Output(result.WithServices("androidpublisher"))
+	}
+
+	client, err := c.getAPIClient(ctx)
+	if err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+
+	publisher, err := client.AndroidPublisher()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+
+	editMgr, edit, created, err := c.prepareEdit(ctx, publisher, editID)
+	if err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+	defer func() { _ = editMgr.ReleaseLock(c.packageName) }()
+
+	if err := publisher.Edits.Listings.Deleteall(c.packageName, edit.ServerID).Context(ctx).Do(); err != nil {
+		if created {
+			_ = publisher.Edits.Delete(c.packageName, edit.ServerID).Context(ctx).Do()
+		}
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
+			fmt.Sprintf("failed to delete listings: %v", err)))
+	}
+
+	if err := c.finalizeEdit(ctx, publisher, editMgr, edit, !noAutoCommit); err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+
+	result := output.NewResult(map[string]interface{}{
+		"success":   true,
+		"package":   c.packageName,
+		"editId":    edit.ServerID,
+		"committed": !noAutoCommit,
+	})
+	return c.Output(result.WithServices("androidpublisher"))
+}
+
 func (c *CLI) publishDetailsGet(ctx context.Context) error {
 	if err := c.requirePackage(); err != nil {
 		return c.OutputError(err.(*errors.APIError))

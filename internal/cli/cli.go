@@ -41,6 +41,7 @@ type CLI struct {
 	quiet        bool
 	verbose      bool
 	keyPath      string
+	profile      string
 }
 
 // New creates a new CLI instance.
@@ -87,7 +88,7 @@ for automating Android app publishing and management tasks.`,
 	// Global flags
 	pf := c.rootCmd.PersistentFlags()
 	pf.StringVar(&c.packageName, "package", "", "App package name")
-	pf.StringVar(&c.outputFormat, "output", "json", "Output format: json, table, markdown")
+	pf.StringVar(&c.outputFormat, "output", "json", "Output format: json, table, markdown, csv (analytics/vitals only)")
 	pf.BoolVar(&c.pretty, "pretty", false, "Pretty print JSON output")
 	pf.DurationVar(&c.timeout, "timeout", 30*time.Second, "Network timeout")
 	pf.StringVar(&c.storeTokens, "store-tokens", "auto", "Token storage: auto, never, secure")
@@ -95,11 +96,13 @@ for automating Android app publishing and management tasks.`,
 	pf.BoolVar(&c.quiet, "quiet", false, "Suppress stderr except errors")
 	pf.BoolVar(&c.verbose, "verbose", false, "Verbose output")
 	pf.StringVar(&c.keyPath, "key", "", "Service account key file path")
+	pf.StringVar(&c.profile, "profile", "", "Authentication profile name")
 
 	// Add command groups
 	c.addVersionCommand()
 	c.addAuthCommands()
 	c.addConfigCommands()
+	c.addAppsCommands()
 	c.addPublishCommands()
 	c.addCustomAppCommands()
 	c.addMigrateCommands()
@@ -137,7 +140,14 @@ func (c *CLI) setup(_ *cobra.Command) error {
 	if c.storeTokens == "auto" && c.config.StoreTokens != "" {
 		c.storeTokens = c.config.StoreTokens
 	}
+	if envProfile := config.GetEnvAuthProfile(); envProfile != "" && c.profile == "" {
+		c.profile = envProfile
+	}
+	if c.profile == "" && c.config.ActiveProfile != "" {
+		c.profile = c.config.ActiveProfile
+	}
 	c.authMgr.SetStoreTokens(c.storeTokens)
+	c.authMgr.SetActiveProfile(c.profile)
 
 	// Configure output manager
 	c.outputMgr.SetFormat(output.ParseFormat(c.outputFormat))
@@ -208,7 +218,7 @@ func (c *CLI) addVersionCommand() {
 				"goVersion": info.GoVersion,
 				"platform":  info.Platform,
 			})
-			return c.Output(result)
+			return c.Output(result.WithServices("version"))
 		},
 	}
 	c.rootCmd.AddCommand(versionCmd)
@@ -222,8 +232,24 @@ func (c *CLI) addVersionCommand() {
 // addHelpCommands adds help-related commands.
 func (c *CLI) addHelpCommands() {
 	helpCmd := &cobra.Command{
-		Use:   "help",
+		Use:   "help [command]",
 		Short: "Help about any command",
+		Args:  cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			root := cmd.Root()
+			if len(args) == 0 {
+				return root.Help()
+			}
+			target, _, err := root.Find(args)
+			if err != nil {
+				return err
+			}
+			if target == nil {
+				return root.Help()
+			}
+			target.InitDefaultHelpFlag()
+			return target.Help()
+		},
 	}
 
 	agentCmd := &cobra.Command{
@@ -275,5 +301,5 @@ Output Format:
 	}
 
 	helpCmd.AddCommand(agentCmd)
-	c.rootCmd.AddCommand(helpCmd)
+	c.rootCmd.SetHelpCommand(helpCmd)
 }

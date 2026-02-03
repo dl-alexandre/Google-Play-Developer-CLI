@@ -45,8 +45,6 @@ func (c *CLI) addAnalyticsCommands() {
 	queryCmd.Flags().Int64Var(&pageSize, "page-size", 100, "Results per page")
 	queryCmd.Flags().StringVar(&pageToken, "page-token", "", "Pagination token")
 	addPaginationFlags(queryCmd, &all)
-	_ = queryCmd.MarkFlagRequired("start-date")
-	_ = queryCmd.MarkFlagRequired("end-date")
 
 	// analytics capabilities
 	capabilitiesCmd := &cobra.Command{
@@ -63,49 +61,51 @@ func (c *CLI) addAnalyticsCommands() {
 }
 
 func (c *CLI) analyticsQuery(ctx context.Context, startDate, endDate string, metrics, dimensions []string,
-	_ string, _ int64, _ string, _ bool) error {
-	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
+	outputFmt string, pageSize int64, pageToken string, all bool) error {
+	if apiErr := validateReportingDates(startDate, endDate); apiErr != nil {
+		result := output.NewErrorResult(apiErr).WithServices("playdeveloperreporting")
+		return c.Output(result)
+	}
+	if len(metrics) != 1 {
+		result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError, "exactly one metric is required").
+			WithHint("Use --metrics with a single value. For multiple metrics, run separate queries.")).
+			WithServices("playdeveloperreporting")
+		return c.Output(result)
 	}
 
-	// Get API client
-	client, err := c.getAPIClient(ctx)
-	if err != nil {
-		return c.OutputError(err.(*errors.APIError))
+	metric := metrics[0]
+	switch metric {
+	case "crashRate":
+		return c.vitalsCrashes(ctx, startDate, endDate, dimensions, outputFmt, pageSize, pageToken, all)
+	case "anrRate":
+		return c.vitalsANRs(ctx, startDate, endDate, dimensions, outputFmt, pageSize, pageToken, all)
+	case "excessiveWakeups":
+		return c.vitalsExcessiveWakeups(ctx, startDate, endDate, dimensions, outputFmt, pageSize, pageToken, all)
+	case "slowRendering":
+		return c.vitalsSlowRendering(ctx, startDate, endDate, dimensions, outputFmt, pageSize, pageToken, all)
+	case "slowStart":
+		return c.vitalsSlowStart(ctx, startDate, endDate, dimensions, outputFmt, pageSize, pageToken, all)
+	case "stuckWakelocks":
+		return c.vitalsStuckWakelocks(ctx, startDate, endDate, dimensions, outputFmt, pageSize, pageToken, all)
+	default:
+		result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+			"requested metric is not available in public Play Reporting APIs").
+			WithHint("Supported metrics: crashRate, anrRate, excessiveWakeups, slowRendering, slowStart, stuckWakelocks")).
+			WithServices("playdeveloperreporting")
+		return c.Output(result)
 	}
-
-	reporting, err := client.PlayReporting()
-	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
-	}
-
-	// Note: This is a simplified implementation
-	// Actual implementation would use proper Play Developer Reporting API calls
-	_ = reporting
-
-	result := output.NewResult(map[string]interface{}{
-		"startDate":  startDate,
-		"endDate":    endDate,
-		"metrics":    metrics,
-		"dimensions": dimensions,
-		"package":    c.packageName,
-		"rows":       []interface{}{},
-		"dataFreshness": map[string]interface{}{
-			"note": "Data may be delayed by 24-48 hours",
-		},
-	})
-	return c.Output(result.WithServices("playdeveloperreporting"))
 }
 
 func (c *CLI) analyticsCapabilities(_ context.Context) error {
 	result := output.NewResult(map[string]interface{}{
+		"requiredScopes": []string{"https://www.googleapis.com/auth/playdeveloperreporting"},
 		"metrics": []map[string]interface{}{
-			{"name": "installs", "description": "Total installs"},
-			{"name": "uninstalls", "description": "Total uninstalls"},
-			{"name": "updates", "description": "App updates"},
-			{"name": "activeDevices", "description": "Active devices"},
-			{"name": "crashes", "description": "Crash count"},
-			{"name": "anrs", "description": "ANR count"},
+			{"name": "crashRate", "description": "Crash rate per 1000 sessions"},
+			{"name": "anrRate", "description": "ANR rate per 1000 sessions"},
+			{"name": "excessiveWakeups", "description": "Excessive wakeups"},
+			{"name": "slowRendering", "description": "Slow rendering rate"},
+			{"name": "slowStart", "description": "Slow start rate"},
+			{"name": "stuckWakelocks", "description": "Stuck wakelocks"},
 		},
 		"dimensions": []map[string]interface{}{
 			{"name": "country", "description": "Country code"},
@@ -113,11 +113,15 @@ func (c *CLI) analyticsCapabilities(_ context.Context) error {
 			{"name": "androidVersion", "description": "Android OS version"},
 			{"name": "appVersion", "description": "App version code"},
 		},
-		"granularities":   []string{"daily", "weekly", "monthly"},
-		"maxLookbackDays": 365,
+		"granularities":   []string{"daily"},
+		"maxLookbackDays": 28,
 		"dataFreshness": map[string]interface{}{
 			"typical": "24-48 hours",
-			"note":    "Data freshness varies by metric type",
+			"note":    "Analytics queries proxy to Play Reporting vitals metrics",
+		},
+		"notes": []string{
+			"Install, revenue, and discovery analytics are not available via public APIs.",
+			"Use gpd vitals for full app quality metrics and error reports.",
 		},
 	})
 	return c.Output(result.WithServices("playdeveloperreporting"))

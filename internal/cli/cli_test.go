@@ -1,10 +1,15 @@
 package cli
 
 import (
+	"bytes"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/dl-alexandre/gpd/internal/errors"
+	"github.com/dl-alexandre/gpd/internal/output"
 )
 
 func TestCommandRegistration(t *testing.T) {
@@ -20,7 +25,7 @@ func TestCommandRegistration(t *testing.T) {
 		commands[cmd.Use] = true
 	}
 
-	requiredCommands := []string{"permissions", "recovery", "games", "customapp", "integrity", "grouping"}
+	requiredCommands := []string{"permissions", "recovery", "games", "customapp", "integrity", "grouping", "apps"}
 	for _, cmdName := range requiredCommands {
 		if !commands[cmdName] {
 			t.Errorf("Command %q not found in root commands", cmdName)
@@ -94,6 +99,27 @@ func TestPermissionsCommandsExist(t *testing.T) {
 	}
 }
 
+func TestAuthCommandsExist(t *testing.T) {
+	cli := New()
+	rootCmd := cli.rootCmd
+
+	authCmd := requireCommand(t, rootCmd, "auth")
+	checkRequiredSubcommands(t, getSubcommandNames(authCmd),
+		[]string{"status", "check", "logout", "diagnose", "doctor", "login", "init", "switch", "list"},
+		"Auth")
+}
+
+func TestReviewsCommandsExist(t *testing.T) {
+	cli := New()
+	rootCmd := cli.rootCmd
+
+	reviewsCmd := requireCommand(t, rootCmd, "reviews")
+	checkRequiredSubcommands(t, getSubcommandNames(reviewsCmd), []string{"list", "reply", "get", "response", "capabilities"}, "Reviews")
+
+	responseCmd := requireCommand(t, reviewsCmd, "response")
+	checkRequiredSubcommands(t, getSubcommandNames(responseCmd), []string{"get", "delete"}, "Reviews response")
+}
+
 func TestRecoveryCommandsExist(t *testing.T) {
 	cli := New()
 	rootCmd := cli.rootCmd
@@ -153,6 +179,14 @@ func TestCustomAppCommandsExist(t *testing.T) {
 
 	customAppCmd := requireCommand(t, rootCmd, "customapp")
 	checkSubcommandExists(t, getSubcommandNames(customAppCmd), "create", "CustomApp")
+}
+
+func TestAppsCommandsExist(t *testing.T) {
+	cli := New()
+	rootCmd := cli.rootCmd
+
+	appsCmd := requireCommand(t, rootCmd, "apps")
+	checkRequiredSubcommands(t, getSubcommandNames(appsCmd), []string{"list", "get"}, "Apps")
 }
 
 func TestIntegrityCommandsExist(t *testing.T) {
@@ -353,6 +387,89 @@ func TestCapabilitiesCommandsExist(t *testing.T) {
 	gamesCapabilitiesCmd := findCommand(gamesCmd, "capabilities")
 	if gamesCapabilitiesCmd == nil {
 		t.Error("games capabilities command not found")
+	}
+}
+
+func TestSetupAppliesEnvAndOutput(t *testing.T) {
+	t.Setenv("GPD_PACKAGE", "com.example.env")
+	t.Setenv("GPD_STORE_TOKENS", "never")
+
+	buf := &bytes.Buffer{}
+	cli := New()
+	cli.stdout = buf
+	cli.outputMgr = output.NewManager(buf)
+	cli.startTime = time.Now()
+
+	cli.outputFormat = "markdown"
+	cli.pretty = true
+	cli.fields = "hello,world"
+
+	if err := cli.setup(nil); err != nil {
+		t.Fatalf("setup error: %v", err)
+	}
+
+	if cli.packageName != "com.example.env" {
+		t.Fatalf("packageName = %q, want %q", cli.packageName, "com.example.env")
+	}
+
+	result := output.NewResult(map[string]interface{}{"hello": "world"})
+	if err := cli.Output(result); err != nil {
+		t.Fatalf("Output error: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "- **hello:** world") {
+		t.Fatalf("expected markdown output, got %q", out)
+	}
+}
+
+func TestOutputErrorWritesMarkdown(t *testing.T) {
+	buf := &bytes.Buffer{}
+	cli := New()
+	cli.stdout = buf
+	cli.outputMgr = output.NewManager(buf)
+	cli.outputFormat = "markdown"
+
+	if err := cli.setup(nil); err != nil {
+		t.Fatalf("setup error: %v", err)
+	}
+
+	apiErr := errors.NewAPIError(errors.CodeValidationError, "bad input")
+	if err := cli.OutputError(apiErr); err != nil {
+		t.Fatalf("OutputError error: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "## Error") || !strings.Contains(out, "bad input") {
+		t.Fatalf("expected markdown error output, got %q", out)
+	}
+}
+
+func TestRequirePackage(t *testing.T) {
+	cli := New()
+	cli.packageName = ""
+	if err := cli.requirePackage(); err == nil {
+		t.Fatal("expected error when package is missing")
+	}
+	cli.packageName = "com.example.app"
+	if err := cli.requirePackage(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestHelpAgentCommand(t *testing.T) {
+	buf := &bytes.Buffer{}
+	cli := New()
+	cli.stdout = buf
+	cli.outputMgr = output.NewManager(buf)
+
+	cli.rootCmd.SetArgs([]string{"help", "agent"})
+	if err := cli.rootCmd.Execute(); err != nil {
+		t.Fatalf("execute help agent error: %v", err)
+	}
+
+	if !strings.Contains(buf.String(), "AI Agent Quickstart Guide") {
+		t.Fatalf("expected agent help output, got %q", buf.String())
 	}
 }
 

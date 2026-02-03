@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -243,15 +245,26 @@ func (m *Manager) writeTable(r *Result) error {
 	// Convert data to table format
 	data := r.Data
 	if data == nil {
-		return nil
+		return m.writeWarnings(r)
 	}
 
 	// Handle slice data
 	switch v := data.(type) {
 	case []interface{}:
-		return m.writeTableSlice(v)
+		if err := m.writeTableSlice(v); err != nil {
+			return err
+		}
+		return m.writeWarnings(r)
+	case []map[string]interface{}:
+		if err := m.writeTableSlice(m.mapSliceToInterface(v)); err != nil {
+			return err
+		}
+		return m.writeWarnings(r)
 	case map[string]interface{}:
-		return m.writeTableMap(v)
+		if err := m.writeTableMap(v); err != nil {
+			return err
+		}
+		return m.writeWarnings(r)
 	default:
 		// Fall back to JSON for complex types
 		return m.writeJSON(r)
@@ -324,14 +337,25 @@ func (m *Manager) writeMarkdown(r *Result) error {
 
 	data := r.Data
 	if data == nil {
-		return nil
+		return m.writeWarnings(r)
 	}
 
 	switch v := data.(type) {
 	case []interface{}:
-		return m.writeMarkdownTable(v)
+		if err := m.writeMarkdownTable(v); err != nil {
+			return err
+		}
+		return m.writeWarnings(r)
+	case []map[string]interface{}:
+		if err := m.writeMarkdownTable(m.mapSliceToInterface(v)); err != nil {
+			return err
+		}
+		return m.writeWarnings(r)
 	case map[string]interface{}:
-		return m.writeMarkdownMap(v)
+		if err := m.writeMarkdownMap(v); err != nil {
+			return err
+		}
+		return m.writeWarnings(r)
 	default:
 		return m.writeJSON(r)
 	}
@@ -401,16 +425,20 @@ func (m *Manager) writeCSV(r *Result) error {
 
 	data := r.Data
 	if data == nil {
-		return nil
+		return m.writeWarnings(r)
 	}
 
 	slice, ok := data.([]interface{})
 	if !ok {
-		return m.writeJSON(r)
+		if mapSlice, ok := data.([]map[string]interface{}); ok {
+			slice = m.mapSliceToInterface(mapSlice)
+		} else {
+			return m.writeJSON(r)
+		}
 	}
 
 	if len(slice) == 0 {
-		return nil
+		return m.writeWarnings(r)
 	}
 
 	first, ok := slice[0].(map[string]interface{})
@@ -448,7 +476,15 @@ func (m *Manager) writeCSV(r *Result) error {
 		}
 	}
 
-	return nil
+	return m.writeWarnings(r)
+}
+
+func (m *Manager) mapSliceToInterface(data []map[string]interface{}) []interface{} {
+	slice := make([]interface{}, 0, len(data))
+	for _, item := range data {
+		slice = append(slice, item)
+	}
+	return slice
 }
 
 // applyFieldProjection applies --fields projection to the result.
@@ -457,9 +493,148 @@ func (m *Manager) applyFieldProjection(r *Result) interface{} {
 		return r
 	}
 
-	// For simplicity, return full result if no projection
-	// Full implementation would extract specific fields using dotted paths
-	return r
+	raw, err := resultToMap(r)
+	if err != nil {
+		return r
+	}
+
+	projected := make(map[string]interface{})
+	for _, field := range m.fields {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			continue
+		}
+		parts := strings.Split(field, ".")
+		value, ok := getPathValue(raw, parts)
+		if !ok {
+			continue
+		}
+		updated := setPathValueAny(projected, parts, value)
+		next, ok := updated.(map[string]interface{})
+		if !ok {
+			return projected
+		}
+		projected = next
+	}
+	return projected
+}
+
+func resultToMap(r *Result) (map[string]interface{}, error) {
+	data, err := json.Marshal(r)
+	if err != nil {
+		return nil, err
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
+func getPathValue(value interface{}, parts []string) (interface{}, bool) {
+	current := value
+	for _, part := range parts {
+		switch typed := current.(type) {
+		case map[string]interface{}:
+			next, ok := typed[part]
+			if !ok {
+				return nil, false
+			}
+			current = next
+		case []interface{}:
+			index, err := strconv.Atoi(part)
+			if err != nil || index < 0 || index >= len(typed) {
+				return nil, false
+			}
+			current = typed[index]
+		default:
+			return nil, false
+		}
+	}
+	return current, true
+}
+
+func setPathValueAny(container interface{}, parts []string, value interface{}) interface{} {
+	if len(parts) == 0 {
+		return container
+	}
+	part := parts[0]
+	if index, err := strconv.Atoi(part); err == nil {
+		var slice []interface{}
+		switch typed := container.(type) {
+		case []interface{}:
+			slice = typed
+		case nil:
+			slice = []interface{}{}
+		default:
+			return container
+		}
+		if index < 0 {
+			return slice
+		}
+		if index >= len(slice) {
+			extended := make([]interface{}, index+1)
+			copy(extended, slice)
+			slice = extended
+		}
+		if len(parts) == 1 {
+			slice[index] = value
+			return slice
+		}
+		slice[index] = setPathValueAny(slice[index], parts[1:], value)
+		return slice
+	}
+
+	var m map[string]interface{}
+	switch typed := container.(type) {
+	case map[string]interface{}:
+		m = typed
+	case nil:
+		m = make(map[string]interface{})
+	default:
+		return container
+	}
+	if len(parts) == 1 {
+		m[part] = value
+		return m
+	}
+	m[part] = setPathValueAny(m[part], parts[1:], value)
+	return m
+}
+
+func (m *Manager) writeWarnings(r *Result) error {
+	if r.Meta == nil || len(r.Meta.Warnings) == 0 {
+		return nil
+	}
+	switch m.format {
+	case FormatMarkdown:
+		if _, err := fmt.Fprintln(m.writer, "\n## Warnings"); err != nil {
+			return err
+		}
+		for _, warning := range r.Meta.Warnings {
+			if _, err := fmt.Fprintf(m.writer, "- %s\n", warning); err != nil {
+				return err
+			}
+		}
+		return nil
+	case FormatCSV:
+		for _, warning := range r.Meta.Warnings {
+			if _, err := fmt.Fprintf(os.Stderr, "warning: %s\n", warning); err != nil {
+				return err
+			}
+		}
+		return nil
+	default:
+		if _, err := fmt.Fprintln(m.writer, "\nWarnings:"); err != nil {
+			return err
+		}
+		for _, warning := range r.Meta.Warnings {
+			if _, err := fmt.Fprintf(m.writer, "- %s\n", warning); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 }
 
 // ParseFormat parses a format string into a Format type.

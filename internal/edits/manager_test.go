@@ -1,6 +1,8 @@
 package edits
 
 import (
+	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -510,5 +512,148 @@ func TestIsLockStale(t *testing.T) {
 				t.Errorf("isLockStale() = %v, want %v", got, tt.wantStale)
 			}
 		})
+	}
+}
+
+func TestAcquireAndReleaseLock(t *testing.T) {
+	tmpDir := t.TempDir()
+	m := &Manager{
+		editsDir:  tmpDir,
+		lockFiles: make(map[string]*LockFile),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	if err := m.AcquireLock(ctx, "com.example.app"); err != nil {
+		t.Fatalf("AcquireLock error: %v", err)
+	}
+	lockPath := filepath.Join(tmpDir, "com.example.app.lock")
+	if _, err := os.Stat(lockPath); err != nil {
+		t.Fatalf("lock file not created: %v", err)
+	}
+
+	if err := m.ReleaseLock("com.example.app"); err != nil {
+		t.Fatalf("ReleaseLock error: %v", err)
+	}
+	if _, err := os.Stat(lockPath); err == nil {
+		t.Fatalf("lock file should be removed")
+	}
+}
+
+func TestCleanExpiredCacheWithContext(t *testing.T) {
+	tmpDir := t.TempDir()
+	m := &Manager{
+		cacheDir: tmpDir,
+	}
+	cacheDir := filepath.Join(tmpDir, "com.example.app")
+	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
+		t.Fatalf("mkdir cache error: %v", err)
+	}
+
+	expired := CacheEntry{
+		SHA256:    "expired",
+		Path:      "/tmp/expired.aab",
+		Size:      1,
+		CachedAt:  time.Now().Add(-48 * time.Hour),
+		ExpiresAt: time.Now().Add(-1 * time.Hour),
+	}
+	active := CacheEntry{
+		SHA256:    "active",
+		Path:      "/tmp/active.aab",
+		Size:      2,
+		CachedAt:  time.Now(),
+		ExpiresAt: time.Now().Add(1 * time.Hour),
+	}
+
+	expiredPath := filepath.Join(cacheDir, "expired.json")
+	activePath := filepath.Join(cacheDir, "active.json")
+	for path, entry := range map[string]CacheEntry{expiredPath: expired, activePath: active} {
+		data, err := json.MarshalIndent(entry, "", "  ")
+		if err != nil {
+			t.Fatalf("marshal cache entry error: %v", err)
+		}
+		if err := os.WriteFile(path, data, 0o600); err != nil {
+			t.Fatalf("write cache entry error: %v", err)
+		}
+	}
+
+	if err := m.CleanExpiredCacheWithContext(context.Background()); err != nil {
+		t.Fatalf("CleanExpiredCacheWithContext error: %v", err)
+	}
+
+	if _, err := os.Stat(expiredPath); !os.IsNotExist(err) {
+		t.Fatalf("expired cache entry should be removed")
+	}
+	if _, err := os.Stat(activePath); err != nil {
+		t.Fatalf("active cache entry should remain: %v", err)
+	}
+}
+
+func TestHashFileWithProgress(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "data.bin")
+	payload := []byte("progress content")
+	if err := os.WriteFile(path, payload, 0o600); err != nil {
+		t.Fatalf("write error: %v", err)
+	}
+
+	var calls int
+	var lastProcessed int64
+	var total int64
+	_, err := HashFileWithProgress(path, func(processed, totalBytes int64) {
+		calls++
+		lastProcessed = processed
+		total = totalBytes
+	})
+	if err != nil {
+		t.Fatalf("HashFileWithProgress error: %v", err)
+	}
+	if calls == 0 {
+		t.Fatalf("expected progress callback to be called")
+	}
+	if total != int64(len(payload)) {
+		t.Fatalf("total bytes = %d, want %d", total, len(payload))
+	}
+	if lastProcessed != int64(len(payload)) {
+		t.Fatalf("processed bytes = %d, want %d", lastProcessed, len(payload))
+	}
+}
+
+func TestIdempotencyCleanExpiredWithContext(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := &IdempotencyStore{dir: tmpDir, ttl: idempotencyTTL}
+
+	expired := IdempotencyEntry{
+		Key:       "expired",
+		Operation: "upload",
+		Timestamp: time.Now().Add(-48 * time.Hour),
+		ExpiresAt: time.Now().Add(-1 * time.Hour),
+	}
+	active := IdempotencyEntry{
+		Key:       "active",
+		Operation: "upload",
+		Timestamp: time.Now(),
+		ExpiresAt: time.Now().Add(1 * time.Hour),
+	}
+	for _, entry := range []IdempotencyEntry{expired, active} {
+		data, err := json.MarshalIndent(entry, "", "  ")
+		if err != nil {
+			t.Fatalf("marshal entry error: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(tmpDir, entry.Key+".json"), data, 0o600); err != nil {
+			t.Fatalf("write entry error: %v", err)
+		}
+	}
+
+	if err := store.CleanExpiredWithContext(context.Background()); err != nil {
+		t.Fatalf("CleanExpiredWithContext error: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(tmpDir, "expired.json")); !os.IsNotExist(err) {
+		t.Fatalf("expired entry should be removed")
+	}
+	if _, err := os.Stat(filepath.Join(tmpDir, "active.json")); err != nil {
+		t.Fatalf("active entry should remain: %v", err)
 	}
 }

@@ -28,11 +28,13 @@ func (c *CLI) addIntegrityCommands() {
 		Long:  "Decode a standard Play Integrity token for the configured package.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := c.requirePackage(); err != nil {
-				return c.OutputError(err.(*errors.APIError))
+				result := output.NewErrorResult(err.(*errors.APIError)).WithServices("playintegrity")
+				return c.Output(result)
 			}
 			tokenValue, err := resolveTokenInput(token, tokenFile)
 			if err != nil {
-				return c.OutputError(err)
+				result := output.NewErrorResult(err).WithServices("playintegrity")
+				return c.Output(result)
 			}
 			return c.integrityDecode(cmd.Context(), c.packageName, tokenValue)
 		},
@@ -95,7 +97,16 @@ func (c *CLI) integrityDecode(ctx context.Context, packageName, token string) er
 		IntegrityToken: token,
 	}).Context(ctx).Do()
 	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+		apiErr := errors.ClassifyAuthError(err)
+		if apiErr == nil {
+			apiErr = errors.NewAPIError(errors.CodeGeneralError, err.Error())
+		}
+		if strings.Contains(apiErr.Message, "SERVICE_DISABLED") || strings.Contains(apiErr.Message, "accessNotConfigured") ||
+			strings.Contains(apiErr.Message, "has not been used") || strings.Contains(apiErr.Message, "disabled") {
+			apiErr = apiErr.WithHint("Enable the Play Integrity API in Google Cloud Console and retry.")
+		}
+		result := output.NewErrorResult(apiErr).WithServices("playintegrity")
+		return c.Output(result)
 	}
 
 	return c.Output(output.NewResult(resp).WithServices("playintegrity"))

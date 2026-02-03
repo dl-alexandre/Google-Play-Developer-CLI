@@ -144,15 +144,21 @@ func (c *CLI) addMigrateFastlaneCommands(migrateCmd *cobra.Command) {
 func (c *CLI) migrateFastlaneValidate(_ context.Context, dir string) error {
 	dir = strings.TrimSpace(dir)
 	if dir == "" {
-		return c.OutputError(errors.NewAPIError(errors.CodeValidationError, "dir is required"))
+		result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError, "dir is required").
+			WithHint("Provide --dir or use the default fastlane/metadata/android structure"))
+		return c.Output(result.WithServices("migrate"))
 	}
 
 	metadata, err := fastlane.ParseDirectory(dir)
 	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeValidationError, err.Error()))
+		result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError, err.Error()).
+			WithHint("Ensure the fastlane metadata directory exists (fastlane/metadata/android) or use --dir"))
+		return c.Output(result.WithServices("migrate"))
 	}
 	if len(metadata) == 0 {
-		return c.OutputError(errors.NewAPIError(errors.CodeValidationError, "no locale directories found"))
+		result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError, "no locale directories found").
+			WithHint("Fastlane metadata should include locale folders like fastlane/metadata/android/en-US"))
+		return c.Output(result.WithServices("migrate"))
 	}
 
 	var allErrors []migrate.ValidationError
@@ -174,7 +180,7 @@ func (c *CLI) migrateFastlaneValidate(_ context.Context, dir string) error {
 		"locales":     locales,
 		"localeCount": len(locales),
 	})
-	return c.Output(result)
+	return c.Output(result.WithServices("migrate"))
 }
 
 func (c *CLI) migrateFastlaneExport(ctx context.Context, outputDir string, includeImages bool, locales []string) error {

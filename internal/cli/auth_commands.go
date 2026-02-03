@@ -3,11 +3,14 @@ package cli
 
 import (
 	"context"
+	"fmt"
+	"sort"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/dl-alexandre/gpd/internal/auth"
+	"github.com/dl-alexandre/gpd/internal/config"
 	"github.com/dl-alexandre/gpd/internal/errors"
 	"github.com/dl-alexandre/gpd/internal/output"
 )
@@ -61,7 +64,79 @@ func (c *CLI) addAuthCommands() {
 	}
 	diagnoseCmd.Flags().Bool("refresh-check", false, "Attempt a token refresh and report errors")
 
-	authCmd.AddCommand(statusCmd, checkCmd, logoutCmd, diagnoseCmd)
+	// auth doctor (alias of diagnose for parity)
+	doctorCmd := &cobra.Command{
+		Use:   "doctor",
+		Short: "Diagnose authentication setup",
+		Long:  "Alias for auth diagnose to match parity expectations.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			refreshCheck, _ := cmd.Flags().GetBool("refresh-check")
+			return c.authDiagnose(cmd.Context(), refreshCheck)
+		},
+	}
+	doctorCmd.Flags().Bool("refresh-check", false, "Attempt a token refresh and report errors")
+
+	// auth login
+	var (
+		loginClientID     string
+		loginClientSecret string
+		loginFlow         string
+	)
+	loginCmd := &cobra.Command{
+		Use:   "login [profile]",
+		Short: "Authenticate using OAuth device flow",
+		Long:  "Authenticate using OAuth device flow and store credentials for a profile.",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			profile := "default"
+			if len(args) > 0 {
+				profile = args[0]
+			}
+			return c.authLogin(cmd.Context(), profile, loginClientID, loginClientSecret, loginFlow)
+		},
+	}
+	loginCmd.Flags().StringVar(&loginClientID, "client-id", "", "OAuth client ID (or set GPD_CLIENT_ID)")
+	loginCmd.Flags().StringVar(&loginClientSecret, "client-secret", "", "OAuth client secret (or set GPD_CLIENT_SECRET)")
+	loginCmd.Flags().StringVar(&loginFlow, "flow", "device", "OAuth flow (device)")
+
+	// auth init (alias of login)
+	initCmd := &cobra.Command{
+		Use:   "init [profile]",
+		Short: "Initialize OAuth authentication",
+		Long:  "Alias for auth login to initialize credentials for a profile.",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			profile := "default"
+			if len(args) > 0 {
+				profile = args[0]
+			}
+			return c.authLogin(cmd.Context(), profile, loginClientID, loginClientSecret, loginFlow)
+		},
+	}
+	initCmd.Flags().StringVar(&loginClientID, "client-id", "", "OAuth client ID (or set GPD_CLIENT_ID)")
+	initCmd.Flags().StringVar(&loginClientSecret, "client-secret", "", "OAuth client secret (or set GPD_CLIENT_SECRET)")
+	initCmd.Flags().StringVar(&loginFlow, "flow", "device", "OAuth flow (device)")
+
+	// auth switch
+	switchCmd := &cobra.Command{
+		Use:   "switch <profile>",
+		Short: "Switch active authentication profile",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return c.authSwitch(cmd.Context(), args[0])
+		},
+	}
+
+	// auth list
+	listCmd := &cobra.Command{
+		Use:   "list",
+		Short: "List stored authentication profiles",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return c.authList(cmd.Context())
+		},
+	}
+
+	authCmd.AddCommand(statusCmd, checkCmd, logoutCmd, diagnoseCmd, doctorCmd, loginCmd, initCmd, switchCmd, listCmd)
 	c.rootCmd.AddCommand(authCmd)
 }
 
@@ -205,7 +280,7 @@ func (c *CLI) authDiagnose(ctx context.Context, refreshCheck bool) error {
 		return c.Output(result.WithServices("auth"))
 	}
 
-	meta, _ := c.authMgr.LoadTokenMetadata("default")
+	meta, _ := c.authMgr.LoadTokenMetadata(c.authMgr.GetActiveProfile())
 	tokenLocation := c.authMgr.TokenLocation()
 
 	token, tokenErr := creds.TokenSource.Token()
@@ -251,4 +326,98 @@ func (c *CLI) authDiagnose(ctx context.Context, refreshCheck bool) error {
 
 	result := output.NewResult(diagnostics)
 	return c.Output(result.WithServices("auth"))
+}
+
+func (c *CLI) authLogin(ctx context.Context, profile, clientID, clientSecret, flow string) error {
+	if flow != "" && flow != "device" {
+		return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
+			fmt.Sprintf("unsupported flow: %s", flow)).
+			WithHint("Supported flows: device"))
+	}
+	if clientID == "" {
+		clientID = config.GetEnvOAuthClientID()
+	}
+	if clientSecret == "" {
+		clientSecret = config.GetEnvOAuthClientSecret()
+	}
+	if profile == "" {
+		profile = "default"
+	}
+	c.profile = profile
+	c.authMgr.SetActiveProfile(profile)
+	scopes := []string{
+		auth.ScopeAndroidPublisher,
+		auth.ScopePlayReporting,
+		auth.ScopeGames,
+		auth.ScopePlayIntegrity,
+	}
+	creds, err := c.authMgr.AuthenticateWithDeviceCode(ctx, clientID, clientSecret, scopes, c.stderr)
+	if err != nil {
+		if apiErr, ok := err.(*errors.APIError); ok {
+			return c.OutputError(apiErr)
+		}
+		return c.OutputError(errors.NewAPIError(errors.CodeAuthFailure, err.Error()))
+	}
+	if err := c.setActiveProfile(profile); err != nil {
+		return c.OutputError(err)
+	}
+	result := output.NewResult(map[string]interface{}{
+		"success":  true,
+		"profile":  profile,
+		"origin":   creds.Origin.String(),
+		"scopes":   creds.Scopes,
+		"location": c.authMgr.TokenLocation(),
+	})
+	return c.Output(result.WithServices("auth"))
+}
+
+func (c *CLI) authSwitch(_ context.Context, profile string) error {
+	meta, err := c.authMgr.LoadTokenMetadata(profile)
+	if err != nil || meta == nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeNotFound,
+			fmt.Sprintf("profile not found: %s", profile)).
+			WithHint("Use gpd auth list to see available profiles"))
+	}
+	if err := c.setActiveProfile(profile); err != nil {
+		return c.OutputError(err)
+	}
+	result := output.NewResult(map[string]interface{}{
+		"success": true,
+		"profile": profile,
+		"origin":  meta.Origin,
+		"email":   meta.Email,
+	})
+	return c.Output(result.WithServices("auth"))
+}
+
+func (c *CLI) authList(_ context.Context) error {
+	profiles, err := c.authMgr.ListProfiles()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+	sort.Slice(profiles, func(i, j int) bool {
+		return profiles[i].Profile < profiles[j].Profile
+	})
+	result := output.NewResult(map[string]interface{}{
+		"profiles":      profiles,
+		"count":         len(profiles),
+		"activeProfile": c.authMgr.GetActiveProfile(),
+	})
+	return c.Output(result.WithServices("auth"))
+}
+
+func (c *CLI) setActiveProfile(profile string) *errors.APIError {
+	if profile == "" {
+		profile = "default"
+	}
+	c.profile = profile
+	c.authMgr.SetActiveProfile(profile)
+	if c.config == nil {
+		return nil
+	}
+	c.config.ActiveProfile = profile
+	if err := c.config.Save(); err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to save config: %v", err))
+	}
+	return nil
 }

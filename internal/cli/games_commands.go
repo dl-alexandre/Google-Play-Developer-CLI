@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"strings"
 
 	"github.com/spf13/cobra"
 	gamesmanagement "google.golang.org/api/gamesmanagement/v1management"
@@ -46,8 +47,10 @@ func (c *CLI) addAchievementsCommands(parent *cobra.Command) {
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 && !allPlayers && len(achievementIDs) == 0 {
-				return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
-					"achievement ID required or use --all-players with no args to reset all"))
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"achievement ID required or use --all-players with no args to reset all")).
+					WithServices("gamesmanagement")
+				return c.Output(result)
 			}
 			if len(achievementIDs) > 0 && allPlayers {
 				return c.gamesAchievementsResetMultipleForAllPlayers(cmd.Context(), achievementIDs)
@@ -87,8 +90,10 @@ func (c *CLI) addScoresCommands(parent *cobra.Command) {
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 && !allPlayers && len(leaderboardIDs) == 0 {
-				return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
-					"leaderboard ID required or use --all-players with no args to reset all"))
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"leaderboard ID required or use --all-players with no args to reset all")).
+					WithServices("gamesmanagement")
+				return c.Output(result)
 			}
 			if len(leaderboardIDs) > 0 && allPlayers {
 				return c.gamesScoresResetMultipleForAllPlayers(cmd.Context(), leaderboardIDs)
@@ -128,8 +133,10 @@ func (c *CLI) addEventsCommands(parent *cobra.Command) {
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 && !allPlayers && len(eventIDs) == 0 {
-				return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
-					"event ID required or use --all-players with no args to reset all"))
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"event ID required or use --all-players with no args to reset all")).
+					WithServices("gamesmanagement")
+				return c.Output(result)
 			}
 			if len(eventIDs) > 0 && allPlayers {
 				return c.gamesEventsResetMultipleForAllPlayers(cmd.Context(), eventIDs)
@@ -163,33 +170,43 @@ func (c *CLI) addPlayersCommands(parent *cobra.Command) {
 		Use:   "hide [playerId]",
 		Short: "Hide a player",
 		Long:  "Hide the given player's leaderboard scores from other players.",
-		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) != 1 {
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"playerId is required").WithHint("Usage: gpd games players hide <playerId>")).
+					WithServices("gamesmanagement")
+				return c.Output(result)
+			}
 			if applicationID == "" {
-				return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
-					"--application-id is required"))
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--application-id is required")).WithServices("gamesmanagement")
+				return c.Output(result)
 			}
 			return c.gamesPlayersHide(cmd.Context(), applicationID, args[0])
 		},
 	}
 	hideCmd.Flags().StringVar(&applicationID, "application-id", "", "Game application ID (required)")
-	_ = hideCmd.MarkFlagRequired("application-id")
 
 	unhideCmd := &cobra.Command{
 		Use:   "unhide [playerId]",
 		Short: "Unhide a player",
 		Long:  "Unhide the given player's leaderboard scores from other players.",
-		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) != 1 {
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"playerId is required").WithHint("Usage: gpd games players unhide <playerId>")).
+					WithServices("gamesmanagement")
+				return c.Output(result)
+			}
 			if applicationID == "" {
-				return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
-					"--application-id is required"))
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--application-id is required")).WithServices("gamesmanagement")
+				return c.Output(result)
 			}
 			return c.gamesPlayersUnhide(cmd.Context(), applicationID, args[0])
 		},
 	}
 	unhideCmd.Flags().StringVar(&applicationID, "application-id", "", "Game application ID (required)")
-	_ = unhideCmd.MarkFlagRequired("application-id")
 
 	playersCmd.AddCommand(hideCmd, unhideCmd)
 	parent.AddCommand(playersCmd)
@@ -247,12 +264,21 @@ func (c *CLI) getGamesManagementService(ctx context.Context) (*gamesmanagement.S
 func (c *CLI) gamesAchievementsReset(ctx context.Context, achievementID string) error {
 	svc, err := c.getGamesManagementService(ctx)
 	if err != nil {
-		return c.OutputError(err.(*errors.APIError))
+		result := output.NewErrorResult(err.(*errors.APIError)).WithServices("gamesmanagement")
+		return c.Output(result)
 	}
 
 	resp, err := svc.Achievements.Reset(achievementID).Context(ctx).Do()
 	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+		apiErr := errors.ClassifyAuthError(err)
+		if apiErr == nil {
+			apiErr = errors.NewAPIError(errors.CodeGeneralError, err.Error())
+		}
+		if strings.Contains(apiErr.Message, "has not been used") || strings.Contains(apiErr.Message, "disabled") {
+			apiErr = apiErr.WithHint("Enable the Google Play Games Services Management API in Google Cloud Console and retry.")
+		}
+		result := output.NewErrorResult(apiErr).WithServices("gamesmanagement")
+		return c.Output(result)
 	}
 
 	result := output.NewResult(map[string]interface{}{
@@ -353,12 +379,21 @@ func (c *CLI) gamesAchievementsResetMultipleForAllPlayers(ctx context.Context, a
 func (c *CLI) gamesScoresReset(ctx context.Context, leaderboardID string) error {
 	svc, err := c.getGamesManagementService(ctx)
 	if err != nil {
-		return c.OutputError(err.(*errors.APIError))
+		result := output.NewErrorResult(err.(*errors.APIError)).WithServices("gamesmanagement")
+		return c.Output(result)
 	}
 
 	resp, err := svc.Scores.Reset(leaderboardID).Context(ctx).Do()
 	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+		apiErr := errors.ClassifyAuthError(err)
+		if apiErr == nil {
+			apiErr = errors.NewAPIError(errors.CodeGeneralError, err.Error())
+		}
+		if strings.Contains(apiErr.Message, "has not been used") || strings.Contains(apiErr.Message, "disabled") {
+			apiErr = apiErr.WithHint("Enable the Google Play Games Services Management API in Google Cloud Console and retry.")
+		}
+		result := output.NewErrorResult(apiErr).WithServices("gamesmanagement")
+		return c.Output(result)
 	}
 
 	var resetScoreTimeSpans []map[string]interface{}
@@ -464,12 +499,21 @@ func (c *CLI) gamesScoresResetMultipleForAllPlayers(ctx context.Context, leaderb
 func (c *CLI) gamesEventsReset(ctx context.Context, eventID string) error {
 	svc, err := c.getGamesManagementService(ctx)
 	if err != nil {
-		return c.OutputError(err.(*errors.APIError))
+		result := output.NewErrorResult(err.(*errors.APIError)).WithServices("gamesmanagement")
+		return c.Output(result)
 	}
 
 	err = svc.Events.Reset(eventID).Context(ctx).Do()
 	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+		apiErr := errors.ClassifyAuthError(err)
+		if apiErr == nil {
+			apiErr = errors.NewAPIError(errors.CodeGeneralError, err.Error())
+		}
+		if strings.Contains(apiErr.Message, "has not been used") || strings.Contains(apiErr.Message, "disabled") {
+			apiErr = apiErr.WithHint("Enable the Google Play Games Services Management API in Google Cloud Console and retry.")
+		}
+		result := output.NewErrorResult(apiErr).WithServices("gamesmanagement")
+		return c.Output(result)
 	}
 
 	result := output.NewResult(map[string]interface{}{
@@ -594,7 +638,8 @@ func (c *CLI) gamesPlayersUnhide(ctx context.Context, applicationID, playerID st
 func (c *CLI) gamesApplicationsListHidden(ctx context.Context, applicationID string, pageSize int64, pageToken string, all bool) error {
 	svc, err := c.getGamesManagementService(ctx)
 	if err != nil {
-		return c.OutputError(err.(*errors.APIError))
+		result := output.NewErrorResult(err.(*errors.APIError)).WithServices("gamesmanagement")
+		return c.Output(result)
 	}
 
 	req := svc.Applications.ListHidden(applicationID)
@@ -611,7 +656,15 @@ func (c *CLI) gamesApplicationsListHidden(ctx context.Context, applicationID str
 	for {
 		resp, err := req.Context(ctx).Do()
 		if err != nil {
-			return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+			apiErr := errors.ClassifyAuthError(err)
+			if apiErr == nil {
+				apiErr = errors.NewAPIError(errors.CodeGeneralError, err.Error())
+			}
+			if strings.Contains(apiErr.Message, "has not been used") || strings.Contains(apiErr.Message, "disabled") {
+				apiErr = apiErr.WithHint("Enable the Google Play Games Services Management API in Google Cloud Console and retry.")
+			}
+			result := output.NewErrorResult(apiErr).WithServices("gamesmanagement")
+			return c.Output(result)
 		}
 
 		for _, item := range resp.Items {

@@ -41,6 +41,22 @@ func imageSpecs() map[string]imageSpec {
 	}
 }
 
+func imageTypeHint() string {
+	types := []string{
+		"icon",
+		"featureGraphic",
+		"promoGraphic",
+		"tvBanner",
+		"phoneScreenshots",
+		"tabletScreenshots",
+		"sevenInchScreenshots",
+		"tenInchScreenshots",
+		"tvScreenshots",
+		"wearScreenshots",
+	}
+	return "Valid image types: " + strings.Join(types, ", ")
+}
+
 func validateImageFile(filePath, imageType string) (info os.FileInfo, cfg image.Config, format string, apiErr *errors.APIError) {
 	info, err := os.Stat(filePath)
 	if err != nil {
@@ -251,7 +267,15 @@ func (c *CLI) publishImagesList(ctx context.Context, imageType, locale, editID s
 	}
 	images, err := publisher.Edits.Images.List(c.packageName, edit.Id, locale, imageType).Context(ctx).Do()
 	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+		apiErr := errors.ClassifyAuthError(err)
+		if apiErr == nil {
+			apiErr = errors.NewAPIError(errors.CodeGeneralError, err.Error())
+		}
+		if apiErr.Hint == "" {
+			apiErr = apiErr.WithHint(imageTypeHint())
+		}
+		result := output.NewErrorResult(apiErr).WithServices("androidpublisher")
+		return c.Output(result)
 	}
 	return c.Output(output.NewResult(images).WithServices("androidpublisher"))
 }

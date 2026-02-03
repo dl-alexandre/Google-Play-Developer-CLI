@@ -87,6 +87,101 @@ func (c *CLI) addReviewsCommands() {
 	replyCmd.Flags().StringVar(&rateLimit, "rate-limit", "5s", "Rate limit between replies")
 	replyCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show intended actions without executing")
 
+	// reviews get
+	var (
+		getReviewID string
+		getInclude  bool
+		getLanguage string
+	)
+	getCmd := &cobra.Command{
+		Use:   "get [review-id]",
+		Short: "Get a review by ID",
+		Long:  "Fetch a single review by ID with optional translated text.",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			reviewID := getReviewID
+			if len(args) > 0 {
+				reviewID = args[0]
+			}
+			if strings.TrimSpace(reviewID) == "" {
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError, "review ID is required").
+					WithHint("Provide a review ID argument or use --review-id")).WithServices("androidpublisher")
+				return c.Output(result)
+			}
+			return c.reviewsGet(cmd.Context(), reviewID, getInclude, getLanguage)
+		},
+	}
+	getCmd.Flags().StringVar(&getReviewID, "review-id", "", "Review ID to fetch")
+	getCmd.Flags().BoolVar(&getInclude, "include-review-text", false, "Include review text in output")
+	getCmd.Flags().StringVar(&getLanguage, "translation-language", "", "Language for translated review")
+
+	// reviews response
+	responseCmd := &cobra.Command{
+		Use:   "response",
+		Short: "Review response commands",
+		Long:  "Get or delete a developer response for a review.",
+	}
+
+	var responseReviewID string
+	responseGetCmd := &cobra.Command{
+		Use:   "get [review-id]",
+		Short: "Get a review response",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			reviewID := responseReviewID
+			if len(args) > 0 {
+				reviewID = args[0]
+			}
+			if strings.TrimSpace(reviewID) == "" {
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError, "review ID is required").
+					WithHint("Provide a review ID argument or use --review-id")).WithServices("androidpublisher")
+				return c.Output(result)
+			}
+			return c.reviewsResponseGet(cmd.Context(), reviewID)
+		},
+	}
+	responseGetCmd.Flags().StringVar(&responseReviewID, "review-id", "", "Review ID to fetch response for")
+
+	responseForReviewCmd := &cobra.Command{
+		Use:   "for-review [review-id]",
+		Short: "Get a review response for a review",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			reviewID := responseReviewID
+			if len(args) > 0 {
+				reviewID = args[0]
+			}
+			if strings.TrimSpace(reviewID) == "" {
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError, "review ID is required").
+					WithHint("Provide a review ID argument or use --review-id")).WithServices("androidpublisher")
+				return c.Output(result)
+			}
+			return c.reviewsResponseGet(cmd.Context(), reviewID)
+		},
+	}
+	responseForReviewCmd.Flags().StringVar(&responseReviewID, "review-id", "", "Review ID to fetch response for")
+
+	responseDeleteCmd := &cobra.Command{
+		Use:   "delete [review-id]",
+		Short: "Delete a review response",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			reviewID := responseReviewID
+			if len(args) > 0 {
+				reviewID = args[0]
+			}
+			if strings.TrimSpace(reviewID) == "" {
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError, "review ID is required").
+					WithHint("Provide a review ID argument or use --review-id")).WithServices("androidpublisher")
+				return c.Output(result)
+			}
+			return c.reviewsResponseDelete(cmd.Context(), reviewID)
+		},
+	}
+	responseDeleteCmd.Flags().StringVar(&responseReviewID, "review-id", "", "Review ID to delete response for")
+
+	responseCmd.AddCommand(responseGetCmd, responseForReviewCmd, responseDeleteCmd)
+
 	// reviews capabilities
 	capabilitiesCmd := &cobra.Command{
 		Use:   "capabilities",
@@ -97,7 +192,7 @@ func (c *CLI) addReviewsCommands() {
 		},
 	}
 
-	reviewsCmd.AddCommand(listCmd, replyCmd, capabilitiesCmd)
+	reviewsCmd.AddCommand(listCmd, replyCmd, getCmd, responseCmd, capabilitiesCmd)
 	c.rootCmd.AddCommand(reviewsCmd)
 }
 
@@ -189,6 +284,84 @@ func (c *CLI) reviewsList(ctx context.Context, minRating, maxRating int, _, _, _
 	return c.fetchAndOutputReviews(ctx, &params)
 }
 
+func (c *CLI) reviewsGet(ctx context.Context, reviewID string, includeText bool, translationLang string) error {
+	if err := c.requirePackage(); err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+
+	client, err := c.getAPIClient(ctx)
+	if err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+
+	publisher, err := client.AndroidPublisher()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+
+	call := publisher.Reviews.Get(c.packageName, reviewID)
+	if translationLang != "" {
+		call = call.TranslationLanguage(translationLang)
+	}
+
+	resp, err := call.Context(ctx).Do()
+	if err != nil {
+		apiErr := errors.ClassifyAuthError(err)
+		if apiErr == nil {
+			apiErr = errors.NewAPIError(errors.CodeGeneralError, err.Error())
+		}
+		if apiErr.Code == errors.CodeValidationError || strings.Contains(apiErr.Message, "wrong format") {
+			apiErr = apiErr.WithHint("Review IDs look like 'gp:AOqpTO...'. Use 'gpd reviews list' to retrieve a valid ID.")
+		}
+		result := output.NewErrorResult(apiErr).WithServices("androidpublisher")
+		return c.Output(result)
+	}
+
+	result := output.NewResult(buildReviewOutput(resp, includeText))
+	return c.Output(result.WithServices("androidpublisher"))
+}
+
+func (c *CLI) reviewsResponseGet(ctx context.Context, reviewID string) error {
+	if err := c.requirePackage(); err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+
+	client, err := c.getAPIClient(ctx)
+	if err != nil {
+		return c.OutputError(err.(*errors.APIError))
+	}
+
+	publisher, err := client.AndroidPublisher()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+
+	resp, err := publisher.Reviews.Get(c.packageName, reviewID).Context(ctx).Do()
+	if err != nil {
+		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+	}
+
+	if len(resp.Comments) > 1 && resp.Comments[1].DeveloperComment != nil {
+		result := output.NewResult(map[string]interface{}{
+			"reviewId": resp.ReviewId,
+			"text":     resp.Comments[1].DeveloperComment.Text,
+			"updated":  resp.Comments[1].DeveloperComment.LastModified.Seconds,
+		})
+		return c.Output(result.WithServices("androidpublisher"))
+	}
+
+	result := output.NewErrorResult(errors.NewAPIError(errors.CodeNotFound, "review response not found").
+		WithDetails(map[string]interface{}{"reviewId": reviewID})).WithServices("androidpublisher")
+	return c.Output(result)
+}
+
+func (c *CLI) reviewsResponseDelete(_ context.Context, reviewID string) error {
+	result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError, "review response deletion is not supported by the Google Play API").
+		WithHint("Use gpd reviews reply to overwrite an existing response if needed").
+		WithDetails(map[string]interface{}{"reviewId": reviewID})).WithServices("androidpublisher")
+	return c.Output(result)
+}
+
 func (c *CLI) fetchAndOutputReviews(ctx context.Context, params *reviewsListParams) error {
 	client, err := c.getAPIClient(ctx)
 	if err != nil {
@@ -255,34 +428,49 @@ func (c *CLI) outputReviewsResult(reviews []map[string]interface{}, scanned, fil
 	result.WithServices("androidpublisher")
 	result.WithPartial(scanned, filtered, 0)
 	result.WithPagination(pageToken, nextToken)
+
+	if len(reviews) == 0 {
+		if scanned == 0 {
+			result.WithWarnings("No reviews returned. This can mean the app has no reviews yet or access to reviews is restricted.")
+		} else {
+			result.WithWarnings("No reviews matched the current filters. Try adjusting rating filters or scan limits.")
+		}
+	} else if filtered > 0 {
+		result.WithWarnings("Some reviews were filtered out by rating or date.")
+	}
+
 	return c.Output(result)
 }
 
 func (c *CLI) reviewsReply(ctx context.Context, reviewID, replyText, templateFile string, _ int, rateLimit string, dryRun bool) error {
 	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
+		result := output.NewErrorResult(err.(*errors.APIError)).WithServices("androidpublisher")
+		return c.Output(result)
 	}
 
 	// Parse rate limit
 	rateDuration, err := time.ParseDuration(rateLimit)
 	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
-			fmt.Sprintf("invalid rate limit: %s", rateLimit)))
+		result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+			fmt.Sprintf("invalid rate limit: %s", rateLimit))).WithServices("androidpublisher")
+		return c.Output(result)
 	}
 
 	// Process template if provided
 	if templateFile != "" {
 		data, err := os.ReadFile(templateFile)
 		if err != nil {
-			return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
-				fmt.Sprintf("failed to read template file: %v", err)))
+			result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+				fmt.Sprintf("failed to read template file: %v", err))).WithServices("androidpublisher")
+			return c.Output(result)
 		}
 		replyText = string(data)
 	}
 
 	if replyText == "" {
-		return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
-			"reply text is required").WithHint("Provide --text or --template-file"))
+		result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+			"reply text is required").WithHint("Provide --text or --template-file")).WithServices("androidpublisher")
+		return c.Output(result)
 	}
 
 	// Process template variables
@@ -292,7 +480,9 @@ func (c *CLI) reviewsReply(ctx context.Context, reviewID, replyText, templateFil
 		"locale":  "en-US",       // Would come from review
 	})
 	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeValidationError, err.Error()))
+		result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError, err.Error())).
+			WithServices("androidpublisher")
+		return c.Output(result)
 	}
 
 	// Check idempotency
@@ -351,6 +541,7 @@ func (c *CLI) reviewsReply(ctx context.Context, reviewID, replyText, templateFil
 
 func (c *CLI) reviewsCapabilities(_ context.Context) error {
 	result := output.NewResult(map[string]interface{}{
+		"requiredScopes":   []string{"https://www.googleapis.com/auth/androidpublisher"},
 		"reviewWindowDays": 90,
 		"maxReplyLength":   350,
 		"supportedFilters": map[string]interface{}{

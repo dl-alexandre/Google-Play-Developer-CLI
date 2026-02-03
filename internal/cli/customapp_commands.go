@@ -34,19 +34,28 @@ func (c *CLI) addCustomAppCommands() {
 		Long:  "Create a custom app and upload an APK to publish it.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if accountID == 0 {
-				return c.OutputError(errors.NewAPIError(errors.CodeValidationError, "--account is required"))
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError, "--account is required")).
+					WithServices("playcustomapp")
+				return c.Output(result)
 			}
 			if strings.TrimSpace(title) == "" {
-				return c.OutputError(errors.NewAPIError(errors.CodeValidationError, "--title is required"))
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError, "--title is required")).
+					WithServices("playcustomapp")
+				return c.Output(result)
 			}
 			if strings.TrimSpace(language) == "" {
-				return c.OutputError(errors.NewAPIError(errors.CodeValidationError, "--language is required"))
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError, "--language is required")).
+					WithServices("playcustomapp")
+				return c.Output(result)
 			}
 			if strings.TrimSpace(apkPath) == "" {
-				return c.OutputError(errors.NewAPIError(errors.CodeValidationError, "--apk is required"))
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError, "--apk is required")).
+					WithServices("playcustomapp")
+				return c.Output(result)
 			}
 			if err := validateCustomAppAPK(apkPath); err != nil {
-				return c.OutputError(err)
+				result := output.NewErrorResult(err).WithServices("playcustomapp")
+				return c.Output(result)
 			}
 			return c.customAppCreate(cmd.Context(), accountID, title, language, apkPath, orgIDs)
 		},
@@ -57,11 +66,6 @@ func (c *CLI) addCustomAppCommands() {
 	createCmd.Flags().StringVar(&language, "language", "", "Default listing language (BCP 47, required)")
 	createCmd.Flags().StringVar(&apkPath, "apk", "", "Path to APK to upload (required)")
 	createCmd.Flags().StringSliceVar(&orgIDs, "org-id", nil, "Organization IDs to grant access")
-
-	_ = createCmd.MarkFlagRequired("account")
-	_ = createCmd.MarkFlagRequired("title")
-	_ = createCmd.MarkFlagRequired("language")
-	_ = createCmd.MarkFlagRequired("apk")
 
 	customAppCmd.AddCommand(createCmd)
 	c.rootCmd.AddCommand(customAppCmd)
@@ -99,12 +103,15 @@ func (c *CLI) getPlayCustomAppService(ctx context.Context) (*playcustomapp.Servi
 func (c *CLI) customAppCreate(ctx context.Context, accountID int64, title, language, apkPath string, orgIDs []string) error {
 	svc, err := c.getPlayCustomAppService(ctx)
 	if err != nil {
-		return c.OutputError(err.(*errors.APIError))
+		result := output.NewErrorResult(err.(*errors.APIError)).WithServices("playcustomapp")
+		return c.Output(result)
 	}
 
 	f, err := os.Open(apkPath)
 	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+		result := output.NewErrorResult(errors.NewAPIError(errors.CodeGeneralError, err.Error())).
+			WithServices("playcustomapp")
+		return c.Output(result)
 	}
 
 	orgs := make([]*playcustomapp.Organization, 0, len(orgIDs))
@@ -127,13 +134,19 @@ func (c *CLI) customAppCreate(ctx context.Context, accountID int64, title, langu
 	closeErr := f.Close()
 	if uploadErr != nil {
 		if closeErr != nil {
-			return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, uploadErr.Error()).
-				WithDetails(map[string]interface{}{"closeError": closeErr.Error()}))
+			result := output.NewErrorResult(errors.NewAPIError(errors.CodeGeneralError, uploadErr.Error()).
+				WithDetails(map[string]interface{}{"closeError": closeErr.Error()})).
+				WithServices("playcustomapp")
+			return c.Output(result)
 		}
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, uploadErr.Error()))
+		result := output.NewErrorResult(errors.NewAPIError(errors.CodeGeneralError, uploadErr.Error())).
+			WithServices("playcustomapp")
+		return c.Output(result)
 	}
 	if closeErr != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, closeErr.Error()))
+		result := output.NewErrorResult(errors.NewAPIError(errors.CodeGeneralError, closeErr.Error())).
+			WithServices("playcustomapp")
+		return c.Output(result)
 	}
 
 	return c.Output(output.NewResult(resp).WithServices("playcustomapp"))

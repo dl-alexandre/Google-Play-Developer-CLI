@@ -15,12 +15,15 @@ import (
 
 func (c *CLI) publishTestersAdd(ctx context.Context, track string, groups []string, editID string, noAutoCommit, dryRun bool) error {
 	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
+		result := output.NewErrorResult(err.(*errors.APIError)).WithServices("androidpublisher")
+		return c.Output(result)
 	}
 
 	if len(groups) == 0 {
-		return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
-			"at least one group email is required").WithHint("Use --group to specify tester group emails"))
+		result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+			"at least one group email is required").WithHint("Use --group to specify tester group emails")).
+			WithServices("androidpublisher")
+		return c.Output(result)
 	}
 
 	if dryRun {
@@ -92,12 +95,15 @@ func (c *CLI) publishTestersAdd(ctx context.Context, track string, groups []stri
 
 func (c *CLI) publishTestersRemove(ctx context.Context, track string, groups []string, editID string, noAutoCommit, dryRun bool) error {
 	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
+		result := output.NewErrorResult(err.(*errors.APIError)).WithServices("androidpublisher")
+		return c.Output(result)
 	}
 
 	if len(groups) == 0 {
-		return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
-			"at least one group email is required").WithHint("Use --group to specify tester group emails"))
+		result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+			"at least one group email is required").WithHint("Use --group to specify tester group emails")).
+			WithServices("androidpublisher")
+		return c.Output(result)
 	}
 
 	if dryRun {
@@ -209,7 +215,7 @@ func (c *CLI) publishTestersList(ctx context.Context, track string) error {
 		return c.Output(result.WithServices("androidpublisher"))
 	}
 
-	tracks := []string{"internal", "alpha", "beta", "production"}
+	tracks := []string{"internal", "alpha", "beta"}
 	testersData := make(map[string]interface{})
 	var mu sync.Mutex
 
@@ -247,5 +253,6 @@ func (c *CLI) publishTestersList(ctx context.Context, track string) error {
 		"testers": testersData,
 		"package": c.packageName,
 	})
+	result.WithWarnings("Production track does not support testers; use internal/alpha/beta.")
 	return c.Output(result.WithServices("androidpublisher"))
 }

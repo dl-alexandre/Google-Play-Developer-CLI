@@ -14,7 +14,8 @@ import (
 
 func (c *CLI) vitalsAnomaliesList(ctx context.Context, metric, timePeriod, minSeverity string, pageSize int64, pageToken string, all bool) error {
 	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
+		result := output.NewErrorResult(err.(*errors.APIError)).WithServices("playdeveloperreporting")
+		return c.Output(result)
 	}
 	client, err := c.getAPIClient(ctx)
 	if err != nil {
@@ -101,7 +102,8 @@ func buildAnomalyFilter(timePeriod string) string {
 
 func (c *CLI) vitalsErrorsIssuesSearch(ctx context.Context, query, interval string, pageSize int64, pageToken string, all bool) error {
 	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
+		result := output.NewErrorResult(err.(*errors.APIError)).WithServices("playdeveloperreporting")
+		return c.Output(result)
 	}
 
 	client, err := c.getAPIClient(ctx)
@@ -155,8 +157,7 @@ func (c *CLI) vitalsErrorsIssuesSearch(ctx context.Context, query, interval stri
 	for {
 		resp, err := searchCall.Context(ctx).Do()
 		if err != nil {
-			return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
-				fmt.Sprintf("failed to search error issues: %v", err)))
+			return c.outputReportingQueryError(err, "failed to search error issues")
 		}
 		allIssues = append(allIssues, resp.ErrorIssues...)
 		nextToken = resp.NextPageToken
@@ -180,7 +181,8 @@ func (c *CLI) vitalsErrorsIssuesSearch(ctx context.Context, query, interval stri
 
 func (c *CLI) vitalsErrorsReportsSearch(ctx context.Context, query, interval string, pageSize int64, pageToken string, all, formatReport bool) error {
 	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
+		result := output.NewErrorResult(err.(*errors.APIError)).WithServices("playdeveloperreporting")
+		return c.Output(result)
 	}
 
 	client, err := c.getAPIClient(ctx)
@@ -234,8 +236,7 @@ func (c *CLI) vitalsErrorsReportsSearch(ctx context.Context, query, interval str
 	for {
 		resp, err := searchCall.Context(ctx).Do()
 		if err != nil {
-			return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
-				fmt.Sprintf("failed to search error reports: %v", err)))
+			return c.outputReportingQueryError(err, "failed to search error reports")
 		}
 		if formatReport {
 			for _, report := range resp.ErrorReports {
@@ -266,7 +267,8 @@ func (c *CLI) vitalsErrorsReportsSearch(ctx context.Context, query, interval str
 
 func (c *CLI) vitalsErrorsCountsGet(ctx context.Context) error {
 	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
+		result := output.NewErrorResult(err.(*errors.APIError)).WithServices("playdeveloperreporting")
+		return c.Output(result)
 	}
 
 	client, err := c.getAPIClient(ctx)
@@ -282,8 +284,7 @@ func (c *CLI) vitalsErrorsCountsGet(ctx context.Context) error {
 	appName := fmt.Sprintf("apps/%s", c.packageName)
 	resp, err := reporting.Vitals.Errors.Counts.Get(appName).Context(ctx).Do()
 	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
-			fmt.Sprintf("failed to get error counts: %v", err)))
+		return c.outputReportingQueryError(err, "failed to get error counts")
 	}
 
 	result := output.NewResult(map[string]interface{}{
@@ -294,8 +295,13 @@ func (c *CLI) vitalsErrorsCountsGet(ctx context.Context) error {
 }
 
 func (c *CLI) vitalsErrorsCountsQuery(ctx context.Context, startDate, endDate string, dimensions []string, pageSize int64, pageToken string, all bool) error {
+	if apiErr := validateReportingDates(startDate, endDate); apiErr != nil {
+		result := output.NewErrorResult(apiErr).WithServices("playdeveloperreporting")
+		return c.Output(result)
+	}
 	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
+		result := output.NewErrorResult(err.(*errors.APIError)).WithServices("playdeveloperreporting")
+		return c.Output(result)
 	}
 
 	client, err := c.getAPIClient(ctx)
@@ -340,8 +346,7 @@ func (c *CLI) vitalsErrorsCountsQuery(ctx context.Context, startDate, endDate st
 	for {
 		resp, err := reporting.Vitals.Errors.Counts.Query(appName, req).Context(ctx).Do()
 		if err != nil {
-			return c.OutputError(errors.NewAPIError(errors.CodeGeneralError,
-				fmt.Sprintf("failed to query error counts: %v", err)))
+			return c.outputReportingQueryError(err, "failed to query error counts")
 		}
 		for _, row := range resp.Rows {
 			rowData := map[string]interface{}{

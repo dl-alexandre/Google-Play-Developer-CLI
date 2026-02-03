@@ -313,17 +313,20 @@ func hasObbOptions(opts obbOptions) bool {
 
 func (c *CLI) publishInternalShareUpload(ctx context.Context, filePath string, dryRun bool) error {
 	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
+		result := output.NewErrorResult(err.(*errors.APIError)).WithServices("androidpublisher")
+		return c.Output(result)
 	}
 	info, err := os.Stat(filePath)
 	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
-			fmt.Sprintf("file not found: %s", filePath)))
+		result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+			fmt.Sprintf("file not found: %s", filePath))).WithServices("androidpublisher")
+		return c.Output(result)
 	}
 	ext := strings.ToLower(filepath.Ext(filePath))
 	if ext != extAPK && ext != extAAB {
-		return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
-			"file must be an APK or AAB"))
+		result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+			"file must be an APK or AAB").WithHint("Supported formats: .apk, .aab")).WithServices("androidpublisher")
+		return c.Output(result)
 	}
 	if dryRun {
 		result := output.NewResult(map[string]interface{}{

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"google.golang.org/api/androidpublisher/v3"
@@ -38,11 +39,13 @@ func (c *CLI) addRecoveryCommands() {
 		Long:  "Create an app recovery action with DRAFT status. Use deploy to activate.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := c.requirePackage(); err != nil {
-				return c.OutputError(err.(*errors.APIError))
+				result := output.NewErrorResult(err.(*errors.APIError)).WithServices("androidpublisher")
+				return c.Output(result)
 			}
 			if versionCode <= 0 && targetingFile == "" {
-				return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
-					"--version-code or --file is required"))
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--version-code or --file is required")).WithServices("androidpublisher")
+				return c.Output(result)
 			}
 			return c.recoveryCreate(cmd.Context(), versionCode, targetingFile, allUsers, regions, androidSdkLevels, versionCodes, versionRangeMin, versionRangeMax)
 		},
@@ -102,11 +105,14 @@ func (c *CLI) addRecoveryCommands() {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := c.requirePackage(); err != nil {
-				return c.OutputError(err.(*errors.APIError))
+				result := output.NewErrorResult(err.(*errors.APIError)).WithServices("androidpublisher")
+				return c.Output(result)
 			}
 			if targetingFile == "" && !allUsers && len(regions) == 0 && len(androidSdkLevels) == 0 {
-				return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
-					"at least one targeting option is required: --file, --all-users, --regions, or --android-sdk-levels"))
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"at least one targeting option is required: --file, --all-users, --regions, or --android-sdk-levels")).
+					WithServices("androidpublisher")
+				return c.Output(result)
 			}
 			return c.recoveryAddTargeting(cmd.Context(), args[0], targetingFile, allUsers, regions, androidSdkLevels)
 		},
@@ -144,11 +150,14 @@ func (c *CLI) recoveryCreate(ctx context.Context, versionCode int64, targetingFi
 	if targetingFile != "" {
 		data, err := os.ReadFile(targetingFile)
 		if err != nil {
-			return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
-				"failed to read file: "+targetingFile))
+			result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+				"failed to read file: "+targetingFile)).WithServices("androidpublisher")
+			return c.Output(result)
 		}
 		if err := json.Unmarshal(data, &req); err != nil {
-			return c.OutputError(errors.NewAPIError(errors.CodeValidationError, "invalid JSON file"))
+			result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+				"invalid JSON file")).WithServices("androidpublisher")
+			return c.Output(result)
 		}
 	} else {
 		req.RemoteInAppUpdate = &androidpublisher.RemoteInAppUpdate{
@@ -233,7 +242,15 @@ func (c *CLI) recoveryList(ctx context.Context, versionCode int64) error {
 
 	resp, err := call.Context(ctx).Do()
 	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+		apiErr := errors.ClassifyAuthError(err)
+		if apiErr == nil {
+			apiErr = errors.NewAPIError(errors.CodeGeneralError, err.Error())
+		}
+		if strings.Contains(apiErr.Message, "Version Code must be positive") && versionCode <= 0 {
+			apiErr = apiErr.WithHint("Set --version-code to a positive value to filter recovery actions.")
+		}
+		result := output.NewErrorResult(apiErr).WithServices("androidpublisher")
+		return c.Output(result)
 	}
 
 	var actions []interface{}
@@ -267,7 +284,9 @@ func (c *CLI) recoveryDeploy(ctx context.Context, recoveryID string) error {
 
 	appRecoveryID, err := parseRecoveryID(recoveryID)
 	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeValidationError, err.Error()))
+		result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError, err.Error())).
+			WithServices("androidpublisher")
+		return c.Output(result)
 	}
 
 	_, err = publisher.Apprecovery.Deploy(c.packageName, appRecoveryID, &androidpublisher.DeployAppRecoveryRequest{}).Context(ctx).Do()
@@ -335,11 +354,14 @@ func (c *CLI) recoveryAddTargeting(ctx context.Context, recoveryID, targetingFil
 	if targetingFile != "" {
 		data, err := os.ReadFile(targetingFile)
 		if err != nil {
-			return c.OutputError(errors.NewAPIError(errors.CodeValidationError,
-				"failed to read file: "+targetingFile))
+			result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+				"failed to read file: "+targetingFile)).WithServices("androidpublisher")
+			return c.Output(result)
 		}
 		if err := json.Unmarshal(data, &req); err != nil {
-			return c.OutputError(errors.NewAPIError(errors.CodeValidationError, "invalid JSON file"))
+			result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+				"invalid JSON file")).WithServices("androidpublisher")
+			return c.Output(result)
 		}
 	} else {
 		targetingUpdate := &androidpublisher.TargetingUpdate{}

@@ -19,12 +19,14 @@ import (
 
 func (c *CLI) publishDeobfuscationUpload(ctx context.Context, filePath, fileType string, versionCode int64, editID string, chunkSize int64, noAutoCommit, dryRun bool) error {
 	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
+		result := output.NewErrorResult(err.(*errors.APIError)).WithServices("androidpublisher")
+		return c.Output(result)
 	}
 
 	info, apiErr := validateDeobfuscationFile(filePath, fileType)
 	if apiErr != nil {
-		return c.OutputError(apiErr)
+		result := output.NewErrorResult(apiErr).WithServices("androidpublisher")
+		return c.Output(result)
 	}
 
 	if dryRun {

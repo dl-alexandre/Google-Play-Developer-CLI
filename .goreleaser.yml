@@ -121,7 +121,7 @@ brews:
     folder: Formula
     homepage: "https://github.com/dl-alexandre/gpd"
     description: "Google Play Developer CLI - fast, lightweight CLI for Google Play Console"
-    license: "Apache-2.0"
+    license: "MIT"
     test: |
       system "#{bin}/gpd", "version"
     install: |
@@ -134,7 +134,7 @@ nfpms:
     homepage: "https://github.com/dl-alexandre/gpd"
     maintainer: "gpd contributors"
     description: "Google Play Developer CLI - fast, lightweight CLI for Google Play Console"
-    license: "Apache-2.0"
+    license: "MIT"
     formats:
       - deb
       - rpm

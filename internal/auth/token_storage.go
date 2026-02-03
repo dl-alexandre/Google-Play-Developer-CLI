@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -21,13 +22,15 @@ const (
 )
 
 type StoredToken struct {
-	AccessToken string   `json:"access_token"`
-	Expiry      string   `json:"expiry"`
-	Scopes      []string `json:"scopes,omitempty"`
-	Origin      string   `json:"origin,omitempty"`
-	Email       string   `json:"email,omitempty"`
-	KeyPath     string   `json:"keyPath,omitempty"`
-	ClientID    string   `json:"clientId,omitempty"`
+	AccessToken  string   `json:"access_token"`
+	RefreshToken string   `json:"refresh_token,omitempty"`
+	TokenType    string   `json:"token_type,omitempty"`
+	Expiry       string   `json:"expiry"`
+	Scopes       []string `json:"scopes,omitempty"`
+	Origin       string   `json:"origin,omitempty"`
+	Email        string   `json:"email,omitempty"`
+	KeyPath      string   `json:"keyPath,omitempty"`
+	ClientID     string   `json:"clientId,omitempty"`
 }
 
 type TokenMetadata struct {
@@ -61,6 +64,46 @@ func (m *Manager) TokenLocation() string {
 func (m *Manager) LoadTokenMetadata(profile string) (*TokenMetadata, error) {
 	meta, _, err := findTokenMetadata(profile)
 	return meta, err
+}
+
+func (m *Manager) ListProfiles() ([]TokenMetadata, error) {
+	paths := config.GetPaths()
+	dir := filepath.Join(paths.ConfigDir, "tokens")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []TokenMetadata{}, nil
+		}
+		return nil, err
+	}
+	byProfile := make(map[string]TokenMetadata)
+	byProfileMod := make(map[string]time.Time)
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), tokenMetadataSuffix) {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		metaPath := filepath.Join(dir, entry.Name())
+		meta, err := readTokenMetadata(metaPath)
+		if err != nil || meta == nil || meta.Profile == "" {
+			continue
+		}
+		if priorMod, ok := byProfileMod[meta.Profile]; !ok || info.ModTime().After(priorMod) {
+			byProfile[meta.Profile] = *meta
+			byProfileMod[meta.Profile] = info.ModTime()
+		}
+	}
+	profiles := make([]TokenMetadata, 0, len(byProfile))
+	for _, meta := range byProfile {
+		profiles = append(profiles, meta)
+	}
+	sort.Slice(profiles, func(i, j int) bool {
+		return profiles[i].Profile < profiles[j].Profile
+	})
+	return profiles, nil
 }
 
 func tokenStorageKey(profile, hash string) string {
@@ -164,7 +207,9 @@ func (m *Manager) loadStoredToken(key string) (*oauth2.Token, error) {
 		return nil, err
 	}
 	token := &oauth2.Token{
-		AccessToken: stored.AccessToken,
+		AccessToken:  stored.AccessToken,
+		RefreshToken: stored.RefreshToken,
+		TokenType:    stored.TokenType,
 	}
 	if stored.Expiry != "" {
 		expiry, err := time.Parse(time.RFC3339, stored.Expiry)
@@ -172,7 +217,7 @@ func (m *Manager) loadStoredToken(key string) (*oauth2.Token, error) {
 			token.Expiry = expiry
 		}
 	}
-	if !token.Valid() {
+	if !token.Valid() && token.RefreshToken == "" {
 		return nil, nil
 	}
 	return token, nil

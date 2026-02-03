@@ -210,3 +210,77 @@ func TestReadImagesMissing(t *testing.T) {
 		t.Fatalf("expected nil images")
 	}
 }
+
+func TestReadChangelogsSkipsNonText(t *testing.T) {
+	dir := t.TempDir()
+	localeDir := filepath.Join(dir, "en-US")
+	changelogDir := filepath.Join(localeDir, "changelogs")
+	if err := os.MkdirAll(changelogDir, 0o755); err != nil {
+		t.Fatalf("mkdir error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(changelogDir, "notes.md"), []byte("ignore"), 0o644); err != nil {
+		t.Fatalf("write error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(changelogDir, "100.txt"), []byte("keep"), 0o644); err != nil {
+		t.Fatalf("write error: %v", err)
+	}
+
+	changelogs, err := readChangelogs(localeDir)
+	if err != nil {
+		t.Fatalf("readChangelogs error: %v", err)
+	}
+	if len(changelogs) != 1 || changelogs["100"] != "keep" {
+		t.Fatalf("unexpected changelogs: %+v", changelogs)
+	}
+}
+
+func TestReadImagesIgnoresUnknownDirsAndFiles(t *testing.T) {
+	dir := t.TempDir()
+	localeDir := filepath.Join(dir, "en-US")
+	imagesDir := filepath.Join(localeDir, "images")
+	if err := os.MkdirAll(imagesDir, 0o755); err != nil {
+		t.Fatalf("mkdir error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(imagesDir, "featureGraphic.jpg"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(imagesDir, "featureGraphic.png"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(imagesDir, "README.txt"), []byte("ignore"), 0o644); err != nil {
+		t.Fatalf("write error: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(imagesDir, "unknownDir"), 0o755); err != nil {
+		t.Fatalf("mkdir error: %v", err)
+	}
+
+	images, err := readImages(localeDir)
+	if err != nil {
+		t.Fatalf("readImages error: %v", err)
+	}
+	if len(images["featureGraphic"]) != 1 || filepath.Ext(images["featureGraphic"][0]) != ".png" {
+		t.Fatalf("expected png preferred for featureGraphic, got %v", images["featureGraphic"])
+	}
+}
+
+func TestParseDirectorySkipsNonDirEntries(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "README.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write error: %v", err)
+	}
+	localeDir := filepath.Join(dir, "en-US")
+	if err := os.MkdirAll(localeDir, 0o755); err != nil {
+		t.Fatalf("mkdir error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(localeDir, "title.txt"), []byte("Title"), 0o644); err != nil {
+		t.Fatalf("write error: %v", err)
+	}
+
+	metas, err := ParseDirectory(dir)
+	if err != nil {
+		t.Fatalf("ParseDirectory error: %v", err)
+	}
+	if len(metas) != 1 || metas[0].Locale != "en-US" {
+		t.Fatalf("unexpected metas: %+v", metas)
+	}
+}

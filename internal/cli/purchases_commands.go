@@ -49,6 +49,11 @@ func (c *CLI) addPurchasesVerifyCommands(purchasesCmd *cobra.Command) {
 		Short: "Verify a purchase token",
 		Long:  "Verify a purchase or subscription token.",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if token == "" {
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--token is required")).WithServices("androidpublisher")
+				return c.Output(result)
+			}
 			return c.purchasesVerify(cmd.Context(), productID, token, environment, productType)
 		},
 	}
@@ -56,7 +61,6 @@ func (c *CLI) addPurchasesVerifyCommands(purchasesCmd *cobra.Command) {
 	verifyCmd.Flags().StringVar(&token, "token", "", "Purchase token")
 	verifyCmd.Flags().StringVar(&environment, "environment", purchaseTypeAuto, "Environment: sandbox, production, auto")
 	verifyCmd.Flags().StringVar(&productType, "type", purchaseTypeAuto, "Product type: product, subscription, auto")
-	_ = verifyCmd.MarkFlagRequired("token")
 
 	capabilitiesCmd := &cobra.Command{
 		Use:   "capabilities",
@@ -70,11 +74,6 @@ func (c *CLI) addPurchasesVerifyCommands(purchasesCmd *cobra.Command) {
 }
 
 func (c *CLI) addPurchasesVoidedCommands(purchasesCmd *cobra.Command) {
-	voidedCmd := &cobra.Command{
-		Use:   "voided",
-		Short: "Voided purchases",
-	}
-
 	var (
 		startTime  string
 		endTime    string
@@ -84,6 +83,23 @@ func (c *CLI) addPurchasesVoidedCommands(purchasesCmd *cobra.Command) {
 		all        bool
 	)
 
+	voidedCmd := &cobra.Command{
+		Use:   "voided",
+		Short: "Voided purchases",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return c.purchasesVoidedList(cmd.Context(), startTime, endTime, kind, maxResults, pageToken, all)
+		},
+	}
+
+	voidedCmd.PersistentFlags().StringVar(&startTime, "start-time", "", "Start time (RFC3339 or millis)")
+	voidedCmd.PersistentFlags().StringVar(&endTime, "end-time", "", "End time (RFC3339 or millis)")
+	voidedCmd.PersistentFlags().StringVar(&kind, "type", "", "Type: product or subscription")
+	voidedCmd.PersistentFlags().Int64Var(&maxResults, "max-results", 0, "Max results per page")
+	voidedCmd.PersistentFlags().Int64Var(&maxResults, "page-size", 0, "Alias for --max-results")
+	_ = voidedCmd.PersistentFlags().MarkDeprecated("page-size", "use --max-results instead")
+	voidedCmd.PersistentFlags().StringVar(&pageToken, "page-token", "", "Pagination token")
+	addPaginationFlags(voidedCmd, &all)
+
 	voidedListCmd := &cobra.Command{
 		Use:   "list",
 		Short: "List voided purchases",
@@ -91,12 +107,6 @@ func (c *CLI) addPurchasesVoidedCommands(purchasesCmd *cobra.Command) {
 			return c.purchasesVoidedList(cmd.Context(), startTime, endTime, kind, maxResults, pageToken, all)
 		},
 	}
-	voidedListCmd.Flags().StringVar(&startTime, "start-time", "", "Start time (RFC3339 or millis)")
-	voidedListCmd.Flags().StringVar(&endTime, "end-time", "", "End time (RFC3339 or millis)")
-	voidedListCmd.Flags().StringVar(&kind, "type", "", "Type: product or subscription")
-	voidedListCmd.Flags().Int64Var(&maxResults, "max-results", 0, "Max results per page")
-	voidedListCmd.Flags().StringVar(&pageToken, "page-token", "", "Pagination token")
-	addPaginationFlags(voidedListCmd, &all)
 
 	voidedCmd.AddCommand(voidedListCmd)
 	purchasesCmd.AddCommand(voidedCmd)
@@ -118,26 +128,32 @@ func (c *CLI) addPurchasesProductsCommands(purchasesCmd *cobra.Command) {
 		Use:   "acknowledge",
 		Short: "Acknowledge a product purchase",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if productID == "" || token == "" {
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--product-id and --token are required")).WithServices("androidpublisher")
+				return c.Output(result)
+			}
 			return c.purchasesProductsAcknowledge(cmd.Context(), productID, token, developerPayload)
 		},
 	}
 	productsAcknowledgeCmd.Flags().StringVar(&productID, "product-id", "", "Product ID")
 	productsAcknowledgeCmd.Flags().StringVar(&token, "token", "", "Purchase token")
 	productsAcknowledgeCmd.Flags().StringVar(&developerPayload, "developer-payload", "", "Developer payload")
-	_ = productsAcknowledgeCmd.MarkFlagRequired("product-id")
-	_ = productsAcknowledgeCmd.MarkFlagRequired("token")
 
 	productsConsumeCmd := &cobra.Command{
 		Use:   "consume",
 		Short: "Consume a product purchase",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if productID == "" || token == "" {
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--product-id and --token are required")).WithServices("androidpublisher")
+				return c.Output(result)
+			}
 			return c.purchasesProductsConsume(cmd.Context(), productID, token)
 		},
 	}
 	productsConsumeCmd.Flags().StringVar(&productID, "product-id", "", "Product ID")
 	productsConsumeCmd.Flags().StringVar(&token, "token", "", "Purchase token")
-	_ = productsConsumeCmd.MarkFlagRequired("product-id")
-	_ = productsConsumeCmd.MarkFlagRequired("token")
 
 	productsCmd.AddCommand(productsAcknowledgeCmd, productsConsumeCmd)
 	purchasesCmd.AddCommand(productsCmd)
@@ -162,31 +178,43 @@ func (c *CLI) addPurchasesSubscriptionsCommands(purchasesCmd *cobra.Command) {
 		Use:   "acknowledge",
 		Short: "Acknowledge a subscription purchase",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if subscriptionID == "" || token == "" {
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--subscription-id and --token are required")).WithServices("androidpublisher")
+				return c.Output(result)
+			}
 			return c.purchasesSubscriptionsAcknowledge(cmd.Context(), subscriptionID, token, developerPayload)
 		},
 	}
 	subscriptionsAcknowledgeCmd.Flags().StringVar(&subscriptionID, "subscription-id", "", "Subscription ID")
 	subscriptionsAcknowledgeCmd.Flags().StringVar(&token, "token", "", "Purchase token")
 	subscriptionsAcknowledgeCmd.Flags().StringVar(&developerPayload, "developer-payload", "", "Developer payload")
-	_ = subscriptionsAcknowledgeCmd.MarkFlagRequired("subscription-id")
-	_ = subscriptionsAcknowledgeCmd.MarkFlagRequired("token")
 
 	subscriptionsCancelCmd := &cobra.Command{
 		Use:   "cancel",
 		Short: "Cancel a subscription",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if subscriptionID == "" || token == "" {
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--subscription-id and --token are required")).WithServices("androidpublisher")
+				return c.Output(result)
+			}
 			return c.purchasesSubscriptionsCancel(cmd.Context(), subscriptionID, token)
 		},
 	}
 	subscriptionsCancelCmd.Flags().StringVar(&subscriptionID, "subscription-id", "", "Subscription ID")
 	subscriptionsCancelCmd.Flags().StringVar(&token, "token", "", "Purchase token")
-	_ = subscriptionsCancelCmd.MarkFlagRequired("subscription-id")
-	_ = subscriptionsCancelCmd.MarkFlagRequired("token")
 
 	subscriptionsDeferCmd := &cobra.Command{
 		Use:   "defer",
 		Short: "Defer a subscription renewal",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if subscriptionID == "" || token == "" || expectedExpiry == "" || desiredExpiry == "" {
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--subscription-id, --token, --expected-expiry-time, and --desired-expiry-time are required")).
+					WithServices("androidpublisher")
+				return c.Output(result)
+			}
 			return c.purchasesSubscriptionsDefer(cmd.Context(), subscriptionID, token, expectedExpiry, desiredExpiry)
 		},
 	}
@@ -194,34 +222,37 @@ func (c *CLI) addPurchasesSubscriptionsCommands(purchasesCmd *cobra.Command) {
 	subscriptionsDeferCmd.Flags().StringVar(&token, "token", "", "Purchase token")
 	subscriptionsDeferCmd.Flags().StringVar(&expectedExpiry, "expected-expiry-time", "", "Expected expiry time (RFC3339 or millis)")
 	subscriptionsDeferCmd.Flags().StringVar(&desiredExpiry, "desired-expiry-time", "", "Desired expiry time (RFC3339 or millis)")
-	_ = subscriptionsDeferCmd.MarkFlagRequired("subscription-id")
-	_ = subscriptionsDeferCmd.MarkFlagRequired("token")
-	_ = subscriptionsDeferCmd.MarkFlagRequired("expected-expiry-time")
-	_ = subscriptionsDeferCmd.MarkFlagRequired("desired-expiry-time")
 
 	subscriptionsRefundCmd := &cobra.Command{
 		Use:   "refund",
 		Short: "Refund a subscription (v1)",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if subscriptionID == "" || token == "" {
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--subscription-id and --token are required")).WithServices("androidpublisher")
+				return c.Output(result)
+			}
 			return c.purchasesSubscriptionsRefund(cmd.Context(), subscriptionID, token)
 		},
 	}
 	subscriptionsRefundCmd.Flags().StringVar(&subscriptionID, "subscription-id", "", "Subscription ID")
 	subscriptionsRefundCmd.Flags().StringVar(&token, "token", "", "Purchase token")
-	_ = subscriptionsRefundCmd.MarkFlagRequired("subscription-id")
-	_ = subscriptionsRefundCmd.MarkFlagRequired("token")
 
 	subscriptionsRevokeCmd := &cobra.Command{
 		Use:   "revoke",
 		Short: "Revoke a subscription",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if token == "" {
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+					"--token is required")).WithServices("androidpublisher")
+				return c.Output(result)
+			}
 			return c.purchasesSubscriptionsRevoke(cmd.Context(), subscriptionID, token, revokeType)
 		},
 	}
 	subscriptionsRevokeCmd.Flags().StringVar(&subscriptionID, "subscription-id", "", "Subscription ID (v1)")
 	subscriptionsRevokeCmd.Flags().StringVar(&token, "token", "", "Purchase token")
 	subscriptionsRevokeCmd.Flags().StringVar(&revokeType, "revoke-type", "", "Revoke type for v2: fullRefund, partialRefund, itemBasedRefund")
-	_ = subscriptionsRevokeCmd.MarkFlagRequired("token")
 
 	subscriptionsCmd.AddCommand(subscriptionsAcknowledgeCmd, subscriptionsCancelCmd, subscriptionsDeferCmd, subscriptionsRefundCmd, subscriptionsRevokeCmd)
 	purchasesCmd.AddCommand(subscriptionsCmd)
@@ -229,22 +260,33 @@ func (c *CLI) addPurchasesSubscriptionsCommands(purchasesCmd *cobra.Command) {
 
 func (c *CLI) purchasesVerify(ctx context.Context, productID, token, environment, productType string) error {
 	if err := c.requirePackage(); err != nil {
-		return c.OutputError(err.(*errors.APIError))
+		result := output.NewErrorResult(err.(*errors.APIError)).WithServices("androidpublisher")
+		return c.Output(result)
 	}
 
 	if token == "" {
-		return c.OutputError(errors.NewAPIError(errors.CodeValidationError, "purchase token is required"))
+		result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError, "purchase token is required")).
+			WithServices("androidpublisher")
+		return c.Output(result)
 	}
 
 	// Get API client
 	client, err := c.getAPIClient(ctx)
 	if err != nil {
-		return c.OutputError(err.(*errors.APIError))
+		if apiErr, ok := err.(*errors.APIError); ok {
+			result := output.NewErrorResult(apiErr).WithServices("androidpublisher")
+			return c.Output(result)
+		}
+		result := output.NewErrorResult(errors.NewAPIError(errors.CodeGeneralError, err.Error())).
+			WithServices("androidpublisher")
+		return c.Output(result)
 	}
 
 	publisher, err := client.AndroidPublisher()
 	if err != nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))
+		result := output.NewErrorResult(errors.NewAPIError(errors.CodeGeneralError, err.Error())).
+			WithServices("androidpublisher")
+		return c.Output(result)
 	}
 
 	var purchaseData interface{}
@@ -290,15 +332,17 @@ func (c *CLI) purchasesVerify(ctx context.Context, productID, token, environment
 				}
 				purchaseType = purchaseTypeSubscription
 			} else if productType == purchaseTypeSubscription {
-				return c.OutputError(errors.NewAPIError(errors.CodeNotFound,
-					fmt.Sprintf("subscription not found: %v", err)))
+				result := output.NewErrorResult(errors.NewAPIError(errors.CodeNotFound,
+					fmt.Sprintf("subscription not found: %v", err))).WithServices("androidpublisher")
+				return c.Output(result)
 			}
 		}
 	}
 
 	if purchaseData == nil {
-		return c.OutputError(errors.NewAPIError(errors.CodeNotFound,
+		result := output.NewErrorResult(errors.NewAPIError(errors.CodeNotFound,
 			"purchase not found").WithHint("Check that the token and product ID are correct"))
+		return c.Output(result.WithServices("androidpublisher"))
 	}
 
 	result := output.NewResult(map[string]interface{}{
@@ -380,7 +424,9 @@ func (c *CLI) purchasesVoidedList(ctx context.Context, startTime, endTime, kind 
 		case purchaseTypeSubscription:
 			req = req.Type(1)
 		default:
-			return c.OutputError(errors.NewAPIError(errors.CodeValidationError, "type must be product or subscription"))
+			result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+				"type must be product or subscription")).WithServices("androidpublisher")
+			return c.Output(result)
 		}
 	}
 	if maxResults > 0 {
@@ -392,7 +438,7 @@ func (c *CLI) purchasesVoidedList(ctx context.Context, startTime, endTime, kind 
 
 	startToken := pageToken
 	nextToken := ""
-	var allPurchases []*androidpublisher.VoidedPurchase
+	allPurchases := make([]*androidpublisher.VoidedPurchase, 0)
 	for {
 		resp, err := req.Context(ctx).Do()
 		if err != nil {
@@ -600,7 +646,9 @@ func (c *CLI) purchasesSubscriptionsRevoke(ctx context.Context, subscriptionID, 
 				ProratedRefund: &androidpublisher.RevocationContextProratedRefund{},
 			}
 		default:
-			return c.OutputError(errors.NewAPIError(errors.CodeValidationError, "invalid revoke-type: must be fullRefund or partialRefund"))
+			result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+				"invalid revoke-type: must be fullRefund or partialRefund")).WithServices("androidpublisher")
+			return c.Output(result)
 		}
 		req := &androidpublisher.RevokeSubscriptionPurchaseRequest{
 			RevocationContext: revocationContext,
@@ -618,7 +666,9 @@ func (c *CLI) purchasesSubscriptionsRevoke(ctx context.Context, subscriptionID, 
 		return c.Output(result.WithServices("androidpublisher"))
 	}
 	if subscriptionID == "" {
-		return c.OutputError(errors.NewAPIError(errors.CodeValidationError, "subscription-id is required for v1 revoke"))
+		result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
+			"subscription-id is required for v1 revoke")).WithServices("androidpublisher")
+		return c.Output(result)
 	}
 	if err := publisher.Purchases.Subscriptions.Revoke(c.packageName, subscriptionID, token).Context(ctx).Do(); err != nil {
 		return c.OutputError(errors.NewAPIError(errors.CodeGeneralError, err.Error()))

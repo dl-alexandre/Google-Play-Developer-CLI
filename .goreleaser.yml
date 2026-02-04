@@ -118,7 +118,7 @@ brews:
       owner: dl-alexandre
       name: tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    folder: Formula
+    directory: Formula
     homepage: "https://github.com/dl-alexandre/gpd"
     description: "Google Play Developer CLI - fast, lightweight CLI for Google Play Console"
     license: "MIT"

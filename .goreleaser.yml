@@ -78,7 +78,7 @@ changelog:
 release:
   github:
     owner: dl-alexandre
-    name: gpd
+    name: Google-Play-Developer-CLI
   draft: false
   prerelease: auto
   name_template: "v{{.Version}}"

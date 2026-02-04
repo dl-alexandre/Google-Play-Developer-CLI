@@ -10,10 +10,13 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/dl-alexandre/gpd/internal/auth"
+
 	"github.com/dl-alexandre/gpd/internal/config"
 	"github.com/dl-alexandre/gpd/internal/errors"
 	"github.com/dl-alexandre/gpd/internal/output"
 )
+
+const defaultProfileName = "default"
 
 func (c *CLI) addAuthCommands() {
 	authCmd := &cobra.Command{
@@ -88,7 +91,7 @@ func (c *CLI) addAuthCommands() {
 		Long:  "Authenticate using OAuth device flow and store credentials for a profile.",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			profile := "default"
+			profile := defaultProfileName
 			if len(args) > 0 {
 				profile = args[0]
 			}
@@ -106,7 +109,7 @@ func (c *CLI) addAuthCommands() {
 		Long:  "Alias for auth login to initialize credentials for a profile.",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			profile := "default"
+			profile := defaultProfileName
 			if len(args) > 0 {
 				profile = args[0]
 			}

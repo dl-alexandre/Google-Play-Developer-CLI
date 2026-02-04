@@ -33,8 +33,12 @@ type TokenResponse struct {
 }
 
 const (
+	// #nosec G101 -- OAuth endpoints, not credentials.
 	deviceCodeEndpoint = "https://oauth2.googleapis.com/device/code"
-	tokenEndpoint      = "https://oauth2.googleapis.com/token"
+	// #nosec G101 -- OAuth endpoints, not credentials.
+	tokenEndpoint = "https://oauth2.googleapis.com/token"
+	authPending   = "authorization_pending"
+	slowDown      = "slow_down"
 )
 
 type DeviceCodeFlow struct {
@@ -62,7 +66,9 @@ func (f *DeviceCodeFlow) RequestDeviceCode(ctx context.Context) (*DeviceCodeResp
 	if err != nil {
 		return nil, fmt.Errorf("failed to request device code: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -107,9 +113,9 @@ func (f *DeviceCodeFlow) PollForToken(ctx context.Context) (*oauth2.Token, error
 			return token, nil
 		}
 		switch errType {
-		case "authorization_pending":
+		case authPending:
 			time.Sleep(interval)
-		case "slow_down":
+		case slowDown:
 			interval += 5 * time.Second
 			time.Sleep(interval)
 		default:
@@ -137,7 +143,9 @@ func (f *DeviceCodeFlow) pollOnce(ctx context.Context, client *http.Client) (*oa
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to poll for token: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	var tokenResp TokenResponse
 	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
@@ -146,7 +154,7 @@ func (f *DeviceCodeFlow) pollOnce(ctx context.Context, client *http.Client) (*oa
 
 	if tokenResp.Error != "" {
 		switch tokenResp.Error {
-		case "authorization_pending", "slow_down":
+		case authPending, slowDown:
 			return nil, tokenResp.Error, nil
 		case "expired_token":
 			return nil, "", fmt.Errorf("device code has expired")
@@ -167,19 +175,19 @@ func (f *DeviceCodeFlow) pollOnce(ctx context.Context, client *http.Client) (*oa
 		}, "", nil
 	}
 
-	return nil, "authorization_pending", nil
+	return nil, authPending, nil
 }
 
 func displayDeviceCodePrompt(w io.Writer, resp *DeviceCodeResponse) {
 	if w == nil || resp == nil {
 		return
 	}
-	url := resp.VerificationURL
-	if url == "" {
-		url = resp.VerificationURI
+	verificationURL := resp.VerificationURL
+	if verificationURL == "" {
+		verificationURL = resp.VerificationURI
 	}
 	_, _ = fmt.Fprintln(w, "Authenticate with Google Play Developer CLI")
-	_, _ = fmt.Fprintln(w, "1) Visit:", url)
+	_, _ = fmt.Fprintln(w, "1) Visit:", verificationURL)
 	_, _ = fmt.Fprintln(w, "2) Enter code:", resp.UserCode)
 	if resp.VerificationURLComplete != "" {
 		_, _ = fmt.Fprintln(w, "Or visit:", resp.VerificationURLComplete)

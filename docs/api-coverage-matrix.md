@@ -20,7 +20,18 @@ This document provides a comprehensive overview of Google Play API coverage in t
 | API Endpoint | CLI Command | Status | Notes |
 |--------------|-------------|--------|-------|
 | `edits.bundles.upload` | `gpd publish upload <file.aab>` | ✅ | Upload Android App Bundle (AAB) |
+| `edits.bundles.list` | `gpd publish builds list --type bundle` | ✅ | List bundles in an edit |
+| `edits.bundles.get` | `gpd publish builds get <version-code> --type bundle` | ✅ | Get bundle details |
 | `edits.apks.upload` | `gpd publish upload <file.apk>` | ✅ | Upload APK file |
+| `edits.apks.list` | `gpd publish builds list --type apk` | ✅ | List APKs in an edit |
+| `edits.apks.get` | `gpd publish builds get <version-code> --type apk` | ✅ | Get APK details |
+
+### Expansion Files (OBB)
+
+| API Endpoint | CLI Command | Status | Notes |
+|--------------|-------------|--------|-------|
+| `edits.expansionfiles.upload` | `gpd publish upload --obb-main/--obb-patch <file.obb>` | ✅ | Upload expansion files (OBB) |
+| `edits.expansionfiles.update` | `gpd publish upload --obb-main-references-version/--obb-patch-references-version <version>` | ✅ | Update expansion file references |
 
 ### Tracks
 
@@ -81,6 +92,7 @@ This document provides a comprehensive overview of Google Play API coverage in t
 | `monetization.subscriptions.archive` | `gpd monetization subscriptions archive <id>` | ✅ | Archive a subscription |
 | `monetization.subscriptions.batchGet` | `gpd monetization subscriptions batchGet` | ✅ | Batch get multiple subscriptions |
 | `monetization.subscriptions.batchUpdate` | `gpd monetization subscriptions batchUpdate` | ✅ | Batch update subscriptions |
+| `monetization.convertRegionPrices` | `gpd monetization subscriptions convert-prices` | ✅ | Convert subscription prices across regions |
 
 ### Monetization - Base Plans
 
@@ -134,6 +146,7 @@ This document provides a comprehensive overview of Google Play API coverage in t
 | `purchases.subscriptions.cancel` | `gpd purchases subscriptions cancel` | ✅ | Cancel a subscription |
 | `purchases.subscriptions.defer` | `gpd purchases subscriptions defer` | ✅ | Defer subscription renewal |
 | `purchases.subscriptions.refund` | `gpd purchases subscriptions refund` | ✅ | Refund a subscription (v1) |
+| `purchases.subscriptions.revoke` | `gpd purchases subscriptions revoke` | ✅ | Revoke subscription (v1) |
 | `purchases.subscriptionsv2.revoke` | `gpd purchases subscriptions revoke` | ✅ | Revoke subscription (v2 API) |
 
 ### Purchases - Voided
@@ -147,7 +160,7 @@ This document provides a comprehensive overview of Google Play API coverage in t
 | API Endpoint | CLI Command | Status | Notes |
 |--------------|-------------|--------|-------|
 | `reviews.list` | `gpd reviews list` | ✅ | List user reviews with filtering |
-| `reviews.get` | `gpd reviews list` (filtered) | ✅ | Get specific review (via list filtering) |
+| `reviews.get` | `gpd reviews get` | ✅ | Get a specific review by ID |
 | `reviews.reply` | `gpd reviews reply` | ✅ | Reply to a user review |
 
 ### Users
@@ -179,6 +192,12 @@ This document provides a comprehensive overview of Google Play API coverage in t
 | `apprecovery.addTargeting` | `gpd recovery add-targeting <recovery-id>` | ✅ | Add targeting to recovery action |
 
 ## Play Developer Reporting API v1beta1
+
+### Apps
+
+| API Endpoint | CLI Command | Status | Notes |
+|--------------|-------------|--------|-------|
+| `apps.search` | `gpd apps list` | ✅ | List apps accessible to the account |
 
 ### Crash Rate
 
@@ -246,6 +265,31 @@ This document provides a comprehensive overview of Google Play API coverage in t
 | API Endpoint | CLI Command | Status | Notes |
 |--------------|-------------|--------|-------|
 | `anomalies.list` | `gpd vitals anomalies list` | ✅ | List anomalies in vitals metrics |
+
+## Play Integrity API v1
+
+### Integrity Token Decoding
+
+| API Endpoint | CLI Command | Status | Notes |
+|--------------|-------------|--------|-------|
+| `v1.decodeIntegrityToken` | `gpd integrity decode` | ✅ | Decode Play Integrity tokens |
+
+## Play Games Services API v1
+
+### Access Tokens (Play Grouping)
+
+| API Endpoint | CLI Command | Status | Notes |
+|--------------|-------------|--------|-------|
+| `accesstokens.generatePlayGroupingApiToken` | `gpd grouping token` | ✅ | Generate Play Grouping API token |
+| `accesstokens.generateRecallPlayGroupingApiToken` | `gpd grouping token-recall` | ✅ | Generate Play Grouping API token via Recall |
+
+## Play Custom App Publishing API v1
+
+### Custom Apps
+
+| API Endpoint | CLI Command | Status | Notes |
+|--------------|-------------|--------|-------|
+| `accounts.customApps.create` | `gpd customapp create` | ✅ | Create and upload custom app |
 
 ## Games Management API v1
 

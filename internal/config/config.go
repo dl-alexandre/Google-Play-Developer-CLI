@@ -209,7 +209,7 @@ func DetectCI() bool {
 const (
 	EnvServiceAccountKey = "GPD_SERVICE_ACCOUNT_KEY"
 	EnvOAuthClientID     = "GPD_CLIENT_ID"
-	EnvOAuthClientSecret = "GPD_CLIENT_SECRET"
+	EnvOAuthClientSecret = "GPD_CLIENT_SECRET" //nolint:gosec // G101: This is an env var name, not credentials
 	EnvPackage           = "GPD_PACKAGE"
 	EnvAuthProfile       = "GPD_AUTH_PROFILE"
 	EnvTimeout           = "GPD_TIMEOUT"

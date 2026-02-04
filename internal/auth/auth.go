@@ -296,14 +296,14 @@ func (m *Manager) AuthenticateWithDeviceCode(ctx context.Context, clientID, clie
 		return nil, errors.NewAPIError(errors.CodeAuthFailure, "OAuth scopes are required")
 	}
 
-	config := &oauth2.Config{
+	oauthConfig := &oauth2.Config{
 		ClientID:     clientID,
 		ClientSecret: clientSecret,
 		Scopes:       scopes,
 		Endpoint:     google.Endpoint,
 	}
 
-	flow := NewDeviceCodeFlow(config)
+	flow := NewDeviceCodeFlow(oauthConfig)
 	deviceResp, err := flow.RequestDeviceCode(ctx)
 	if err != nil {
 		return nil, errors.NewAPIError(errors.CodeAuthFailure,
@@ -317,7 +317,7 @@ func (m *Manager) AuthenticateWithDeviceCode(ctx context.Context, clientID, clie
 			fmt.Sprintf("device code authentication failed: %v", err))
 	}
 
-	baseTokenSource := config.TokenSource(ctx, token)
+	baseTokenSource := oauthConfig.TokenSource(ctx, token)
 	wrappedTokenSource := m.wrapTokenSource(baseTokenSource, OriginOAuth, "", clientID, scopes)
 
 	creds := &Credentials{

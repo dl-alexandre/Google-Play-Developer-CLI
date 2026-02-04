@@ -25,7 +25,17 @@ func (c *CLI) addReviewsCommands() {
 		Long:  "List and reply to user reviews.",
 	}
 
-	// Shared flags
+	reviewsCmd.AddCommand(
+		c.newReviewsListCommand(),
+		c.newReviewsReplyCommand(),
+		c.newReviewsGetCommand(),
+		c.newReviewsResponseCommand(),
+		c.newReviewsCapabilitiesCommand(),
+	)
+	c.rootCmd.AddCommand(reviewsCmd)
+}
+
+func (c *CLI) newReviewsListCommand() *cobra.Command {
 	var (
 		minRating       int
 		maxRating       int
@@ -40,7 +50,6 @@ func (c *CLI) addReviewsCommands() {
 		all             bool
 	)
 
-	// reviews list
 	listCmd := &cobra.Command{
 		Use:   "list",
 		Short: "List user reviews",
@@ -62,7 +71,10 @@ func (c *CLI) addReviewsCommands() {
 	listCmd.Flags().StringVar(&pageToken, "page-token", "", "Pagination token")
 	addPaginationFlags(listCmd, &all)
 
-	// reviews reply
+	return listCmd
+}
+
+func (c *CLI) newReviewsReplyCommand() *cobra.Command {
 	var (
 		reviewID     string
 		replyText    string
@@ -87,12 +99,16 @@ func (c *CLI) addReviewsCommands() {
 	replyCmd.Flags().StringVar(&rateLimit, "rate-limit", "5s", "Rate limit between replies")
 	replyCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show intended actions without executing")
 
-	// reviews get
+	return replyCmd
+}
+
+func (c *CLI) newReviewsGetCommand() *cobra.Command {
 	var (
 		getReviewID string
 		getInclude  bool
 		getLanguage string
 	)
+
 	getCmd := &cobra.Command{
 		Use:   "get [review-id]",
 		Short: "Get a review by ID",
@@ -115,7 +131,10 @@ func (c *CLI) addReviewsCommands() {
 	getCmd.Flags().BoolVar(&getInclude, "include-review-text", false, "Include review text in output")
 	getCmd.Flags().StringVar(&getLanguage, "translation-language", "", "Language for translated review")
 
-	// reviews response
+	return getCmd
+}
+
+func (c *CLI) newReviewsResponseCommand() *cobra.Command {
 	responseCmd := &cobra.Command{
 		Use:   "response",
 		Short: "Review response commands",
@@ -181,9 +200,11 @@ func (c *CLI) addReviewsCommands() {
 	responseDeleteCmd.Flags().StringVar(&responseReviewID, "review-id", "", "Review ID to delete response for")
 
 	responseCmd.AddCommand(responseGetCmd, responseForReviewCmd, responseDeleteCmd)
+	return responseCmd
+}
 
-	// reviews capabilities
-	capabilitiesCmd := &cobra.Command{
+func (c *CLI) newReviewsCapabilitiesCommand() *cobra.Command {
+	return &cobra.Command{
 		Use:   "capabilities",
 		Short: "List review capabilities",
 		Long:  "List review API capabilities and limitations.",
@@ -191,9 +212,6 @@ func (c *CLI) addReviewsCommands() {
 			return c.reviewsCapabilities(cmd.Context())
 		},
 	}
-
-	reviewsCmd.AddCommand(listCmd, replyCmd, getCmd, responseCmd, capabilitiesCmd)
-	c.rootCmd.AddCommand(reviewsCmd)
 }
 
 // reviewsListParams holds parameters for listing reviews.

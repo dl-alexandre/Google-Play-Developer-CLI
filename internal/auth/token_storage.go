@@ -76,7 +76,7 @@ func (m *Manager) ListProfiles() ([]TokenMetadata, error) {
 		}
 		return nil, err
 	}
-	byProfile := make(map[string]TokenMetadata)
+	byProfile := make(map[string]*TokenMetadata)
 	byProfileMod := make(map[string]time.Time)
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), tokenMetadataSuffix) {
@@ -92,13 +92,16 @@ func (m *Manager) ListProfiles() ([]TokenMetadata, error) {
 			continue
 		}
 		if priorMod, ok := byProfileMod[meta.Profile]; !ok || info.ModTime().After(priorMod) {
-			byProfile[meta.Profile] = *meta
+			byProfile[meta.Profile] = meta
 			byProfileMod[meta.Profile] = info.ModTime()
 		}
 	}
 	profiles := make([]TokenMetadata, 0, len(byProfile))
 	for _, meta := range byProfile {
-		profiles = append(profiles, meta)
+		if meta == nil {
+			continue
+		}
+		profiles = append(profiles, *meta)
 	}
 	sort.Slice(profiles, func(i, j int) bool {
 		return profiles[i].Profile < profiles[j].Profile

@@ -652,6 +652,8 @@ func (c *CLI) exportFastlaneChangelogs(ctx context.Context, publisher *androidpu
 	return notesByLocale, nil
 }
 
+const defaultChangelogKey = "default"
+
 func buildChangelogSets(metadata []fastlane.LocaleMetadata) map[string]changelogSet {
 	sets := map[string]changelogSet{}
 	for i := range metadata {
@@ -661,7 +663,7 @@ func buildChangelogSets(metadata []fastlane.LocaleMetadata) map[string]changelog
 		}
 		set := changelogSet{byVersion: map[int64]string{}}
 		for key, text := range meta.Changelogs {
-			if key == "default" {
+			if key == defaultChangelogKey {
 				set.defaultText = text
 				set.hasDefault = true
 				continue

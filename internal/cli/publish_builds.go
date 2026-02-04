@@ -102,7 +102,7 @@ func (c *CLI) addPublishBuildsCommands(publishCmd *cobra.Command) {
 	publishCmd.AddCommand(buildsCmd)
 }
 
-func (c *CLI) publishBuildsList(ctx context.Context, buildKind string, editID string) error {
+func (c *CLI) publishBuildsList(ctx context.Context, buildKind, editID string) error {
 	if err := c.requirePackage(); err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}
@@ -159,7 +159,7 @@ func (c *CLI) publishBuildsList(ctx context.Context, buildKind string, editID st
 	return c.Output(output.NewResult(result).WithServices("androidpublisher"))
 }
 
-func (c *CLI) publishBuildsGet(ctx context.Context, versionCode int64, buildKind string, editID string) error {
+func (c *CLI) publishBuildsGet(ctx context.Context, versionCode int64, buildKind, editID string) error {
 	if err := c.requirePackage(); err != nil {
 		return c.OutputError(err.(*errors.APIError))
 	}

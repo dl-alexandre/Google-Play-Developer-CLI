@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -1305,6 +1306,10 @@ func TestCheckCommitError(t *testing.T) {
 }
 
 func TestSaveEditMkdirError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping on Windows: path handling differs")
+	}
+
 	m := &Manager{
 		editsDir: "/invalid/path/that/does/not/exist",
 	}
@@ -1325,6 +1330,10 @@ func TestSaveEditMkdirError(t *testing.T) {
 }
 
 func TestListEditsMkdirError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping on Windows: path handling differs")
+	}
+
 	m := &Manager{
 		editsDir: "/invalid/path/that/does/not/exist",
 	}
@@ -1392,6 +1401,10 @@ func TestIdempotencyStoreCheckError(t *testing.T) {
 }
 
 func TestIdempotencyStoreRecordWithMetaError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping on Windows: path handling differs")
+	}
+
 	store := &IdempotencyStore{dir: "/invalid/path/that/does/not/exist", ttl: idempotencyTTL}
 
 	err := store.RecordWithMeta("key", "op", "pkg", "hash", map[string]interface{}{})

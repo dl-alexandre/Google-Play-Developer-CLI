@@ -804,7 +804,7 @@ func TestCacheArtifactWithHash(t *testing.T) {
 					t.Errorf("GetCachedArtifactByHash() error = %v", err)
 				}
 				if entry == nil {
-					t.Error("GetCachedArtifactByHash() returned nil")
+					t.Fatal("GetCachedArtifactByHash() returned nil")
 				}
 				if entry.SHA256 != tt.hash {
 					t.Errorf("SHA256 = %q, want %q", entry.SHA256, tt.hash)

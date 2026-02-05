@@ -219,3 +219,179 @@ func TestGetTokenSourceAndClear(t *testing.T) {
 		t.Fatalf("expected credentials cleared")
 	}
 }
+
+func TestSetActiveProfile(t *testing.T) {
+	tests := []struct {
+		name     string
+		profile  string
+		expected string
+	}{
+		{"set profile", "myprofile", "myprofile"},
+		{"empty profile defaults", "", "default"},
+		{"another profile", "prod", "prod"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := NewManager(&memoryStorage{available: false})
+			m.SetActiveProfile(tt.profile)
+			if got := m.GetActiveProfile(); got != tt.expected {
+				t.Fatalf("expected %q, got %q", tt.expected, got)
+			}
+		})
+	}
+}
+
+func TestGetActiveProfileDefault(t *testing.T) {
+	m := NewManager(&memoryStorage{available: false})
+	if got := m.GetActiveProfile(); got != "default" {
+		t.Fatalf("expected default profile, got %q", got)
+	}
+}
+
+func TestGetActiveProfileAfterSet(t *testing.T) {
+	m := NewManager(&memoryStorage{available: false})
+	m.SetActiveProfile("custom")
+	if got := m.GetActiveProfile(); got != "custom" {
+		t.Fatalf("expected custom profile, got %q", got)
+	}
+}
+
+func TestAuthenticateWithDeviceCodeMissingClientID(t *testing.T) {
+	m := NewManager(&memoryStorage{available: false})
+	_, err := m.AuthenticateWithDeviceCode(context.Background(), "", "secret", []string{"scope"}, nil)
+	apiErr, ok := err.(*gpdErrors.APIError)
+	if !ok || apiErr.Code != gpdErrors.CodeAuthFailure {
+		t.Fatalf("expected auth failure, got %v", err)
+	}
+}
+
+func TestAuthenticateWithDeviceCodeMissingScopes(t *testing.T) {
+	m := NewManager(&memoryStorage{available: false})
+	_, err := m.AuthenticateWithDeviceCode(context.Background(), "client-id", "secret", []string{}, nil)
+	apiErr, ok := err.(*gpdErrors.APIError)
+	if !ok || apiErr.Code != gpdErrors.CodeAuthFailure {
+		t.Fatalf("expected auth failure, got %v", err)
+	}
+}
+
+func TestAuthenticateWithDeviceCodeRequestFails(t *testing.T) {
+	m := NewManager(&memoryStorage{available: false})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := m.AuthenticateWithDeviceCode(ctx, "client-id", "secret", []string{"scope"}, nil)
+	if err == nil {
+		t.Fatalf("expected error for canceled context")
+	}
+}
+
+func TestAuthenticateFromJSONMissingClientEmail(t *testing.T) {
+	m := NewManager(&memoryStorage{available: false})
+	invalidJSON := []byte(`{
+		"type": "service_account",
+		"project_id": "test",
+		"private_key_id": "keyid",
+		"private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7W8jT\n-----END PRIVATE KEY-----\n",
+		"client_id": "123456789",
+		"auth_uri": "https://accounts.google.com/o/oauth2/auth",
+		"token_uri": "https://oauth2.googleapis.com/token",
+		"auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+		"client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/test"
+	}`)
+	_, err := m.authenticateFromJSON(context.Background(), invalidJSON, []string{"scope"}, OriginKeyfile, "")
+	if err == nil {
+		t.Fatalf("expected error for missing client_email")
+	}
+}
+
+func TestAuthenticateFromJSONMissingClientID(t *testing.T) {
+	m := NewManager(&memoryStorage{available: false})
+	invalidJSON := []byte(`{
+		"type": "service_account",
+		"project_id": "test",
+		"private_key_id": "keyid",
+		"private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7W8jT\n-----END PRIVATE KEY-----\n",
+		"client_email": "test@example.com",
+		"auth_uri": "https://accounts.google.com/o/oauth2/auth",
+		"token_uri": "https://oauth2.googleapis.com/token",
+		"auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+		"client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/test"
+	}`)
+	_, err := m.authenticateFromJSON(context.Background(), invalidJSON, []string{"scope"}, OriginKeyfile, "")
+	if err == nil {
+		t.Fatalf("expected error for missing client_id")
+	}
+}
+
+func TestAuthenticateFromJSONMissingPrivateKey(t *testing.T) {
+	m := NewManager(&memoryStorage{available: false})
+	invalidJSON := []byte(`{
+		"type": "service_account",
+		"project_id": "test",
+		"private_key_id": "keyid",
+		"client_email": "test@example.com",
+		"client_id": "123456789",
+		"auth_uri": "https://accounts.google.com/o/oauth2/auth",
+		"token_uri": "https://oauth2.googleapis.com/token",
+		"auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+		"client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/test"
+	}`)
+	_, err := m.authenticateFromJSON(context.Background(), invalidJSON, []string{"scope"}, OriginKeyfile, "")
+	if err == nil {
+		t.Fatalf("expected error for missing private_key")
+	}
+}
+
+func TestAuthenticateFromJSONMissingTokenURI(t *testing.T) {
+	m := NewManager(&memoryStorage{available: false})
+	invalidJSON := []byte(`{
+		"type": "service_account",
+		"project_id": "test",
+		"private_key_id": "keyid",
+		"private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7W8jT\n-----END PRIVATE KEY-----\n",
+		"client_email": "test@example.com",
+		"client_id": "123456789",
+		"auth_uri": "https://accounts.google.com/o/oauth2/auth",
+		"auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+		"client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/test"
+	}`)
+	_, err := m.authenticateFromJSON(context.Background(), invalidJSON, []string{"scope"}, OriginKeyfile, "")
+	if err == nil {
+		t.Fatalf("expected error for missing token_uri")
+	}
+}
+
+func TestCredentialOriginOAuth(t *testing.T) {
+	if OriginOAuth.String() != "oauth" {
+		t.Fatalf("expected oauth origin string")
+	}
+}
+
+func TestGetActiveProfileEmptyAfterSet(t *testing.T) {
+	m := NewManager(&memoryStorage{available: false})
+	m.SetActiveProfile("custom")
+	m.SetActiveProfile("")
+	if got := m.GetActiveProfile(); got != "default" {
+		t.Fatalf("expected default profile after setting empty, got %q", got)
+	}
+}
+
+func TestWrapTokenSourceWithoutStorage(t *testing.T) {
+	m := NewManager(&memoryStorage{available: false})
+	m.SetStoreTokens("never")
+	baseTokenSource := oauth2.StaticTokenSource(&oauth2.Token{
+		AccessToken: "token",
+		Expiry:      time.Now().Add(time.Hour),
+	})
+	wrapped := m.wrapTokenSource(baseTokenSource, OriginKeyfile, "test@example.com", "client123", []string{"scope"})
+	if wrapped == nil {
+		t.Fatalf("expected wrapped token source")
+	}
+	token, err := wrapped.Token()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if token.AccessToken != "token" {
+		t.Fatalf("expected token to be preserved")
+	}
+}

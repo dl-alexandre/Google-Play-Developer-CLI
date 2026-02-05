@@ -3,6 +3,7 @@ package fastlane
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -484,6 +485,10 @@ func TestParseDirectoryEmptyDir(t *testing.T) {
 }
 
 func TestWriteTextFileError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping on Windows: path handling differs")
+	}
+
 	err := writeTextFile("/nonexistent/path/file.txt", "content")
 	if err == nil {
 		t.Error("writeTextFile should error when directory doesn't exist")

@@ -322,3 +322,75 @@ func TestCalculateDelayMethod(t *testing.T) {
 		t.Fatalf("expected non-zero delay")
 	}
 }
+
+func TestGamesServiceInitialization(t *testing.T) {
+	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "test"})
+	client, err := NewClient(context.Background(), ts)
+	if err != nil {
+		t.Fatalf("NewClient error: %v", err)
+	}
+
+	svc, err := client.Games()
+	if err != nil {
+		t.Fatalf("Games() error: %v", err)
+	}
+	if svc == nil {
+		t.Fatal("Games service should not be nil")
+	}
+
+	svc2, err := client.Games()
+	if err != nil {
+		t.Fatalf("Games() second call error: %v", err)
+	}
+	if svc != svc2 {
+		t.Error("Games() should return the same service instance")
+	}
+}
+
+func TestPlayIntegrityServiceInitialization(t *testing.T) {
+	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "test"})
+	client, err := NewClient(context.Background(), ts)
+	if err != nil {
+		t.Fatalf("NewClient error: %v", err)
+	}
+
+	svc, err := client.PlayIntegrity()
+	if err != nil {
+		t.Fatalf("PlayIntegrity() error: %v", err)
+	}
+	if svc == nil {
+		t.Fatal("PlayIntegrity service should not be nil")
+	}
+
+	svc2, err := client.PlayIntegrity()
+	if err != nil {
+		t.Fatalf("PlayIntegrity() second call error: %v", err)
+	}
+	if svc != svc2 {
+		t.Error("PlayIntegrity() should return the same service instance")
+	}
+}
+
+func TestPlayCustomAppServiceInitialization(t *testing.T) {
+	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "test"})
+	client, err := NewClient(context.Background(), ts)
+	if err != nil {
+		t.Fatalf("NewClient error: %v", err)
+	}
+
+	svc, err := client.PlayCustomApp()
+	if err != nil {
+		t.Fatalf("PlayCustomApp() error: %v", err)
+	}
+	if svc == nil {
+		t.Fatal("PlayCustomApp service should not be nil")
+	}
+
+	svc2, err := client.PlayCustomApp()
+	if err != nil {
+		t.Fatalf("PlayCustomApp() second call error: %v", err)
+	}
+	if svc != svc2 {
+		t.Error("PlayCustomApp() should return the same service instance")
+	}
+}

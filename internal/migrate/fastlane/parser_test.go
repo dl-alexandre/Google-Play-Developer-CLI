@@ -284,3 +284,208 @@ func TestParseDirectorySkipsNonDirEntries(t *testing.T) {
 		t.Fatalf("unexpected metas: %+v", metas)
 	}
 }
+
+func TestWriteLocaleNilMetadata(t *testing.T) {
+	dir := t.TempDir()
+	err := WriteLocale(dir, nil)
+	if err != nil {
+		t.Errorf("WriteLocale(nil) should not error, got: %v", err)
+	}
+}
+
+func TestWriteDirectoryEmpty(t *testing.T) {
+	dir := t.TempDir()
+	err := WriteDirectory(dir, []LocaleMetadata{})
+	if err != nil {
+		t.Errorf("WriteDirectory with empty metadata should not error, got: %v", err)
+	}
+}
+
+func TestWriteDirectoryNil(t *testing.T) {
+	dir := t.TempDir()
+	err := WriteDirectory(dir, nil)
+	if err != nil {
+		t.Errorf("WriteDirectory with nil metadata should not error, got: %v", err)
+	}
+}
+
+func TestWriteLocaleAllFieldsSet(t *testing.T) {
+	dir := t.TempDir()
+	meta := &LocaleMetadata{
+		Locale:              "en-US",
+		Title:               "Test Title",
+		TitleSet:            true,
+		ShortDescription:    "Short desc",
+		ShortDescriptionSet: true,
+		FullDescription:     "Full description",
+		FullDescriptionSet:  true,
+		Video:               "https://video.example.com",
+		VideoSet:            true,
+		Changelogs: map[string]string{
+			"100": "Version 100 notes",
+			"200": "Version 200 notes",
+		},
+	}
+
+	err := WriteLocale(dir, meta)
+	if err != nil {
+		t.Fatalf("WriteLocale error: %v", err)
+	}
+
+	localeDir := filepath.Join(dir, "en-US")
+	titlePath := filepath.Join(localeDir, "title.txt")
+	if _, err := os.Stat(titlePath); err != nil {
+		t.Errorf("title.txt not created: %v", err)
+	}
+
+	shortPath := filepath.Join(localeDir, "short_description.txt")
+	if _, err := os.Stat(shortPath); err != nil {
+		t.Errorf("short_description.txt not created: %v", err)
+	}
+
+	fullPath := filepath.Join(localeDir, "full_description.txt")
+	if _, err := os.Stat(fullPath); err != nil {
+		t.Errorf("full_description.txt not created: %v", err)
+	}
+
+	videoPath := filepath.Join(localeDir, "video.txt")
+	if _, err := os.Stat(videoPath); err != nil {
+		t.Errorf("video.txt not created: %v", err)
+	}
+
+	changelogDir := filepath.Join(localeDir, "changelogs")
+	changelog100 := filepath.Join(changelogDir, "100.txt")
+	if _, err := os.Stat(changelog100); err != nil {
+		t.Errorf("changelog 100.txt not created: %v", err)
+	}
+}
+
+func TestCompareImageNames(t *testing.T) {
+	tests := []struct {
+		name     string
+		a        string
+		b        string
+		expected bool
+	}{
+		{"numeric 1 less than 10", "1.png", "10.png", true},
+		{"numeric 10 not less than 1", "10.png", "1.png", false},
+		{"alphabetic ordering", "a.png", "b.png", true},
+		{"same name png vs jpg", "image.png", "image.jpg", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := compareImageNames(tt.a, tt.b)
+			if result != tt.expected {
+				t.Errorf("compareImageNames(%q, %q) = %v, want %v", tt.a, tt.b, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestImageExtRank(t *testing.T) {
+	tests := []struct {
+		ext      string
+		expected int
+	}{
+		{".png", 2},
+		{".jpg", 1},
+		{".jpeg", 1},
+		{".webp", 0},
+		{".unknown", 0},
+		{"", 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.ext, func(t *testing.T) {
+			result := imageExtRank(tt.ext)
+			if result != tt.expected {
+				t.Errorf("imageExtRank(%q) = %d, want %d", tt.ext, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestSingleImageExtRank(t *testing.T) {
+	tests := []struct {
+		name     string
+		base     string
+		ext      string
+		expected int
+	}{
+		{"icon png", "icon", ".png", 2},
+		{"icon jpg", "icon", ".jpg", 0},
+		{"icon jpeg", "icon", ".jpeg", 0},
+		{"feature png", "featureGraphic", ".png", 2},
+		{"feature jpg", "featureGraphic", ".jpg", 1},
+		{"unknown ext", "icon", ".gif", 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := singleImageExtRank(tt.base, tt.ext)
+			if result != tt.expected {
+				t.Errorf("singleImageExtRank(%q, %q) = %d, want %d", tt.base, tt.ext, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestPreferSingleImage(t *testing.T) {
+	tests := []struct {
+		name      string
+		base      string
+		current   string
+		candidate string
+		expected  string
+	}{
+		{
+			name:      "prefer png over jpg for icon",
+			base:      "icon",
+			current:   "icon.jpg",
+			candidate: "icon.png",
+			expected:  "icon.png",
+		},
+		{
+			name:      "keep current if better rank",
+			base:      "icon",
+			current:   "icon.png",
+			candidate: "icon.jpg",
+			expected:  "icon.png",
+		},
+		{
+			name:      "prefer png for feature graphic",
+			base:      "featureGraphic",
+			current:   "featureGraphic.jpg",
+			candidate: "featureGraphic.png",
+			expected:  "featureGraphic.png",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := preferSingleImage(tt.base, tt.current, tt.candidate)
+			if result != tt.expected {
+				t.Errorf("preferSingleImage(%q, %q, %q) = %q, want %q", tt.base, tt.current, tt.candidate, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestParseDirectoryEmptyDir(t *testing.T) {
+	dir := t.TempDir()
+	metas, err := ParseDirectory(dir)
+	if err != nil {
+		t.Fatalf("ParseDirectory on empty dir should not error, got: %v", err)
+	}
+	if len(metas) != 0 {
+		t.Errorf("expected 0 locales, got %d", len(metas))
+	}
+}
+
+func TestWriteTextFileError(t *testing.T) {
+	err := writeTextFile("/nonexistent/path/file.txt", "content")
+	if err == nil {
+		t.Error("writeTextFile should error when directory doesn't exist")
+	}
+}

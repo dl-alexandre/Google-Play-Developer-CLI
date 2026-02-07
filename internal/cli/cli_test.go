@@ -2,12 +2,15 @@ package cli
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/dl-alexandre/gpd/internal/config"
 	"github.com/dl-alexandre/gpd/internal/errors"
 	"github.com/dl-alexandre/gpd/internal/output"
 )
@@ -420,6 +423,83 @@ func TestSetupAppliesEnvAndOutput(t *testing.T) {
 	out := buf.String()
 	if !strings.Contains(out, "- **hello:** world") {
 		t.Fatalf("expected markdown output, got %q", out)
+	}
+}
+
+func TestSetupAppliesConfigKeyPath(t *testing.T) {
+	tests := []struct {
+		name         string
+		flagKeyPath  string
+		configJSON   string
+		expectedKey  string
+		writeConfig  bool
+		writeBadJSON bool
+	}{
+		{
+			name:        "config key path is applied when flag is empty",
+			configJSON:  `{"serviceAccountKeyPath":"/tmp/from-config.json"}`,
+			expectedKey: "/tmp/from-config.json",
+			writeConfig: true,
+		},
+		{
+			name:        "flag key path wins over config",
+			flagKeyPath: "/tmp/from-flag.json",
+			configJSON:  `{"serviceAccountKeyPath":"/tmp/from-config.json"}`,
+			expectedKey: "/tmp/from-flag.json",
+			writeConfig: true,
+		},
+		{
+			name:        "empty config key path keeps empty",
+			configJSON:  `{"serviceAccountKeyPath":""}`,
+			expectedKey: "",
+			writeConfig: true,
+		},
+		{
+			name:         "bad config falls back to default and keeps empty",
+			expectedKey:  "",
+			writeConfig:  true,
+			writeBadJSON: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpHome := t.TempDir()
+
+			t.Setenv("HOME", tmpHome)
+			t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpHome, ".config"))
+			t.Setenv("GPD_SERVICE_ACCOUNT_KEY", "")
+			t.Setenv("GPD_PACKAGE", "")
+			t.Setenv("GPD_AUTH_PROFILE", "")
+			t.Setenv("GPD_STORE_TOKENS", "")
+
+			if tt.writeConfig {
+				configPath := config.GetPaths().ConfigFile
+				configDir := filepath.Dir(configPath)
+				if err := os.MkdirAll(configDir, 0o755); err != nil {
+					t.Fatalf("mkdir config dir: %v", err)
+				}
+
+				data := tt.configJSON
+				if tt.writeBadJSON {
+					data = "{invalid-json"
+				}
+				if err := os.WriteFile(configPath, []byte(data), 0o600); err != nil {
+					t.Fatalf("write config: %v", err)
+				}
+			}
+
+			cli := New()
+			cli.keyPath = tt.flagKeyPath
+
+			if err := cli.setup(nil); err != nil {
+				t.Fatalf("setup error: %v", err)
+			}
+
+			if cli.keyPath != tt.expectedKey {
+				t.Fatalf("keyPath = %q, want %q", cli.keyPath, tt.expectedKey)
+			}
+		})
 	}
 }
 

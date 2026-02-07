@@ -146,6 +146,9 @@ func (c *CLI) setup(_ *cobra.Command) error {
 	if c.profile == "" && c.config.ActiveProfile != "" {
 		c.profile = c.config.ActiveProfile
 	}
+	if c.keyPath == "" && c.config.ServiceAccountKeyPath != "" {
+		c.keyPath = c.config.ServiceAccountKeyPath
+	}
 	c.authMgr.SetStoreTokens(c.storeTokens)
 	c.authMgr.SetActiveProfile(c.profile)
 

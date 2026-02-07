@@ -59,6 +59,7 @@ checksums.txt
 # Temporary files
 tmp/
 temp/
+.artifacts/
 
 # Play Developer Credentials
 creds/

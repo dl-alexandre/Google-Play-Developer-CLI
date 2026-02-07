@@ -16,6 +16,7 @@ GOMOD = $(GOCMD) mod
 # Binary name
 BINARY_NAME = gpd
 BINARY_DIR = bin
+COVERAGE_DIR = .artifacts/coverage
 
 # Build flags
 LDFLAGS = -ldflags "-X github.com/dl-alexandre/gpd/pkg/version.Version=$(VERSION) \
@@ -64,9 +65,10 @@ test:
 # Run tests with coverage
 test-coverage:
 	@echo "Running tests with coverage..."
-	$(GOTEST) -v -race -coverprofile=coverage.out ./...
-	$(GOCMD) tool cover -html=coverage.out -o coverage.html
-	@echo "Coverage report: coverage.html"
+	@mkdir -p $(COVERAGE_DIR)
+	$(GOTEST) -v -race -coverprofile=$(COVERAGE_DIR)/coverage.out ./...
+	$(GOCMD) tool cover -html=$(COVERAGE_DIR)/coverage.out -o $(COVERAGE_DIR)/coverage.html
+	@echo "Coverage report: $(COVERAGE_DIR)/coverage.html"
 
 # Run linter
 lint:
@@ -82,7 +84,15 @@ clean:
 	@echo "Cleaning..."
 	$(GOCLEAN)
 	rm -rf $(BINARY_DIR)
-	rm -f coverage.out coverage.html
+	rm -rf $(COVERAGE_DIR)
+
+security:
+	@echo "Running govulncheck..."
+	@if command -v govulncheck >/dev/null 2>&1; then \
+		govulncheck ./...; \
+	else \
+		echo "govulncheck not installed. Run: go install golang.org/x/vuln/cmd/govulncheck@latest"; \
+	fi
 
 # Install the binary
 install: build
@@ -92,7 +102,7 @@ install: build
 # Generate checksums
 checksums:
 	@echo "Generating checksums..."
-	@cd $(BINARY_DIR) && \
+	@cd $(BINARY_DIR) && rm -f checksums.txt && \
 	for file in $(BINARY_NAME)*; do \
 		if [ -f "$$file" ]; then \
 			shasum -a 256 "$$file" >> checksums.txt; \

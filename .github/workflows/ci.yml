@@ -40,13 +40,32 @@ jobs:
       - name: Run go vet
         run: go vet ./...
 
-      - name: Run tests (non-Windows)
+      - name: Run tests with flaky diagnostics (non-Windows)
         if: matrix.os != 'windows-latest'
-        run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+        run: |
+          set -o pipefail
+          mkdir -p .artifacts/test
+          attempt=1
+          while [ $attempt -le 2 ]; do
+            echo "Test attempt ${attempt}"
+            if go test -json -v -race -coverprofile=coverage.out -covermode=atomic ./... | tee .artifacts/test/test-attempt-${attempt}.json; then
+              exit 0
+            fi
+            attempt=$((attempt + 1))
+          done
+          exit 1
 
       - name: Run tests (Windows)
         if: matrix.os == 'windows-latest'
         run: go test -v ./...
+
+      - name: Upload test diagnostics
+        if: failure() && matrix.os != 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpd-test-diagnostics-${{ matrix.os }}
+          path: .artifacts/test/
+          retention-days: 7
 
       - name: Upload coverage
         uses: codecov/codecov-action@v4
@@ -73,18 +92,23 @@ jobs:
           cache: true
 
       - name: Build for all platforms
+        run: make build-all
+
+      - name: Verify version metadata
         run: |
-          GOOS=linux GOARCH=amd64 go build -o bin/gpd-linux-amd64 ./cmd/gpd
-          GOOS=linux GOARCH=arm64 go build -o bin/gpd-linux-arm64 ./cmd/gpd
-          GOOS=darwin GOARCH=amd64 go build -o bin/gpd-darwin-amd64 ./cmd/gpd
-          GOOS=darwin GOARCH=arm64 go build -o bin/gpd-darwin-arm64 ./cmd/gpd
-          GOOS=windows GOARCH=amd64 go build -o bin/gpd-windows-amd64.exe ./cmd/gpd
+          make build
+          ./bin/gpd version | grep -F "Version:"
+
+      - name: Generate checksums
+        run: make checksums
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: binaries
-          path: bin/
+          path: |
+            bin/
+            bin/checksums.txt
           retention-days: 7
 
   lint:

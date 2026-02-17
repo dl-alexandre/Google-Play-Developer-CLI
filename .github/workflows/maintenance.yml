@@ -1,0 +1,96 @@
+name: Maintenance
+
+on:
+  schedule:
+    - cron: "0 10 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-drift:
+    name: Dependency Drift
+    runs-on: ubuntu-latest
+    env:
+      GPD_REQUIRE_CUSTOM_OAUTH: "1"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+          cache: true
+
+      - name: Collect dependency update report
+        run: |
+          mkdir -p .artifacts/maintenance
+          go list -u -m all > .artifacts/maintenance/dependency-updates.txt
+
+      - name: Upload dependency report
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpd-dependency-updates
+          path: .artifacts/maintenance/dependency-updates.txt
+          retention-days: 30
+
+  security-summary:
+    name: Security Summary
+    runs-on: ubuntu-latest
+    env:
+      GPD_REQUIRE_CUSTOM_OAUTH: "1"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+          cache: true
+
+      - name: Run govulncheck summary
+        run: |
+          mkdir -p .artifacts/maintenance
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck -json ./... > .artifacts/maintenance/govulncheck.json || true
+
+      - name: Upload vulnerability summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpd-vuln-summary
+          path: .artifacts/maintenance/govulncheck.json
+          retention-days: 30
+
+  coverage-trend:
+    name: Coverage Trend
+    runs-on: ubuntu-latest
+    env:
+      GPD_REQUIRE_CUSTOM_OAUTH: "1"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+          cache: true
+
+      - name: Collect coverage snapshot
+        run: |
+          mkdir -p .artifacts/coverage
+          go test -coverprofile=.artifacts/coverage/coverage.out ./...
+          go tool cover -func=.artifacts/coverage/coverage.out > .artifacts/coverage/coverage-summary.txt
+
+      - name: Upload coverage snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpd-coverage-snapshot
+          path: .artifacts/coverage/
+          retention-days: 30

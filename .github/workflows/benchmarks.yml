@@ -1,0 +1,38 @@
+name: Benchmarks
+
+on:
+  schedule:
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    name: Benchmark gpd
+    runs-on: ubuntu-latest
+    env:
+      GPD_REQUIRE_CUSTOM_OAUTH: "1"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+          cache: true
+
+      - name: Run benchmark sweep
+        run: |
+          mkdir -p .artifacts/benchmarks
+          go test -run '^$' -bench . -benchmem ./cmd/... ./internal/... | tee .artifacts/benchmarks/benchmark.txt
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpd-benchmark-results
+          path: .artifacts/benchmarks/
+          retention-days: 30

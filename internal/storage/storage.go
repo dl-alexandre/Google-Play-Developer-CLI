@@ -1,0 +1,113 @@
+// Package storage provides platform-specific secure credential storage.
+package storage
+
+import (
+	"runtime"
+
+	"github.com/99designs/keyring"
+)
+
+const (
+	serviceName = "gpd"
+)
+
+// SecureStorage provides secure credential storage using the system keychain.
+type SecureStorage struct {
+	ring      keyring.Keyring
+	available bool
+}
+
+// New creates a new SecureStorage instance.
+func New() *SecureStorage {
+	ring, err := openKeyring(keyring.Config{
+		ServiceName: serviceName,
+		// macOS specific
+		KeychainName:                   "gpd",
+		KeychainTrustApplication:       true,
+		KeychainSynchronizable:         false,
+		KeychainAccessibleWhenUnlocked: true,
+		// Linux specific - prefer Secret Service
+		LibSecretCollectionName: "gpd",
+		// Windows specific
+		WinCredPrefix: "gpd",
+		// Disable file-based fallback for security
+		FileDir:          "",
+		FilePasswordFunc: nil,
+	})
+
+	if err != nil {
+		return &SecureStorage{available: false}
+	}
+
+	return NewWithKeyring(ring)
+}
+
+var openKeyring = keyring.Open
+
+func NewWithKeyring(ring keyring.Keyring) *SecureStorage {
+	if ring == nil {
+		return &SecureStorage{available: false}
+	}
+	return &SecureStorage{
+		ring:      ring,
+		available: true,
+	}
+}
+
+// Store stores a value securely.
+func (s *SecureStorage) Store(key string, value []byte) error {
+	if !s.available {
+		return ErrStorageUnavailable
+	}
+	return s.ring.Set(keyring.Item{
+		Key:  key,
+		Data: value,
+	})
+}
+
+// Retrieve retrieves a value from secure storage.
+func (s *SecureStorage) Retrieve(key string) ([]byte, error) {
+	if !s.available {
+		return nil, ErrStorageUnavailable
+	}
+	item, err := s.ring.Get(key)
+	if err != nil {
+		if err == keyring.ErrKeyNotFound {
+			return nil, ErrKeyNotFound
+		}
+		return nil, err
+	}
+	return item.Data, nil
+}
+
+// Delete removes a value from secure storage.
+func (s *SecureStorage) Delete(key string) error {
+	if !s.available {
+		return ErrStorageUnavailable
+	}
+	return s.ring.Remove(key)
+}
+
+// Available returns whether secure storage is available.
+func (s *SecureStorage) Available() bool {
+	return s.available
+}
+
+// Platform returns the current platform name.
+func Platform() string {
+	return runtime.GOOS
+}
+
+// Error represents storage operation errors.
+type Error struct {
+	message string
+}
+
+func (e *Error) Error() string {
+	return e.message
+}
+
+var (
+	ErrStorageUnavailable = &Error{"secure storage not available on this platform"}
+	ErrKeyNotFound        = &Error{"key not found in secure storage"}
+)

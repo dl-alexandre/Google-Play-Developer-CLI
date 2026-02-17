@@ -1,0 +1,142 @@
+version: 2
+
+project_name: gpd
+
+before:
+  hooks:
+    - go mod tidy
+    - go generate ./...
+
+builds:
+  - id: gpd
+    main: ./cmd/gpd
+    binary: gpd
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/dl-alexandre/gpd/pkg/version.Version={{.Version}}
+      - -X github.com/dl-alexandre/gpd/pkg/version.GitCommit={{.Commit}}
+      - -X github.com/dl-alexandre/gpd/pkg/version.BuildTime={{.Date}}
+
+archives:
+  - id: default
+    format: tar.gz
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - LICENSE
+      - README.md
+      - CHANGELOG.md
+
+checksum:
+  name_template: 'checksums.txt'
+  algorithm: sha256
+
+snapshot:
+  name_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^ci:'
+      - '^chore:'
+      - Merge pull request
+      - Merge branch
+  groups:
+    - title: Features
+      regexp: "^.*feat[(\\w)]*:+.*$"
+      order: 0
+    - title: Bug Fixes
+      regexp: "^.*fix[(\\w)]*:+.*$"
+      order: 1
+    - title: Security
+      regexp: "^.*sec[(\\w)]*:+.*$"
+      order: 2
+    - title: Other
+      order: 999
+
+release:
+  github:
+    owner: dl-alexandre
+    name: Google-Play-Developer-CLI
+  draft: false
+  prerelease: auto
+  name_template: "v{{.Version}}"
+  header: |
+    ## What's Changed
+
+    See the [CHANGELOG](https://github.com/dl-alexandre/gpd/blob/main/CHANGELOG.md) for full details.
+
+  footer: |
+    ## Installation
+
+    ### Homebrew
+    ```bash
+    brew tap dl-alexandre/tap
+    brew install gpd
+    ```
+
+    ### Install Script
+    ```bash
+    curl -fsSL https://raw.githubusercontent.com/dl-alexandre/gpd/main/install.sh | bash
+    ```
+
+    ### Go Install
+    ```bash
+    go install github.com/dl-alexandre/gpd/cmd/gpd@v{{.Version}}
+    ```
+
+    ### Download Binary
+    Download the appropriate binary for your platform from the assets below.
+
+    ---
+    **Full Changelog**: https://github.com/dl-alexandre/gpd/compare/{{ .PreviousTag }}...{{ .Tag }}
+
+brews:
+  - name: gpd
+    repository:
+      owner: dl-alexandre
+      name: tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/dl-alexandre/gpd"
+    description: "Google Play Developer CLI - fast, lightweight CLI for Google Play Console"
+    license: "MIT"
+    test: |
+      system "#{bin}/gpd", "version"
+    install: |
+      bin.install "gpd"
+
+nfpms:
+  - id: gpd
+    package_name: gpd
+    vendor: gpd contributors
+    homepage: "https://github.com/dl-alexandre/gpd"
+    maintainer: "gpd contributors"
+    description: "Google Play Developer CLI - fast, lightweight CLI for Google Play Console"
+    license: "MIT"
+    formats:
+      - deb
+      - rpm
+      - apk
+    bindir: /usr/bin

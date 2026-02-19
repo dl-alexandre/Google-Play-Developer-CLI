@@ -12,6 +12,7 @@ import (
 )
 
 func TestNewResult(t *testing.T) {
+	t.Parallel()
 	data := map[string]interface{}{"key": "value"}
 	result := NewResult(data)
 
@@ -30,6 +31,7 @@ func TestNewResult(t *testing.T) {
 }
 
 func TestNewErrorResult(t *testing.T) {
+	t.Parallel()
 	err := errors.NewAPIError(errors.CodeValidationError, "invalid input")
 	result := NewErrorResult(err)
 
@@ -45,6 +47,7 @@ func TestNewErrorResult(t *testing.T) {
 }
 
 func TestResultWithDuration(t *testing.T) {
+	t.Parallel()
 	result := NewResult(nil)
 	result.WithDuration(100 * time.Millisecond)
 
@@ -54,6 +57,7 @@ func TestResultWithDuration(t *testing.T) {
 }
 
 func TestResultWithServices(t *testing.T) {
+	t.Parallel()
 	result := NewResult(nil)
 	result.WithServices("androidpublisher", "playdeveloperreporting")
 
@@ -63,6 +67,7 @@ func TestResultWithServices(t *testing.T) {
 }
 
 func TestResultWithNoOp(t *testing.T) {
+	t.Parallel()
 	result := NewResult(nil)
 	result.WithNoOp("already uploaded")
 
@@ -75,6 +80,7 @@ func TestResultWithNoOp(t *testing.T) {
 }
 
 func TestResultWithPagination(t *testing.T) {
+	t.Parallel()
 	result := NewResult(nil)
 	result.WithPagination("token1", "token2")
 
@@ -90,6 +96,7 @@ func TestResultWithPagination(t *testing.T) {
 }
 
 func TestResultWithPaginationNoNext(t *testing.T) {
+	t.Parallel()
 	result := NewResult(nil)
 	result.WithPagination("token1", "")
 
@@ -99,6 +106,7 @@ func TestResultWithPaginationNoNext(t *testing.T) {
 }
 
 func TestOutputManagerJSON(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	mgr := NewManager(&buf)
 
@@ -128,6 +136,7 @@ func TestOutputManagerJSON(t *testing.T) {
 }
 
 func TestOutputManagerPrettyJSON(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	mgr := NewManager(&buf).SetPretty(true)
 
@@ -145,6 +154,7 @@ func TestOutputManagerPrettyJSON(t *testing.T) {
 }
 
 func TestOutputManagerMinifiedJSON(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	mgr := NewManager(&buf) // Default is minified
 
@@ -162,6 +172,7 @@ func TestOutputManagerMinifiedJSON(t *testing.T) {
 }
 
 func TestParseFormat(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input    string
 		expected Format
@@ -187,6 +198,7 @@ func TestParseFormat(t *testing.T) {
 }
 
 func TestJSONEnvelopeStructure(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	mgr := NewManager(&buf)
 
@@ -224,6 +236,7 @@ func TestJSONEnvelopeStructure(t *testing.T) {
 }
 
 func TestErrorEnvelopeStructure(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	mgr := NewManager(&buf)
 
@@ -263,6 +276,7 @@ func TestErrorEnvelopeStructure(t *testing.T) {
 }
 
 func TestTableFormat(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		data     interface{}
@@ -309,6 +323,7 @@ func TestTableFormat(t *testing.T) {
 }
 
 func TestTableFormatError(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	mgr := NewManager(&buf).SetFormat(FormatTable)
 
@@ -327,6 +342,7 @@ func TestTableFormatError(t *testing.T) {
 }
 
 func TestMarkdownFormat(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		data     interface{}
@@ -373,6 +389,7 @@ func TestMarkdownFormat(t *testing.T) {
 }
 
 func TestMarkdownFormatError(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	mgr := NewManager(&buf).SetFormat(FormatMarkdown)
 
@@ -397,6 +414,7 @@ func TestMarkdownFormatError(t *testing.T) {
 }
 
 func TestCSVFormat(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	mgr := NewManager(&buf).SetFormat(FormatCSV)
 
@@ -423,6 +441,7 @@ func TestCSVFormat(t *testing.T) {
 }
 
 func TestCSVFormatWithSpecialCharacters(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	mgr := NewManager(&buf).SetFormat(FormatCSV)
 
@@ -443,6 +462,7 @@ func TestCSVFormatWithSpecialCharacters(t *testing.T) {
 }
 
 func TestCSVFormatEmpty(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	mgr := NewManager(&buf).SetFormat(FormatCSV)
 
@@ -458,6 +478,7 @@ func TestCSVFormatEmpty(t *testing.T) {
 }
 
 func TestResultWithWarnings(t *testing.T) {
+	t.Parallel()
 	result := NewResult(nil)
 	result.WithWarnings("warning 1", "warning 2")
 
@@ -470,6 +491,7 @@ func TestResultWithWarnings(t *testing.T) {
 }
 
 func TestResultWithPartial(t *testing.T) {
+	t.Parallel()
 	result := NewResult(nil)
 	result.WithPartial(100, 50, 200)
 
@@ -488,6 +510,7 @@ func TestResultWithPartial(t *testing.T) {
 }
 
 func TestResultWithRetries(t *testing.T) {
+	t.Parallel()
 	result := NewResult(nil)
 	result.WithRetries(3)
 
@@ -497,6 +520,7 @@ func TestResultWithRetries(t *testing.T) {
 }
 
 func TestResultWithRequestID(t *testing.T) {
+	t.Parallel()
 	result := NewResult(nil)
 	result.WithRequestID("req-12345")
 
@@ -506,6 +530,7 @@ func TestResultWithRequestID(t *testing.T) {
 }
 
 func TestNewEmptyResult(t *testing.T) {
+	t.Parallel()
 	result := NewEmptyResult()
 
 	if result.Data != nil {
@@ -520,6 +545,7 @@ func TestNewEmptyResult(t *testing.T) {
 }
 
 func TestResultChaining(t *testing.T) {
+	t.Parallel()
 	// Test that result methods return the result for chaining
 	result := NewResult(map[string]interface{}{"test": true}).
 		WithDuration(100*time.Millisecond).
@@ -542,6 +568,7 @@ func TestResultChaining(t *testing.T) {
 }
 
 func TestSetFormatAndPretty(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	mgr := NewManager(&buf).SetFormat(FormatJSON).SetPretty(true)
 
@@ -558,6 +585,7 @@ func TestSetFormatAndPretty(t *testing.T) {
 }
 
 func TestTableFormatNilData(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	mgr := NewManager(&buf).SetFormat(FormatTable)
 
@@ -571,6 +599,7 @@ func TestTableFormatNilData(t *testing.T) {
 }
 
 func TestMarkdownFormatNilData(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	mgr := NewManager(&buf).SetFormat(FormatMarkdown)
 
@@ -584,6 +613,7 @@ func TestMarkdownFormatNilData(t *testing.T) {
 }
 
 func TestCSVFormatError(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	mgr := NewManager(&buf).SetFormat(FormatCSV)
 
@@ -602,6 +632,7 @@ func TestCSVFormatError(t *testing.T) {
 }
 
 func TestSetFieldsAppliesProjection(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	mgr := NewManager(&buf).SetFields([]string{"data.key"})
 	result := NewResult(map[string]interface{}{"key": "value"})
@@ -619,6 +650,7 @@ func TestSetFieldsAppliesProjection(t *testing.T) {
 }
 
 func TestTableFormatSliceWithNonMapFallbacksToJSON(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	mgr := NewManager(&buf).SetFormat(FormatTable)
 	result := NewResult([]interface{}{"value"})
@@ -633,6 +665,7 @@ func TestTableFormatSliceWithNonMapFallbacksToJSON(t *testing.T) {
 }
 
 func TestTableFormatUnsupportedTypeFallbacksToJSON(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	mgr := NewManager(&buf).SetFormat(FormatTable)
 	result := NewResult(42)
@@ -647,6 +680,7 @@ func TestTableFormatUnsupportedTypeFallbacksToJSON(t *testing.T) {
 }
 
 func TestMarkdownFormatUnsupportedTypeFallbacksToJSON(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	mgr := NewManager(&buf).SetFormat(FormatMarkdown)
 	result := NewResult(42)
@@ -661,6 +695,7 @@ func TestMarkdownFormatUnsupportedTypeFallbacksToJSON(t *testing.T) {
 }
 
 func TestMarkdownFormatErrorWithoutHint(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	mgr := NewManager(&buf).SetFormat(FormatMarkdown)
 	err := errors.NewAPIError(errors.CodeValidationError, "test error")
@@ -676,6 +711,7 @@ func TestMarkdownFormatErrorWithoutHint(t *testing.T) {
 }
 
 func TestCSVFormatNonSliceFallbacksToJSON(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	mgr := NewManager(&buf).SetFormat(FormatCSV)
 	result := NewResult(map[string]interface{}{"key": "value"})
@@ -690,6 +726,7 @@ func TestCSVFormatNonSliceFallbacksToJSON(t *testing.T) {
 }
 
 func TestCSVFormatSliceWithNonMapFallbacksToJSON(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	mgr := NewManager(&buf).SetFormat(FormatCSV)
 	result := NewResult([]interface{}{"value"})
@@ -704,6 +741,7 @@ func TestCSVFormatSliceWithNonMapFallbacksToJSON(t *testing.T) {
 }
 
 func TestWriteUnknownFormatDefaultsToJSON(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	mgr := NewManager(&buf).SetFormat(Format("unknown"))
 	result := NewResult(map[string]interface{}{"key": "value"})
@@ -718,6 +756,7 @@ func TestWriteUnknownFormatDefaultsToJSON(t *testing.T) {
 }
 
 func TestWriteJSONReturnsErrorOnInvalidData(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	mgr := NewManager(&buf)
 	result := &Result{Data: func() {}, Meta: &Metadata{}}
@@ -727,6 +766,7 @@ func TestWriteJSONReturnsErrorOnInvalidData(t *testing.T) {
 }
 
 func TestWithMetaNilPaths(t *testing.T) {
+	t.Parallel()
 	r1 := &Result{}
 	r1.WithDuration(5 * time.Millisecond)
 	if r1.Meta == nil || r1.Meta.DurationMs != 5 {
@@ -796,6 +836,7 @@ func (w *failAfterWriter) Write(p []byte) (int, error) {
 }
 
 func TestWriteTableSliceWriteError(t *testing.T) {
+	t.Parallel()
 	mgr := NewManager(errWriter{}).SetFormat(FormatTable)
 	err := mgr.writeTableSlice([]interface{}{map[string]interface{}{"a": "b"}})
 	if err == nil {
@@ -804,6 +845,7 @@ func TestWriteTableSliceWriteError(t *testing.T) {
 }
 
 func TestWriteTableSliceSeparatorWriteError(t *testing.T) {
+	t.Parallel()
 	writer := &failAfterWriter{limit: 1}
 	mgr := NewManager(writer).SetFormat(FormatTable)
 	err := mgr.writeTableSlice([]interface{}{map[string]interface{}{"a": "b"}})
@@ -813,6 +855,7 @@ func TestWriteTableSliceSeparatorWriteError(t *testing.T) {
 }
 
 func TestWriteTableSliceRowWriteError(t *testing.T) {
+	t.Parallel()
 	writer := &failAfterWriter{limit: 2}
 	mgr := NewManager(writer).SetFormat(FormatTable)
 	err := mgr.writeTableSlice([]interface{}{map[string]interface{}{"a": "b"}})
@@ -822,6 +865,7 @@ func TestWriteTableSliceRowWriteError(t *testing.T) {
 }
 
 func TestWriteTableSliceSkipsInvalidRows(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	mgr := NewManager(&buf).SetFormat(FormatTable)
 	err := mgr.writeTableSlice([]interface{}{map[string]interface{}{"a": "b"}, "skip"})
@@ -835,6 +879,7 @@ func TestWriteTableSliceSkipsInvalidRows(t *testing.T) {
 }
 
 func TestWriteTableMapWriteError(t *testing.T) {
+	t.Parallel()
 	mgr := NewManager(errWriter{}).SetFormat(FormatTable)
 	err := mgr.writeTableMap(map[string]interface{}{"a": "b"})
 	if err == nil {
@@ -843,6 +888,7 @@ func TestWriteTableMapWriteError(t *testing.T) {
 }
 
 func TestWriteMarkdownTableWriteError(t *testing.T) {
+	t.Parallel()
 	mgr := NewManager(errWriter{}).SetFormat(FormatMarkdown)
 	err := mgr.writeMarkdownTable([]interface{}{map[string]interface{}{"a": "b"}})
 	if err == nil {
@@ -851,6 +897,7 @@ func TestWriteMarkdownTableWriteError(t *testing.T) {
 }
 
 func TestWriteMarkdownTableSeparatorWriteError(t *testing.T) {
+	t.Parallel()
 	writer := &failAfterWriter{limit: 1}
 	mgr := NewManager(writer).SetFormat(FormatMarkdown)
 	err := mgr.writeMarkdownTable([]interface{}{map[string]interface{}{"a": "b"}})
@@ -860,6 +907,7 @@ func TestWriteMarkdownTableSeparatorWriteError(t *testing.T) {
 }
 
 func TestWriteMarkdownTableRowWriteError(t *testing.T) {
+	t.Parallel()
 	writer := &failAfterWriter{limit: 2}
 	mgr := NewManager(writer).SetFormat(FormatMarkdown)
 	err := mgr.writeMarkdownTable([]interface{}{map[string]interface{}{"a": "b"}})
@@ -869,6 +917,7 @@ func TestWriteMarkdownTableRowWriteError(t *testing.T) {
 }
 
 func TestWriteMarkdownTableFallbacksToJSON(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	mgr := NewManager(&buf).SetFormat(FormatMarkdown)
 	err := mgr.writeMarkdownTable([]interface{}{"value"})
@@ -883,6 +932,7 @@ func TestWriteMarkdownTableFallbacksToJSON(t *testing.T) {
 }
 
 func TestWriteMarkdownTableEmptyWriteError(t *testing.T) {
+	t.Parallel()
 	mgr := NewManager(errWriter{}).SetFormat(FormatMarkdown)
 	err := mgr.writeMarkdownTable([]interface{}{})
 	if err == nil {
@@ -891,6 +941,7 @@ func TestWriteMarkdownTableEmptyWriteError(t *testing.T) {
 }
 
 func TestWriteMarkdownTableSkipsInvalidRows(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	mgr := NewManager(&buf).SetFormat(FormatMarkdown)
 	err := mgr.writeMarkdownTable([]interface{}{
@@ -907,6 +958,7 @@ func TestWriteMarkdownTableSkipsInvalidRows(t *testing.T) {
 }
 
 func TestWriteMarkdownMapWriteError(t *testing.T) {
+	t.Parallel()
 	mgr := NewManager(errWriter{}).SetFormat(FormatMarkdown)
 	err := mgr.writeMarkdownMap(map[string]interface{}{"a": "b"})
 	if err == nil {
@@ -915,6 +967,7 @@ func TestWriteMarkdownMapWriteError(t *testing.T) {
 }
 
 func TestWriteMarkdownErrorWriteFailure(t *testing.T) {
+	t.Parallel()
 	mgr := NewManager(errWriter{}).SetFormat(FormatMarkdown)
 	err := mgr.writeMarkdown(NewErrorResult(errors.NewAPIError(errors.CodeValidationError, "bad")))
 	if err == nil {
@@ -923,6 +976,7 @@ func TestWriteMarkdownErrorWriteFailure(t *testing.T) {
 }
 
 func TestWriteMarkdownErrorHintWriteFailure(t *testing.T) {
+	t.Parallel()
 	writer := &failAfterWriter{limit: 1}
 	mgr := NewManager(writer).SetFormat(FormatMarkdown)
 	err := mgr.writeMarkdown(NewErrorResult(errors.NewAPIError(errors.CodeValidationError, "bad").WithHint("hint")))
@@ -932,6 +986,7 @@ func TestWriteMarkdownErrorHintWriteFailure(t *testing.T) {
 }
 
 func TestWriteCSVWriteErrorOnHeader(t *testing.T) {
+	t.Parallel()
 	mgr := NewManager(errWriter{}).SetFormat(FormatCSV)
 	err := mgr.writeCSV(NewResult([]interface{}{map[string]interface{}{"a": "b"}}))
 	if err == nil {
@@ -940,6 +995,7 @@ func TestWriteCSVWriteErrorOnHeader(t *testing.T) {
 }
 
 func TestWriteCSVWriteErrorOnRow(t *testing.T) {
+	t.Parallel()
 	writer := &failAfterWriter{limit: 1}
 	mgr := NewManager(writer).SetFormat(FormatCSV)
 	err := mgr.writeCSV(NewResult([]interface{}{
@@ -951,6 +1007,7 @@ func TestWriteCSVWriteErrorOnRow(t *testing.T) {
 }
 
 func TestWriteCSVSkipsInvalidRows(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	mgr := NewManager(&buf).SetFormat(FormatCSV)
 	err := mgr.writeCSV(NewResult([]interface{}{
@@ -967,6 +1024,7 @@ func TestWriteCSVSkipsInvalidRows(t *testing.T) {
 }
 
 func TestWriteCSVNilData(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	mgr := NewManager(&buf).SetFormat(FormatCSV)
 	err := mgr.writeCSV(NewResult(nil))

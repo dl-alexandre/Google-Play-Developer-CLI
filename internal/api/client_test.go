@@ -11,6 +11,7 @@ import (
 )
 
 func TestDefaultRetryConfig(t *testing.T) {
+	t.Parallel()
 	cfg := DefaultRetryConfig()
 	if cfg.MaxAttempts != 3 {
 		t.Fatalf("expected MaxAttempts 3, got %d", cfg.MaxAttempts)
@@ -24,6 +25,7 @@ func TestDefaultRetryConfig(t *testing.T) {
 }
 
 func TestAcquireRelease(t *testing.T) {
+	t.Parallel()
 	client := &Client{semaphore: make(chan struct{}, 1)}
 	ctx := context.Background()
 	if err := client.Acquire(ctx); err != nil {
@@ -39,6 +41,7 @@ func TestAcquireRelease(t *testing.T) {
 }
 
 func TestAcquireCanceled(t *testing.T) {
+	t.Parallel()
 	client := &Client{semaphore: make(chan struct{}, 1)}
 	client.semaphore <- struct{}{}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -52,6 +55,7 @@ func TestAcquireCanceled(t *testing.T) {
 }
 
 func TestNewClientAndServices(t *testing.T) {
+	t.Parallel()
 	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "token", Expiry: time.Now().Add(time.Hour)})
 	client, err := NewClient(context.Background(), ts, WithTimeout(2*time.Second), WithMaxRetryAttempts(5), WithConcurrentCalls(2))
 	if err != nil {
@@ -72,6 +76,7 @@ func TestNewClientAndServices(t *testing.T) {
 }
 
 func TestWithRetryConfig(t *testing.T) {
+	t.Parallel()
 	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "token", Expiry: time.Now().Add(time.Hour)})
 	cfg := RetryConfig{MaxAttempts: 4, InitialDelay: time.Millisecond, MaxDelay: time.Second}
 	client, err := NewClient(context.Background(), ts, WithRetryConfig(cfg))
@@ -84,6 +89,7 @@ func TestWithRetryConfig(t *testing.T) {
 }
 
 func TestAcquireForUploadAndRelease(t *testing.T) {
+	t.Parallel()
 	client := &Client{semaphore: make(chan struct{}, 2)}
 	ctx := context.Background()
 	if err := client.AcquireForUpload(ctx); err != nil {
@@ -99,6 +105,7 @@ func TestAcquireForUploadAndRelease(t *testing.T) {
 }
 
 func TestAcquireForUploadCanceled(t *testing.T) {
+	t.Parallel()
 	client := &Client{semaphore: make(chan struct{}, 1)}
 	client.semaphore <- struct{}{}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -112,6 +119,7 @@ func TestAcquireForUploadCanceled(t *testing.T) {
 }
 
 func TestAcquireForUploadPartialCancel(t *testing.T) {
+	t.Parallel()
 	client := &Client{semaphore: make(chan struct{}, 2)}
 	client.semaphore <- struct{}{}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -151,6 +159,7 @@ func TestDoWithRetrySuccess(t *testing.T) {
 }
 
 func TestDoWithRetryNonRetryable(t *testing.T) {
+	t.Parallel()
 	client := &Client{retryConfig: RetryConfig{MaxAttempts: 3, InitialDelay: time.Millisecond, MaxDelay: time.Millisecond}}
 	ctx := context.Background()
 	calls := 0
@@ -183,6 +192,7 @@ func TestDoWithRetryMaxAttempts(t *testing.T) {
 }
 
 func TestDoWithRetryCanceled(t *testing.T) {
+	t.Parallel()
 	client := &Client{retryConfig: RetryConfig{MaxAttempts: 2, InitialDelay: time.Millisecond, MaxDelay: time.Millisecond}}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -192,6 +202,7 @@ func TestDoWithRetryCanceled(t *testing.T) {
 }
 
 func TestDoWithRetryCanceledDuringWait(t *testing.T) {
+	t.Parallel()
 	client := &Client{retryConfig: RetryConfig{MaxAttempts: 3, InitialDelay: time.Millisecond, MaxDelay: time.Millisecond}}
 	ctx, cancel := context.WithCancel(context.Background())
 	calls := 0
@@ -208,6 +219,7 @@ func TestDoWithRetryCanceledDuringWait(t *testing.T) {
 }
 
 func TestExtractRetryAfter(t *testing.T) {
+	t.Parallel()
 	apiErr := &googleapi.Error{Header: http.Header{"Retry-After": []string{"120"}}}
 	if got := extractRetryAfter(apiErr); got != 120*time.Second {
 		t.Fatalf("expected 120s, got %v", got)
@@ -222,6 +234,7 @@ func TestExtractRetryAfter(t *testing.T) {
 }
 
 func TestCalculateDelayWithConfig(t *testing.T) {
+	t.Parallel()
 	cfg := RetryConfig{MaxAttempts: 3, InitialDelay: time.Second, MaxDelay: 2 * time.Second}
 	delay := calculateDelayWithConfig(cfg, 0, nil)
 	if delay < time.Second || delay > 1300*time.Millisecond {
@@ -236,6 +249,7 @@ func TestCalculateDelayWithConfig(t *testing.T) {
 }
 
 func TestCalculateDelayWithConfigRetryAfterUnderMax(t *testing.T) {
+	t.Parallel()
 	cfg := RetryConfig{MaxAttempts: 3, InitialDelay: time.Second, MaxDelay: 5 * time.Second}
 	apiErr := &googleapi.Error{Header: http.Header{"Retry-After": []string{"2"}}}
 	delay := calculateDelayWithConfig(cfg, 1, apiErr)
@@ -245,6 +259,7 @@ func TestCalculateDelayWithConfigRetryAfterUnderMax(t *testing.T) {
 }
 
 func TestCalculateDelayWithConfigLargeAttempt(t *testing.T) {
+	t.Parallel()
 	cfg := RetryConfig{MaxAttempts: 3, InitialDelay: time.Second, MaxDelay: 2 * time.Second}
 	delay := calculateDelayWithConfig(cfg, 100, nil)
 	if delay < 0 || delay > 2*time.Second {
@@ -253,6 +268,7 @@ func TestCalculateDelayWithConfigLargeAttempt(t *testing.T) {
 }
 
 func TestCalculateDelayWithConfigCapsDelay(t *testing.T) {
+	t.Parallel()
 	cfg := RetryConfig{MaxAttempts: 3, InitialDelay: time.Second, MaxDelay: 2 * time.Second}
 	delay := calculateDelayWithConfig(cfg, 3, nil)
 	if delay < 2*time.Second || delay > 2600*time.Millisecond {
@@ -261,6 +277,7 @@ func TestCalculateDelayWithConfigCapsDelay(t *testing.T) {
 }
 
 func TestValidTrackAndStatus(t *testing.T) {
+	t.Parallel()
 	if !IsValidTrack("internal") || IsValidTrack("nope") {
 		t.Fatalf("unexpected track validation result")
 	}
@@ -270,6 +287,7 @@ func TestValidTrackAndStatus(t *testing.T) {
 }
 
 func TestDefaultUploadOptions(t *testing.T) {
+	t.Parallel()
 	opts := DefaultUploadOptions()
 	if opts.ChunkSize != 8*1024*1024 {
 		t.Fatalf("expected 8MB chunk, got %d", opts.ChunkSize)
@@ -277,6 +295,7 @@ func TestDefaultUploadOptions(t *testing.T) {
 }
 
 func TestIsRetryableError(t *testing.T) {
+	t.Parallel()
 	if isRetryableError(nil) {
 		t.Fatalf("expected false for nil error")
 	}
@@ -292,6 +311,7 @@ func TestIsRetryableError(t *testing.T) {
 }
 
 func TestExtractRetryAfterInvalid(t *testing.T) {
+	t.Parallel()
 	apiErr := &googleapi.Error{Header: http.Header{"Retry-After": []string{"not-a-date"}}}
 	if got := extractRetryAfter(apiErr); got != 0 {
 		t.Fatalf("expected 0 for invalid header, got %v", got)
@@ -299,6 +319,7 @@ func TestExtractRetryAfterInvalid(t *testing.T) {
 }
 
 func TestCryptoRandFloat64Error(t *testing.T) {
+	t.Parallel()
 	orig := randRead
 	randRead = func(_ []byte) (int, error) {
 		return 0, context.Canceled
@@ -310,6 +331,7 @@ func TestCryptoRandFloat64Error(t *testing.T) {
 }
 
 func TestRetryConfigGetter(t *testing.T) {
+	t.Parallel()
 	client := &Client{retryConfig: RetryConfig{MaxAttempts: 7}}
 	if client.RetryConfig().MaxAttempts != 7 {
 		t.Fatalf("unexpected retry config")
@@ -317,6 +339,7 @@ func TestRetryConfigGetter(t *testing.T) {
 }
 
 func TestCalculateDelayMethod(t *testing.T) {
+	t.Parallel()
 	client := &Client{retryConfig: RetryConfig{InitialDelay: time.Millisecond, MaxDelay: time.Millisecond}}
 	if delay := client.calculateDelay(0, nil); delay == 0 {
 		t.Fatalf("expected non-zero delay")
@@ -324,6 +347,7 @@ func TestCalculateDelayMethod(t *testing.T) {
 }
 
 func TestGamesServiceInitialization(t *testing.T) {
+	t.Parallel()
 	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "test"})
 	client, err := NewClient(context.Background(), ts)
 	if err != nil {
@@ -348,6 +372,7 @@ func TestGamesServiceInitialization(t *testing.T) {
 }
 
 func TestPlayIntegrityServiceInitialization(t *testing.T) {
+	t.Parallel()
 	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "test"})
 	client, err := NewClient(context.Background(), ts)
 	if err != nil {
@@ -372,6 +397,7 @@ func TestPlayIntegrityServiceInitialization(t *testing.T) {
 }
 
 func TestPlayCustomAppServiceInitialization(t *testing.T) {
+	t.Parallel()
 	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "test"})
 	client, err := NewClient(context.Background(), ts)
 	if err != nil {

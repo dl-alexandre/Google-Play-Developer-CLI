@@ -10,6 +10,7 @@ import (
 )
 
 func TestClassifyAuthErrorInvalidGrant(t *testing.T) {
+	t.Parallel()
 	retrieveErr := &oauth2.RetrieveError{
 		Response: &http.Response{
 			StatusCode: http.StatusBadRequest,
@@ -32,6 +33,7 @@ func TestClassifyAuthErrorInvalidGrant(t *testing.T) {
 }
 
 func TestClassifyAuthErrorGoogleAPI(t *testing.T) {
+	t.Parallel()
 	gapiErr := &googleapi.Error{
 		Code:    http.StatusUnauthorized,
 		Message: "unauthorized",
@@ -49,6 +51,7 @@ func TestClassifyAuthErrorGoogleAPI(t *testing.T) {
 }
 
 func TestClassifyAuthErrorNil(t *testing.T) {
+	t.Parallel()
 	apiErr := ClassifyAuthError(nil)
 	if apiErr != nil {
 		t.Fatalf("expected nil for nil error")
@@ -56,6 +59,7 @@ func TestClassifyAuthErrorNil(t *testing.T) {
 }
 
 func TestClassifyAuthErrorAlreadyAPIError(t *testing.T) {
+	t.Parallel()
 	original := NewAPIError(CodeValidationError, "test error")
 	result := ClassifyAuthError(original)
 	if result != original {
@@ -64,6 +68,7 @@ func TestClassifyAuthErrorAlreadyAPIError(t *testing.T) {
 }
 
 func TestClassifyAuthErrorOAuthTypes(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name         string
 		oauthError   string
@@ -150,6 +155,7 @@ func TestClassifyAuthErrorOAuthTypes(t *testing.T) {
 }
 
 func TestClockSkewDetection(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name           string
 		timeOffset     time.Duration
@@ -215,6 +221,7 @@ func TestClockSkewDetection(t *testing.T) {
 }
 
 func TestClockSkewNoDateHeader(t *testing.T) {
+	t.Parallel()
 	retrieveErr := &oauth2.RetrieveError{
 		Response: &http.Response{
 			StatusCode: http.StatusBadRequest,
@@ -235,6 +242,7 @@ func TestClockSkewNoDateHeader(t *testing.T) {
 }
 
 func TestClockSkewNilHeader(t *testing.T) {
+	t.Parallel()
 	details := map[string]interface{}{}
 	if addClockSkew(details, nil) {
 		t.Fatal("expected no skew with nil header")
@@ -245,6 +253,7 @@ func TestClockSkewNilHeader(t *testing.T) {
 }
 
 func TestClockSkewInvalidDate(t *testing.T) {
+	t.Parallel()
 	details := map[string]interface{}{}
 	header := http.Header{"Date": []string{"not a date"}}
 	if addClockSkew(details, header) {
@@ -256,6 +265,7 @@ func TestClockSkewInvalidDate(t *testing.T) {
 }
 
 func TestGoogleAPIErrorForbidden(t *testing.T) {
+	t.Parallel()
 	gapiErr := &googleapi.Error{
 		Code:    http.StatusForbidden,
 		Message: "forbidden",
@@ -276,6 +286,7 @@ func TestGoogleAPIErrorForbidden(t *testing.T) {
 }
 
 func TestGoogleAPIErrorWithClockSkew(t *testing.T) {
+	t.Parallel()
 	skewedTime := time.Now().Add(-10 * time.Minute)
 	gapiErr := &googleapi.Error{
 		Code:    http.StatusUnauthorized,
@@ -294,6 +305,7 @@ func TestGoogleAPIErrorWithClockSkew(t *testing.T) {
 }
 
 func TestAppendHint(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		current  string
@@ -337,6 +349,7 @@ func TestAppendHint(t *testing.T) {
 }
 
 func TestOAuthErrorResponseParsing(t *testing.T) {
+	t.Parallel()
 	retrieveErr := &oauth2.RetrieveError{
 		Response: &http.Response{
 			StatusCode: http.StatusBadRequest,
@@ -364,6 +377,7 @@ func TestOAuthErrorResponseParsing(t *testing.T) {
 }
 
 func TestOAuthErrorInvalidJSON(t *testing.T) {
+	t.Parallel()
 	retrieveErr := &oauth2.RetrieveError{
 		Response: &http.Response{
 			StatusCode: http.StatusBadRequest,
@@ -382,6 +396,7 @@ func TestOAuthErrorInvalidJSON(t *testing.T) {
 }
 
 func TestOAuthErrorBodyNil(t *testing.T) {
+	t.Parallel()
 	retrieveErr := &oauth2.RetrieveError{
 		Response: &http.Response{
 			StatusCode: http.StatusBadRequest,
@@ -403,6 +418,7 @@ func TestOAuthErrorBodyNil(t *testing.T) {
 }
 
 func TestOAuthErrorSkewedInvalidClient(t *testing.T) {
+	t.Parallel()
 	skewedTime := time.Now().Add(-10 * time.Minute)
 	retrieveErr := &oauth2.RetrieveError{
 		Response: &http.Response{
@@ -421,6 +437,7 @@ func TestOAuthErrorSkewedInvalidClient(t *testing.T) {
 }
 
 func TestOAuthErrorSkewedAccessDenied(t *testing.T) {
+	t.Parallel()
 	skewedTime := time.Now().Add(-10 * time.Minute)
 	retrieveErr := &oauth2.RetrieveError{
 		Response: &http.Response{
@@ -439,6 +456,7 @@ func TestOAuthErrorSkewedAccessDenied(t *testing.T) {
 }
 
 func TestOAuthErrorSkewedDefault(t *testing.T) {
+	t.Parallel()
 	skewedTime := time.Now().Add(-10 * time.Minute)
 	retrieveErr := &oauth2.RetrieveError{
 		Response: &http.Response{
@@ -457,6 +475,7 @@ func TestOAuthErrorSkewedDefault(t *testing.T) {
 }
 
 func TestGenericError(t *testing.T) {
+	t.Parallel()
 	err := &testError{msg: "generic error"}
 	apiErr := ClassifyAuthError(err)
 	if apiErr == nil {
@@ -494,6 +513,7 @@ func (e *testError) Error() string {
 }
 
 func TestClockSkewBoundaryConditions(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name           string
 		timeOffset     time.Duration
@@ -556,6 +576,7 @@ func TestClockSkewBoundaryConditions(t *testing.T) {
 }
 
 func TestHTTPStatusVariations(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name         string
 		statusCode   int
@@ -623,6 +644,7 @@ func TestHTTPStatusVariations(t *testing.T) {
 }
 
 func TestHTTPStatusWithHints(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name         string
 		statusCode   int

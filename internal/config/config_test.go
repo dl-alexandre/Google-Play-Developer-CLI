@@ -18,6 +18,7 @@ func setTestHome(t *testing.T) string {
 }
 
 func TestIsValidTrack(t *testing.T) {
+	t.Parallel()
 	validTracks := []string{"internal", "alpha", "beta", "production"}
 	invalidTracks := []string{"custom", "staging", "dev", ""}
 
@@ -39,6 +40,7 @@ func TestIsValidTrack(t *testing.T) {
 }
 
 func TestNormalizeLocale(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input    string
 		expected string
@@ -109,6 +111,7 @@ func TestDetectCI(t *testing.T) {
 }
 
 func TestDefaultConfig(t *testing.T) {
+	t.Parallel()
 	cfg := DefaultConfig()
 
 	if cfg.OutputFormat != "json" {
@@ -129,6 +132,7 @@ func TestDefaultConfig(t *testing.T) {
 }
 
 func TestValidTracks(t *testing.T) {
+	t.Parallel()
 	tracks := ValidTracks()
 	if len(tracks) != 4 {
 		t.Errorf("ValidTracks() returned %d tracks, want 4", len(tracks))
@@ -149,6 +153,7 @@ func TestValidTracks(t *testing.T) {
 }
 
 func TestDefaultTesterLimits(t *testing.T) {
+	t.Parallel()
 	limits := DefaultTesterLimits()
 	if limits.Internal != 200 || limits.Alpha != -1 || limits.Beta != -1 {
 		t.Fatalf("unexpected limits: %+v", limits)
@@ -260,6 +265,7 @@ func TestLoadDefaultConfigWhenMissing(t *testing.T) {
 }
 
 func TestLoadFromFileInvalidJSON(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
 	if err := os.WriteFile(path, []byte("not json"), 0600); err != nil {
@@ -472,6 +478,7 @@ func TestInitProjectGitignoreError(t *testing.T) {
 }
 
 func TestConfigValidate(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		config     *Config

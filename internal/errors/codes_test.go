@@ -6,6 +6,7 @@ import (
 )
 
 func TestExitCodeMapping(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		code     ErrorCode
@@ -33,6 +34,7 @@ func TestExitCodeMapping(t *testing.T) {
 }
 
 func TestAPIErrorMessage(t *testing.T) {
+	t.Parallel()
 	err := NewAPIError(CodeAuthFailure, "authentication failed")
 	if err.Error() != "AUTH_FAILURE: authentication failed" {
 		t.Errorf("Error() = %v, want AUTH_FAILURE: authentication failed", err.Error())
@@ -46,6 +48,7 @@ func TestAPIErrorMessage(t *testing.T) {
 }
 
 func TestFromHTTPStatus(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		status   int
 		expected ErrorCode
@@ -70,6 +73,7 @@ func TestFromHTTPStatus(t *testing.T) {
 }
 
 func TestAPIErrorChaining(t *testing.T) {
+	t.Parallel()
 	err := NewAPIError(CodeValidationError, "invalid input").
 		WithHint("check the format").
 		WithDetails(map[string]string{"field": "package"}).

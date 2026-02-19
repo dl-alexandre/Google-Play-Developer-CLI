@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -614,5 +615,78 @@ func TestAuthDiagnoseRefreshCheckFlag(t *testing.T) {
 	outputStr := buf.String()
 	if !strings.Contains(outputStr, "error") {
 		t.Errorf("expected error field in output with no credentials, got: %s", outputStr)
+	}
+}
+
+func TestTimeoutContext(t *testing.T) {
+	cli := New()
+	parent := context.Background()
+
+	result, cancel := cli.TimeoutContext(parent, 0)
+	if result != parent {
+		t.Error("TimeoutContext should return same context when duration is 0")
+	}
+	cancel() // no-op, safe to call
+
+	result, cancel = cli.TimeoutContext(parent, -1)
+	if result != parent {
+		t.Error("TimeoutContext should return same context when duration is negative")
+	}
+	cancel() // no-op, safe to call
+
+	result, cancel = cli.TimeoutContext(parent, 5*time.Second)
+	if result == parent {
+		t.Error("TimeoutContext should return different context when duration is positive")
+	}
+	if _, ok := result.Deadline(); !ok {
+		t.Error("TimeoutContext should return context with deadline")
+	}
+	cancel() // release timer resources
+}
+
+func TestRequirePackageFull(t *testing.T) {
+	cli := New()
+	cli.packageName = ""
+
+	err := cli.requirePackage()
+	if err == nil {
+		t.Error("requirePackage should return error when packageName is empty")
+	}
+
+	cli.packageName = "com.example.app"
+	err = cli.requirePackage()
+	if err != nil {
+		t.Errorf("requirePackage should return nil when packageName is set: %v", err)
+	}
+}
+
+func TestOutputError(t *testing.T) {
+	buf := &bytes.Buffer{}
+	cli := New()
+	cli.stdout = buf
+	cli.outputMgr = output.NewManager(buf)
+	cli.startTime = time.Now()
+
+	err := cli.OutputError(errors.ErrPackageRequired)
+	if err != nil {
+		t.Errorf("OutputError returned error: %v", err)
+	}
+
+	outputStr := buf.String()
+	if !strings.Contains(outputStr, "error") {
+		t.Error("expected error field in output")
+	}
+}
+
+func TestGlobalFlags(t *testing.T) {
+	cli := New()
+	rootCmd := cli.rootCmd
+
+	flags := []string{"package", "output", "pretty", "timeout", "quiet", "verbose", "key", "profile"}
+	for _, flagName := range flags {
+		flag := rootCmd.Flag(flagName)
+		if flag == nil {
+			t.Errorf("Global flag --%s not found", flagName)
+		}
 	}
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/dl-alexandre/gpd/internal/auth"
 	"github.com/dl-alexandre/gpd/internal/config"
 	"github.com/dl-alexandre/gpd/internal/errors"
+	"github.com/dl-alexandre/gpd/internal/logging"
 	"github.com/dl-alexandre/gpd/internal/output"
 	"github.com/dl-alexandre/gpd/internal/storage"
 	"github.com/dl-alexandre/gpd/pkg/version"
@@ -125,8 +126,9 @@ for automating Android app publishing and management tasks.`,
 
 func (c *CLI) setup(_ *cobra.Command) error {
 	// Load configuration
-	cfg, err := config.Load()
-	if err != nil {
+	cfg, loadWarn := config.Load()
+	if loadWarn != nil {
+		logging.Warn("config load issue, using defaults", logging.Err(loadWarn))
 		cfg = config.DefaultConfig()
 	}
 	c.config = cfg
@@ -250,6 +252,16 @@ func (c *CLI) getAPIClient(ctx context.Context) (*api.Client, error) {
 
 	c.apiClient = client
 	return client, nil
+}
+
+// TimeoutContext returns a context with optional custom timeout.
+// Use customTimeout > 0 to override the default CLI timeout.
+// Caller MUST call the returned cancel function to prevent timer leaks.
+func (c *CLI) TimeoutContext(parent context.Context, customTimeout time.Duration) (context.Context, context.CancelFunc) {
+	if customTimeout <= 0 {
+		return parent, func() {}
+	}
+	return context.WithTimeout(parent, customTimeout)
 }
 
 // requirePackage ensures a package name is provided.

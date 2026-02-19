@@ -3,9 +3,9 @@
 A fast, lightweight command-line interface for the Google Play Developer Console. The Google Play equivalent to the App Store Connect CLI.
 
 [![CI](https://github.com/dl-alexandre/gpd/actions/workflows/ci.yml/badge.svg)](https://github.com/dl-alexandre/gpd/actions/workflows/ci.yml)
-[![Go Version](https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat&logo=go)](https://go.dev/)
+[![Go Version](https://img.shields.io/badge/Go-1.24.0-00ADD8?style=flat&logo=go)](https://go.dev/)
 [![Release](https://img.shields.io/github/v/release/dl-alexandre/gpd)](https://github.com/dl-alexandre/gpd/releases/latest)
-[![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Linux%20%7C%20Windows-blue)](#)
+[![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Linux%20%7C%20Windows-blue)](https://github.com/dl-alexandre/gpd/releases)
 [![Downloads](https://img.shields.io/github/downloads/dl-alexandre/gpd/total)](https://github.com/dl-alexandre/gpd/releases)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 

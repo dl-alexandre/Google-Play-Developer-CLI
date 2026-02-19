@@ -910,6 +910,22 @@ func (c *CLI) publishCapabilities(_ context.Context) error {
 			"max": 100.0,
 		},
 		"maxInternalTesters": 200,
+		"workflowMappings": map[string]interface{}{
+			"asc": map[string]interface{}{
+				"submit": map[string]string{
+					"create": "gpd publish release",
+					"status": "gpd publish status",
+					"cancel": "gpd publish halt",
+				},
+				"versions": map[string]string{
+					"release":             "gpd publish release",
+					"phasedReleaseUpdate": "gpd publish rollout",
+					"phasedReleaseDelete": "gpd publish rollback",
+					"promotionsCreate":    "gpd publish promote",
+				},
+			},
+			"notes": "Play release workflows map to tracks and staged rollouts, not ASC submissions.",
+		},
 	})
 	return c.Output(result.WithServices("androidpublisher"))
 }

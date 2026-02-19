@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-REPO="dl-alexandre/gpd"
+REPO="dl-alexandre/Google-Play-Developer-CLI"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 
 # Detect OS and architecture

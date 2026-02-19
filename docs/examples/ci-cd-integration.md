@@ -181,7 +181,7 @@ jobs:
 
       - name: Install gpd
         run: |
-          curl -fsSL https://raw.githubusercontent.com/dl-alexandre/gpd/main/install.sh | bash
+          curl -fsSL https://raw.githubusercontent.com/dl-alexandre/Google-Play-Developer-CLI/main/install.sh | bash
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
       - name: Verify authentication
@@ -258,7 +258,7 @@ jobs:
 
       - name: Install gpd
         run: |
-          curl -fsSL https://raw.githubusercontent.com/dl-alexandre/gpd/main/install.sh | bash
+          curl -fsSL https://raw.githubusercontent.com/dl-alexandre/Google-Play-Developer-CLI/main/install.sh | bash
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
       - name: Upload and Release
@@ -338,7 +338,7 @@ jobs:
 
       - name: Install gpd
         run: |
-          curl -fsSL https://raw.githubusercontent.com/dl-alexandre/gpd/main/install.sh | bash
+          curl -fsSL https://raw.githubusercontent.com/dl-alexandre/Google-Play-Developer-CLI/main/install.sh | bash
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
       - name: Promote from Beta to Production
@@ -437,7 +437,7 @@ jobs:
 
       - name: Install gpd
         run: |
-          curl -fsSL https://raw.githubusercontent.com/dl-alexandre/gpd/main/install.sh | bash
+          curl -fsSL https://raw.githubusercontent.com/dl-alexandre/Google-Play-Developer-CLI/main/install.sh | bash
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
       - name: Deploy
@@ -494,7 +494,7 @@ deploy:
   stage: deploy
   image: golang:1.22
   before_script:
-    - curl -fsSL https://raw.githubusercontent.com/dl-alexandre/gpd/main/install.sh | bash
+    - curl -fsSL https://raw.githubusercontent.com/dl-alexandre/Google-Play-Developer-CLI/main/install.sh | bash
     - export PATH="$HOME/.local/bin:$PATH"
   script:
     - |
@@ -550,7 +550,7 @@ deploy-internal:
   stage: deploy-internal
   image: golang:1.22
   before_script:
-    - curl -fsSL https://raw.githubusercontent.com/dl-alexandre/gpd/main/install.sh | bash
+    - curl -fsSL https://raw.githubusercontent.com/dl-alexandre/Google-Play-Developer-CLI/main/install.sh | bash
     - export PATH="$HOME/.local/bin:$PATH"
   script:
     - |
@@ -572,7 +572,7 @@ deploy-production:
   stage: deploy-production
   image: golang:1.22
   before_script:
-    - curl -fsSL https://raw.githubusercontent.com/dl-alexandre/gpd/main/install.sh | bash
+    - curl -fsSL https://raw.githubusercontent.com/dl-alexandre/Google-Play-Developer-CLI/main/install.sh | bash
     - export PATH="$HOME/.local/bin:$PATH"
   script:
     - |

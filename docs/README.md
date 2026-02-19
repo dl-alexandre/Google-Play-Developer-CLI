@@ -158,9 +158,9 @@ Guide for migrating from the legacy Assets API to the modern Images API for uplo
 
 ### GitHub Repository
 
-- **Repository**: [github.com/dl-alexandre/gpd](https://github.com/dl-alexandre/gpd)
-- **Issues**: [Report bugs or request features](https://github.com/dl-alexandre/gpd/issues)
-- **Releases**: [Latest releases and changelog](https://github.com/dl-alexandre/gpd/releases)
+- **Repository**: [github.com/dl-alexandre/Google-Play-Developer-CLI](https://github.com/dl-alexandre/Google-Play-Developer-CLI)
+- **Issues**: [Report bugs or request features](https://github.com/dl-alexandre/Google-Play-Developer-CLI/issues)
+- **Releases**: [Latest releases and changelog](https://github.com/dl-alexandre/Google-Play-Developer-CLI/releases)
 
 ### Contributing
 

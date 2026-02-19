@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-02-19
+
+### Fixed
+- Fixed race condition in `TestCryptoRandFloat64Error` by removing `t.Parallel()` from test that modifies global state
+
 ## [0.2.0] - 2026-01-24
 
 ### Added
@@ -127,6 +132,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docker image support
 - Homebrew formula for macOS/Linux
 
-[Unreleased]: https://github.com/dl-alexandre/gpd/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/dl-alexandre/gpd/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/dl-alexandre/gpd/releases/tag/v0.1.0
+[Unreleased]: https://github.com/dl-alexandre/Google-Play-Developer-CLI/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/dl-alexandre/Google-Play-Developer-CLI/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/dl-alexandre/Google-Play-Developer-CLI/releases/tag/v0.1.0

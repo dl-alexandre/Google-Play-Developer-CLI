@@ -3,13 +3,13 @@ pkgver=0.1.0.2.gd2f8b0d
 pkgrel=1
 pkgdesc="Google Play Developer CLI"
 arch=('x86_64' 'aarch64')
-url="https://github.com/dl-alexandre/gpd"
+url="https://github.com/dl-alexandre/Google-Play-Developer-CLI"
 license=('Apache-2.0')
 depends=('libsecret')
 makedepends=('git' 'go')
 provides=('gpd')
 conflicts=('gpd')
-source=("git+https://github.com/dl-alexandre/gpd.git")
+source=("git+https://github.com/dl-alexandre/Google-Play-Developer-CLI.git")
 sha256sums=('SKIP')
 
 pkgver() {

@@ -91,7 +91,7 @@ func (c *CLI) addPublishReleaseCommands(publishCmd *cobra.Command) {
 	releaseCmd := &cobra.Command{
 		Use:   "release",
 		Short: "Create or update a release",
-		Long:  "Create a new release on a track with specified version codes.",
+		Long:  "Create a new release on a track with specified version codes. Maps to ASC submit create and versions release workflows.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if track == "" {
 				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
@@ -117,7 +117,7 @@ func (c *CLI) addPublishReleaseCommands(publishCmd *cobra.Command) {
 	rolloutCmd := &cobra.Command{
 		Use:   "rollout",
 		Short: "Update rollout percentage",
-		Long:  "Update the staged rollout percentage for a production release.",
+		Long:  "Update the staged rollout percentage for a production release. Maps to ASC phased-release update workflows.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if percentage <= 0 {
 				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
@@ -136,7 +136,7 @@ func (c *CLI) addPublishReleaseCommands(publishCmd *cobra.Command) {
 	promoteCmd := &cobra.Command{
 		Use:   "promote",
 		Short: "Promote a release between tracks",
-		Long:  "Copy a release from one track to another.",
+		Long:  "Copy a release from one track to another. Maps to ASC version promotions create workflows.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if fromTrack == "" || toTrack == "" {
 				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
@@ -156,7 +156,7 @@ func (c *CLI) addPublishReleaseCommands(publishCmd *cobra.Command) {
 	haltCmd := &cobra.Command{
 		Use:   "halt",
 		Short: "Halt a production rollout",
-		Long:  "Halt an in-progress production rollout.",
+		Long:  "Halt an in-progress production rollout. Maps to ASC submit cancel for staged rollouts.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !confirm {
 				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,
@@ -175,7 +175,7 @@ func (c *CLI) addPublishReleaseCommands(publishCmd *cobra.Command) {
 	rollbackCmd := &cobra.Command{
 		Use:   "rollback",
 		Short: "Rollback to a previous version",
-		Long:  "Rollback to a previous version from track history.",
+		Long:  "Rollback to a previous version from track history. Maps to ASC phased-release delete workflows.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !confirm {
 				result := output.NewErrorResult(errors.NewAPIError(errors.CodeValidationError,

@@ -72,8 +72,8 @@ Use clear, descriptive commit messages:
 
 ```bash
 # Clone the repository
-git clone https://github.com/dl-alexandre/gpd.git
-cd gpd
+git clone https://github.com/dl-alexandre/Google-Play-Developer-CLI.git
+cd Google-Play-Developer-CLI
 
 # Download dependencies
 go mod download

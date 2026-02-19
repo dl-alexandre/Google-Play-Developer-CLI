@@ -39,7 +39,7 @@ This document provides a comprehensive overview of Google Play API coverage in t
 |--------------|-------------|--------|-------|
 | `edits.tracks.list` | `gpd publish tracks` | ✅ | List all release tracks |
 | `edits.tracks.get` | `gpd publish status --track <track>` | ✅ | Get specific track status |
-| `edits.tracks.update` | `gpd publish release`, `gpd publish rollout`, `gpd publish promote`, `gpd publish halt`, `gpd publish rollback` | ✅ | Update track releases (via release commands) |
+| `edits.tracks.update` | `gpd publish release`, `gpd publish rollout`, `gpd publish promote`, `gpd publish halt`, `gpd publish rollback` | ✅ | Update track releases (via release commands). See examples/release-workflow.md for ASC mapping |
 
 ### Testers (Track-based)
 

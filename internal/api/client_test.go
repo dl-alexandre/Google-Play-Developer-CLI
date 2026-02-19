@@ -319,7 +319,7 @@ func TestExtractRetryAfterInvalid(t *testing.T) {
 }
 
 func TestCryptoRandFloat64Error(t *testing.T) {
-	t.Parallel()
+	// Not parallel due to global randRead modification
 	orig := randRead
 	randRead = func(_ []byte) (int, error) {
 		return 0, context.Canceled

@@ -2,11 +2,11 @@
 
 A fast, lightweight command-line interface for the Google Play Developer Console. The Google Play equivalent to the App Store Connect CLI.
 
-[![CI](https://github.com/dl-alexandre/gpd/actions/workflows/ci.yml/badge.svg)](https://github.com/dl-alexandre/gpd/actions/workflows/ci.yml)
+[![CI](https://github.com/dl-alexandre/Google-Play-Developer-CLI/actions/workflows/ci.yml/badge.svg)](https://github.com/dl-alexandre/Google-Play-Developer-CLI/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/badge/Go-1.24.0-00ADD8?style=flat&logo=go)](https://go.dev/)
-[![Release](https://img.shields.io/github/v/release/dl-alexandre/gpd)](https://github.com/dl-alexandre/gpd/releases/latest)
-[![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Linux%20%7C%20Windows-blue)](https://github.com/dl-alexandre/gpd/releases)
-[![Downloads](https://img.shields.io/github/downloads/dl-alexandre/gpd/total)](https://github.com/dl-alexandre/gpd/releases)
+[![Release](https://img.shields.io/github/v/release/dl-alexandre/Google-Play-Developer-CLI)](https://github.com/dl-alexandre/Google-Play-Developer-CLI/releases/latest)
+[![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Linux%20%7C%20Windows-blue)](https://github.com/dl-alexandre/Google-Play-Developer-CLI/releases)
+[![Downloads](https://img.shields.io/github/downloads/dl-alexandre/Google-Play-Developer-CLI/total)](https://github.com/dl-alexandre/Google-Play-Developer-CLI/releases)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 ## Features
@@ -36,23 +36,23 @@ brew install gpd
 ### Install Script (macOS/Linux)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/dl-alexandre/gpd/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/dl-alexandre/Google-Play-Developer-CLI/main/install.sh | bash
 ```
 
 ### Go Install
 
 ```bash
-go install github.com/dl-alexandre/gpd/cmd/gpd@latest
+go install github.com/dl-alexandre/Google-Play-Developer-CLI/cmd/gpd@latest
 ```
 
 ### Download Binary
 
-Download the latest release from the [Releases](https://github.com/dl-alexandre/gpd/releases) page.
+Download the latest release from the [Releases](https://github.com/dl-alexandre/Google-Play-Developer-CLI/releases) page.
 
 ### Build from Source
 
 ```bash
-git clone https://github.com/dl-alexandre/gpd.git
+git clone https://github.com/dl-alexandre/Google-Play-Developer-CLI.git
 cd gpd
 make build
 ```
@@ -178,6 +178,10 @@ gpd publish beta-groups add-testers internal --group qa@example.com --package ..
 # Create/update releases
 gpd publish release --package ... --track internal --status draft
 gpd publish release --package ... --track production --status inProgress --version-code 123
+
+# Release workflow mapping (ASC submit/versions parity)
+gpd publish capabilities
+docs/examples/release-workflow.md
 
 # Manage rollouts
 gpd publish rollout --package ... --track production --percentage 10
@@ -482,7 +486,7 @@ MIT License - see [LICENSE](LICENSE) for details.
 ## Support
 
 If you find gpd useful, please consider:
-- Starring the [GitHub repository](https://github.com/dl-alexandre/gpd)
+- Starring the [GitHub repository](https://github.com/dl-alexandre/Google-Play-Developer-CLI)
 - Contributing improvements
 - Reporting bugs
 

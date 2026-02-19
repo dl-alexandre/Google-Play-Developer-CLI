@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-02-19
+
+### Fixed
+- Fixed `TestValidatePathExtended` to use platform-appropriate paths for Windows (was using Unix paths causing CI failure)
+
 ## [0.4.4] - 2026-02-19
 
 ### Fixed

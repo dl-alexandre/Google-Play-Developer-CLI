@@ -30,6 +30,7 @@ jobs:
         with:
           go-version: '1.24.x'
           cache: true
+          check-latest: true
 
       - name: Download dependencies
         run: go mod download
@@ -71,6 +72,7 @@ jobs:
         with:
           go-version: '1.24.x'
           cache: true
+          check-latest: true
 
       - name: Build for all platforms
         run: |
@@ -102,6 +104,7 @@ jobs:
         with:
           go-version: '1.24.x'
           cache: true
+          check-latest: true
 
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9.2.0
@@ -125,6 +128,7 @@ jobs:
         with:
           go-version: '1.24.x'
           cache: true
+          check-latest: true
 
       - name: Run govulncheck
         run: |

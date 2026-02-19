@@ -24,6 +24,7 @@ jobs:
         with:
           go-version: "1.24.x"
           cache: true
+          check-latest: true
 
       - name: Collect dependency update report
         run: |
@@ -52,6 +53,7 @@ jobs:
         with:
           go-version: "1.24.x"
           cache: true
+          check-latest: true
 
       - name: Run govulncheck summary
         run: |
@@ -81,6 +83,7 @@ jobs:
         with:
           go-version: "1.24.x"
           cache: true
+          check-latest: true
 
       - name: Collect coverage snapshot
         run: |

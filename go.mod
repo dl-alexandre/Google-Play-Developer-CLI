@@ -1,6 +1,6 @@
 module github.com/dl-alexandre/gpd
 
-go 1.25.0
+go 1.24.0
 
 require (
 	github.com/99designs/keyring v1.2.2

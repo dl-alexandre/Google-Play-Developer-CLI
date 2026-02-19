@@ -1,171 +1,144 @@
 # Agent Guidelines for gpd
 
-This document provides essential guidance for AI agents working on the gpd (Google Play Developer CLI) codebase.
+Quick reference for AI agents. See linked docs for details.
 
-## Build & Test Commands
+## Quick Reference
+
+| Topic | Reference |
+|-------|-----------|
+| Commands | [README.md](./README.md#command-reference) |
+| API Coverage | [docs/api-coverage-matrix.md](./docs/api-coverage-matrix.md) |
+| Code Style | [CONTRIBUTING.md](./CONTRIBUTING.md#code-style) |
+| Workflows | [docs/examples/](./docs/examples/) |
+
+---
+
+## Table of Contents
+
+1. [Build & Test](#build--test)
+2. [Code Style](#code-style)
+3. [Architecture](#architecture)
+4. [Project Structure](#project-structure)
+5. [Key Packages](#key-packages)
+6. [Important Notes](#important-notes)
+
+---
+
+## Build & Test
+
+See: [CONTRIBUTING.md - Development Setup](./CONTRIBUTING.md#development-setup)
 
 ```bash
-# Build
-make build              # Build for current platform
-make build-all          # Build for all platforms (linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64)
-make run ARGS="cmd"     # Build and run CLI with arguments
-
-# Test
-make test               # Run all tests with race detection and coverage
-make test-coverage      # Generate HTML coverage report (coverage.html)
-go test ./internal/auth              # Run tests for a specific package
-go test -v -run TestAuthStatus ./internal/auth  # Run a single test
-
-# Lint
-make lint               # Run golangci-lint (must be installed: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest)
-
-# Clean
-make clean              # Remove build artifacts and coverage reports
+make build              # Build current platform
+make build-all          # All platforms
+make test               # Tests with race + coverage
+make test-coverage      # HTML coverage report
+make lint               # golangci-lint
+go test ./internal/auth # Specific package
+go test -v -run TestX ./pkg # Single test
 ```
 
-## Code Style Guidelines
+---
 
-### Imports & Formatting
-- **Import order**: Standard library → third-party → internal packages (blank lines between each group)
-- Use `gofmt` and `goimports`; both are enforced by CI
-- Local package prefix in goimports config: `github.com/dl-alexandre/gpd`
+## Code Style
 
-### Naming Conventions
-- **Exported**: PascalCase (types, functions, constants, methods)
-- **Unexported**: camelCase (variables, functions, methods)
-- **Constants**: PascalCase with descriptive names (e.g., `ScopeAndroidPublisher`)
-- **Interfaces**: Simple names ending with capability (e.g., `SecureStorage`, `Option`)
-- **Test helpers**: Create in `*_test.go` files, use `t.Helper()` wrapper
+See: [CONTRIBUTING.md - Code Style](./CONTRIBUTING.md#code-style)
 
-### Comments
-- Package comment: `// Package <name> provides <description>.` (first line of file)
-- Exported types/functions must have comments
-- Use sentence case with first word capitalized
-- Constants may have comments explaining purpose
+- **Imports**: stdlib → third-party → internal (blank lines between)
+- **Naming**: PascalCase (exported), camelCase (unexported)
+- **Errors**: Use `internal/errors` with `WithHint()`, `WithDetails()`
+- **Never suppress errors**: No `as any`, `@ts-ignore`
+- **Max function**: 150 lines, 80 statements, complexity 40
+- **Testing**: Table-driven, co-located `*_test.go`, use `t.Helper()`
 
-### Error Handling
-```go
-// Use structured errors from internal/errors
-import "github.com/dl-alexandre/gpd/internal/errors"
+---
 
-// Create errors
-err := errors.NewAPIError(errors.CodeValidationError, "message")
-    .WithHint("actionable hint")
-    .WithDetails(map[string]interface{}{"key": "value"})
+## Architecture
 
-// Use predefined common errors
-errors.ErrAuthNotConfigured
-errors.ErrPermissionDenied
-errors.ErrPackageRequired
+See: [internal/api/client.go](./internal/api/client.go), [internal/cli/*.go](./internal/cli/)
 
-// NEVER suppress type errors
-// Forbidden: as any, @ts-ignore, @ts-expect-error
-```
+### API Client
+- Lazy init with `sync.Once`
+- Retry with exponential backoff via `DoWithRetry()`
+- Options pattern for config
 
-### Function & Type Guidelines
-- Max 150 lines per function, 80 statements (enforced by golangci-lint)
-- Max cyclomatic complexity: 40 (enforced by golangci-lint)
-- Use `sync.Once` for lazy initialization (see `api/client.go`)
-- Use options pattern for configuration (see `api/client.go:WithTimeout`)
-
-### Concurrency
-- Use `sync.RWMutex` for protecting shared state
-- Always `defer mu.Unlock()` after `mu.Lock()`
-- Use channels for synchronization
-- No package-level variables with complex initialization
-
-### Context Management
-- Pass `context.Context` as first parameter
-- Respect context cancellation in all I/O operations
-- Use `context.Background()` for lazy initialization (see API services)
-
-### Testing Patterns
-- Table-driven tests for multiple scenarios
-- Test files co-located: `package.go` → `package_test.go`
-- Use `t.Helper()` for test helper functions
-- Exemptions: Test files are exempt from `funlen`, `goconst`, `gosec` linters
-
-### Linting & Quality
-- golangci-lint configured with 30+ linters (`.golangci.yml`)
-- Key rules enforced:
-  - No empty catch blocks (errcheck)
-  - No duplicates except CLI package (intentional command structure)
-  - No type assertions without checking
-  - No exported functions without comments
-- Test files exempt from: dupl, funlen, goconst, gosec
-
-## Architecture Patterns
-
-### API Client Pattern
-```go
-// Lazy initialization with sync.Once
-type Client struct {
-  publisherOnce sync.Once
-  publisherSvc  *androidpublisher.Service
-  publisherErr  error
-}
-
-// Method returns service with lazy initialization
-func (c *Client) AndroidPublisher() (*androidpublisher.Service, error) {
-  c.publisherOnce.Do(func() {
-    c.publisherSvc, c.publisherErr = androidpublisher.NewService(...)
-  })
-  return c.publisherSvc, c.publisherErr
-}
-
-// Retry with exponential backoff
-func (c *Client) DoWithRetry(ctx context.Context, fn func() error) error
-```
-
-### CLI Command Pattern
+### CLI Commands
 1. Define `cobra.Command` with `Use`, `Short`, `Long`, `RunE`
-2. Add flags specific to the command
-3. `RunE` calls a method on the CLI struct (e.g., `c.authStatus(ctx)`)
-4. Method implementation:
-   - Parse/validate inputs
-   - Call API via `c.apiClient`
-   - Handle errors with structured error types
-   - Return `output.Result` via `c.output.Write(result)`
+2. `RunE` calls handler method on CLI struct
+3. Return `output.Result` via `c.output.Write()`
 
-### Error Response Structure
-All CLI commands return `output.Result` with:
-- `data`: Response payload
-- `error`: Structured error with code, message, hint, details
-- `meta`: No-op flag, durationMs, services list, warnings
+### Output Structure
+```json
+{"data": {...}, "error": {...}, "meta": {"durationMs": 150, "services": [...]}}
+```
 
 ### Exit Codes
-```go
-const (
-  ExitSuccess = 0
-  ExitGeneralError = 1
-  ExitAuthFailure = 2
-  ExitPermissionDenied = 3
-  ExitValidationError = 4
-  ExitRateLimited = 5
-  ExitNetworkError = 6
-  ExitNotFound = 7
-  ExitConflict = 8
-)
-```
+0=Success, 1=API, 2=Auth, 3=Permission, 4=Validation, 5=RateLimit, 6=Network, 7=NotFound, 8=Conflict
+
+---
 
 ## Project Structure
 
-- `cmd/gpd/`: Entry point (minimal, calls `cli.New().Execute()`)
-- `internal/api/`: Unified API client wrapper for Google Play APIs
-- `internal/auth/`: Authentication manager (service accounts, OAuth, credential sources)
-- `internal/cli/`: Cobra-based command definitions (32 command files)
-- `internal/edits/`: Edit transaction lifecycle with file locking and idempotency
-- `internal/errors/`: Centralized error types with exit codes
-- `internal/output/`: Standardized JSON envelope structure
-- `internal/storage/`: Platform-specific secure credential storage
-- `internal/config/`: Configuration file management
-- `internal/logging/`: PII-redacting logger
+```
+cmd/gpd/           # Entry point
+internal/
+  api/             # Google Play API client (lazy init, retry)
+  auth/            # Service account, OAuth, ADC
+  cli/             # 41 command files (Cobra)
+  edits/           # Edit transaction lifecycle + file locking
+  errors/          # Structured errors + exit codes
+  output/          # JSON envelope
+  storage/         # Platform keychain (Keychain/Secret Service)
+  config/          # Config file management
+  logging/         # PII redaction
+docs/examples/     # Workflow guides
+```
+
+---
+
+## Key Packages
+
+| Package | Purpose |
+|---------|---------|
+| `internal/api` | API client, lazy init, retry |
+| `internal/auth` | Multi-source auth |
+| `internal/cli` | All CLI commands |
+| `internal/edits` | Transactional edits |
+| `internal/errors` | Structured errors |
+| `internal/output` | JSON envelope |
+| `internal/storage` | Secure credential storage |
+
+---
 
 ## Important Notes
 
 - Go version: 1.24.0
-- Never commit unless explicitly requested
-- AI-agent friendly: JSON-first output, predictable exit codes, explicit flags
-- Credentials stored in platform keychains (Keychain/Secret Service/Credential Manager)
-- PII automatically redacted from logs
-- Service account keys never stored in config files
+- **Never commit unless explicitly requested**
+- JSON-first output, predictable exit codes
+- Credentials in platform keychains only
+- PII auto-redacted from logs
+
+---
+
+## Example Workflows
+
+| Guide | Description |
+|-------|-------------|
+| [edit-workflow.md](./docs/examples/edit-workflow.md) | Edit transactions |
+| [subscription-management.md](./docs/examples/subscription-management.md) | Monetization |
+| [ci-cd-integration.md](./docs/examples/ci-cd-integration.md) | CI/CD pipelines |
+| [error-debugging.md](./docs/examples/error-debugging.md) | Android Vitals |
+
+---
+
+## Common Commands
+
+```bash
+gpd auth status                    # Check auth
+gpd auth check --package <pkg>     # Validate permissions
+gpd publish upload <file> --package <pkg>
+gpd publish edit create --package <pkg>
+gpd publish release --package <pkg> --track internal
+gpd reviews list --package <pkg> --min-rating 1
+gpd config doctor                  # Diagnose issues
+```

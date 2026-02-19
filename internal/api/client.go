@@ -5,9 +5,7 @@ import (
 	"context"
 	crand "crypto/rand"
 	"encoding/binary"
-	"fmt"
 	"net/http"
-	"os"
 	"strconv"
 	"sync"
 	"time"
@@ -21,6 +19,8 @@ import (
 	"google.golang.org/api/playcustomapp/v1"
 	playdeveloperreporting "google.golang.org/api/playdeveloperreporting/v1beta1"
 	"google.golang.org/api/playintegrity/v1"
+
+	"github.com/dl-alexandre/gpd/internal/logging"
 )
 
 type RetryConfig struct {
@@ -38,6 +38,12 @@ func DefaultRetryConfig() RetryConfig {
 }
 
 type Client struct {
+	ctx context.Context
+	// ctx is stored at creation time and used for lazy service initialization.
+	// It is NOT used for per-request context propagation - individual API calls
+	// receive their context from the caller. If the caller's context is cancelled
+	// before the first call to a service method, initialization will fail.
+
 	httpClient  *http.Client
 	timeout     time.Duration
 	retryConfig RetryConfig
@@ -102,6 +108,7 @@ func WithMaxRetryAttempts(n int) Option {
 
 func NewClient(ctx context.Context, tokenSource oauth2.TokenSource, opts ...Option) (*Client, error) {
 	c := &Client{
+		ctx:         ctx,
 		timeout:     30 * time.Second,
 		semaphore:   make(chan struct{}, DefaultConcurrentCalls),
 		retryConfig: DefaultRetryConfig(),
@@ -132,7 +139,7 @@ func NewClient(ctx context.Context, tokenSource oauth2.TokenSource, opts ...Opti
 func (c *Client) AndroidPublisher() (*androidpublisher.Service, error) {
 	c.publisherOnce.Do(func() {
 		c.publisherSvc, c.publisherErr = androidpublisher.NewService(
-			context.Background(),
+			c.ctx,
 			option.WithHTTPClient(c.httpClient),
 		)
 	})
@@ -143,7 +150,7 @@ func (c *Client) AndroidPublisher() (*androidpublisher.Service, error) {
 func (c *Client) PlayReporting() (*playdeveloperreporting.Service, error) {
 	c.reportingOnce.Do(func() {
 		c.reportingSvc, c.reportingErr = playdeveloperreporting.NewService(
-			context.Background(),
+			c.ctx,
 			option.WithHTTPClient(c.httpClient),
 		)
 	})
@@ -154,7 +161,7 @@ func (c *Client) PlayReporting() (*playdeveloperreporting.Service, error) {
 func (c *Client) GamesManagement() (*gamesmanagement.Service, error) {
 	c.gamesManagementOnce.Do(func() {
 		c.gamesManagementSvc, c.gamesManagementErr = gamesmanagement.NewService(
-			context.Background(),
+			c.ctx,
 			option.WithHTTPClient(c.httpClient),
 		)
 	})
@@ -165,7 +172,7 @@ func (c *Client) GamesManagement() (*gamesmanagement.Service, error) {
 func (c *Client) Games() (*games.Service, error) {
 	c.gamesOnce.Do(func() {
 		c.gamesSvc, c.gamesErr = games.NewService(
-			context.Background(),
+			c.ctx,
 			option.WithHTTPClient(c.httpClient),
 		)
 	})
@@ -176,7 +183,7 @@ func (c *Client) Games() (*games.Service, error) {
 func (c *Client) PlayIntegrity() (*playintegrity.Service, error) {
 	c.playIntegrityOnce.Do(func() {
 		c.playIntegritySvc, c.playIntegrityErr = playintegrity.NewService(
-			context.Background(),
+			c.ctx,
 			option.WithHTTPClient(c.httpClient),
 		)
 	})
@@ -187,7 +194,7 @@ func (c *Client) PlayIntegrity() (*playintegrity.Service, error) {
 func (c *Client) PlayCustomApp() (*playcustomapp.Service, error) {
 	c.customAppOnce.Do(func() {
 		c.customAppSvc, c.customAppErr = playcustomapp.NewService(
-			context.Background(),
+			c.ctx,
 			option.WithHTTPClient(c.httpClient),
 		)
 	})
@@ -257,7 +264,12 @@ func (c *Client) DoWithRetry(ctx context.Context, fn func() error) error {
 		}
 
 		delay := c.calculateDelay(attempt, lastErr)
-		fmt.Fprintf(os.Stderr, "Retrying request (attempt %d/%d) after %v due to: %v\n", attempt+2, c.retryConfig.MaxAttempts, delay, lastErr)
+		logging.Warn("Retrying request",
+			logging.Int("attempt", attempt+2),
+			logging.Int("maxAttempts", c.retryConfig.MaxAttempts),
+			logging.Duration("delay", delay),
+			logging.Err(lastErr),
+		)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()

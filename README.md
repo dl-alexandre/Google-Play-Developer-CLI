@@ -3,19 +3,11 @@
 A fast, lightweight command-line interface for the Google Play Developer Console. The Google Play equivalent to the App Store Connect CLI.
 
 [![CI](https://github.com/dl-alexandre/gpd/actions/workflows/ci.yml/badge.svg)](https://github.com/dl-alexandre/gpd/actions/workflows/ci.yml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/dl-alexandre/gpd)](https://goreportcard.com/report/github.com/dl-alexandre/gpd)
+[![Go Version](https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat&logo=go)](https://go.dev/)
+[![Release](https://img.shields.io/github/v/release/dl-alexandre/gpd)](https://github.com/dl-alexandre/gpd/releases/latest)
+[![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Linux%20%7C%20Windows-blue)](#)
+[![Downloads](https://img.shields.io/github/downloads/dl-alexandre/gpd/total)](https://github.com/dl-alexandre/gpd/releases)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-
-## Test Coverage
-
-- Current statement coverage: 31.5% (from `coverage.out`)
-- Lowest coverage areas:
-  - `internal/cli` (~22%)
-  - `cmd/gpd` (~50%)
-  - `internal/edits` (~64%)
-  - `internal/migrate/fastlane` (~82%)
-  - `internal/api` (~89%)
-- Gaps to fill next: CLI command handlers, edit lock/content flows, API client edge conditions
 
 ## Features
 
@@ -26,6 +18,13 @@ A fast, lightweight command-line interface for the Google Play Developer Console
 - **Comprehensive**: Full API coverage for publishing, reviews, analytics, and monetization
 
 ## Installation
+
+### Quick Install
+
+```bash
+# One-liner for macOS/Linux
+brew install gpd
+```
 
 ### Homebrew (macOS/Linux)
 
@@ -109,12 +108,16 @@ gpd reviews list --package com.example.app --min-rating 1 --max-rating 3
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--package` | App package name | - |
-| `--output` | Output format: json, table, markdown | json |
+| `--output` | Output format: json, table, markdown, csv (analytics/vitals only) | json |
 | `--pretty` | Pretty print JSON output | false |
 | `--timeout` | Network timeout | 30s |
 | `--key` | Service account key file path | - |
 | `--quiet` | Suppress stderr except errors | false |
 | `--verbose` | Verbose output | false |
+| `--profile` | Authentication profile name | - |
+| `--store-tokens` | Token storage: auto, never, secure | auto |
+| `--fields` | JSON field projection (comma-separated paths) | - |
+| `-v, --version` | Print version information | false |
 
 ### Command Namespaces
 
@@ -272,6 +275,111 @@ gpd monetization products create --package ... --product-id sku123 --type manage
 
 # List subscriptions (read-only)
 gpd monetization subscriptions list --package ...
+
+# Manage offers
+gpd monetization offers list --package ... --subscription-id sub123
+gpd monetization offers get sub123 offer123 --package ...
+
+# Manage base plans
+gpd monetization baseplans list --package ... --subscription-id sub123
+gpd monetization baseplans activate sub123 base-plan-id --package ...
+gpd monetization baseplans deactivate sub123 base-plan-id --package ...
+```
+
+#### `gpd customapp` - Custom App Publishing
+
+```bash
+# Create a custom app
+gpd customapp create --name "My App" --title "My App Title" --category GAMES
+```
+
+#### `gpd games` - Play Games Services
+
+```bash
+# Manage achievements
+gpd games achievements list --package ...
+gpd games achievements get achievement-id --package ...
+
+# Manage events
+gpd games events list --package ...
+gpd games events get event-id --package ...
+
+# Manage scores (leaderboards)
+gpd games scores list --package ... --leaderboard-id leaderboard-id
+
+# Manage player visibility
+gpd games players get --player-id player123
+gpd games players update --player-id player123 --visibility VISIBLE
+
+# Manage applications
+gpd games applications list
+gpd games applications get application-id
+
+# View capabilities
+gpd games capabilities
+```
+
+#### `gpd grouping` - Play Grouping API
+
+```bash
+# Generate Play Grouping API tokens
+gpd grouping token --package ...
+
+# Generate Recall tokens
+gpd grouping token-recall --package ...
+```
+
+#### `gpd integrity` - Play Integrity API
+
+```bash
+# Decode a Play Integrity token
+gpd integrity decode --token <integrity-token>
+```
+
+#### `gpd migrate` - Metadata Migration
+
+```bash
+# Migrate fastlane supply format
+gpd migrate fastlane /path/to/metadata --package ...
+```
+
+#### `gpd permissions` - Permissions Management
+
+```bash
+# Manage developer account users
+gpd permissions users list
+gpd permissions users get user123
+gpd permissions users invite --email user@example.com --role viewer
+
+# Manage app-level permission grants
+gpd permissions grants list --package ...
+gpd permissions grants get grant123 --package ...
+gpd permissions grants create --package ... --user user@example.com --permission release
+
+# View capabilities
+gpd permissions capabilities
+```
+
+#### `gpd recovery` - App Recovery
+
+```bash
+# List recovery actions
+gpd recovery list --package ...
+
+# Create a recovery action
+gpd recovery create --package ... --region us --version-code 123
+
+# Deploy a recovery action
+gpd recovery deploy action123 --package ... --confirm
+
+# Cancel a recovery action
+gpd recovery cancel action123 --package ... --confirm
+
+# Add targeting to a recovery action
+gpd recovery add-targeting action123 --package ... --country us
+
+# View capabilities
+gpd recovery capabilities
 ```
 
 ## Output Format
@@ -369,7 +477,14 @@ Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for gui
 
 ## License
 
-Apache License 2.0 - see [LICENSE](LICENSE) for details.
+MIT License - see [LICENSE](LICENSE) for details.
+
+## Support
+
+If you find gpd useful, please consider:
+- Starring the [GitHub repository](https://github.com/dl-alexandre/gpd)
+- Contributing improvements
+- Reporting bugs
 
 ## Related Projects
 

@@ -3,10 +3,12 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"unicode"
 )
 
 // Config represents the gpd configuration.
@@ -27,6 +29,77 @@ type TesterLimits struct {
 	Internal int `json:"internal"` // Default: 200
 	Alpha    int `json:"alpha"`    // Default: -1 (unlimited)
 	Beta     int `json:"beta"`     // Default: -1 (unlimited)
+}
+
+// ConfigValidationResult holds validation warnings and errors.
+type ConfigValidationResult struct {
+	Warnings []string
+	Errors   []string
+}
+
+func isValidPackageName(name string) bool {
+	if name == "" {
+		return false
+	}
+	if !unicode.IsLower(rune(name[0])) {
+		return false
+	}
+	for _, r := range name {
+		if !unicode.IsLower(r) && !unicode.IsDigit(r) && r != '_' && r != '.' {
+			return false
+		}
+	}
+	return true
+}
+
+// Validate checks the config for invalid values.
+func (c *Config) Validate() *ConfigValidationResult {
+	result := &ConfigValidationResult{}
+
+	if c.StoreTokens != "" && c.StoreTokens != "auto" && c.StoreTokens != "never" && c.StoreTokens != "secure" {
+		result.Warnings = append(result.Warnings, fmt.Sprintf("invalid storeTokens value %q, using default", c.StoreTokens))
+		c.StoreTokens = "auto"
+	}
+
+	validFormats := map[string]bool{"json": true, "table": true, "markdown": true, "csv": true}
+	if c.OutputFormat != "" && !validFormats[c.OutputFormat] {
+		result.Warnings = append(result.Warnings, fmt.Sprintf("invalid outputFormat %q, using default", c.OutputFormat))
+		c.OutputFormat = "json"
+	}
+
+	if c.TimeoutSeconds != 0 && (c.TimeoutSeconds < 5 || c.TimeoutSeconds > 300) {
+		result.Warnings = append(result.Warnings, fmt.Sprintf("timeoutSeconds %d out of range [5-300], using default", c.TimeoutSeconds))
+		c.TimeoutSeconds = 30
+	}
+
+	if c.TesterLimits != nil {
+		if c.TesterLimits.Internal < -1 {
+			result.Warnings = append(result.Warnings, "testerLimits.internal cannot be negative, using default")
+			c.TesterLimits.Internal = 200
+		}
+		if c.TesterLimits.Alpha < -1 {
+			result.Warnings = append(result.Warnings, "testerLimits.alpha cannot be negative, using default")
+			c.TesterLimits.Alpha = -1
+		}
+		if c.TesterLimits.Beta < -1 {
+			result.Warnings = append(result.Warnings, "testerLimits.beta cannot be negative, using default")
+			c.TesterLimits.Beta = -1
+		}
+	}
+
+	if c.ActiveProfile != "" {
+		for _, r := range c.ActiveProfile {
+			if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '-' && r != '_' {
+				result.Errors = append(result.Errors, fmt.Sprintf("activeProfile contains invalid character %q", string(r)))
+			}
+		}
+	}
+
+	if c.DefaultPackage != "" && !isValidPackageName(c.DefaultPackage) {
+		result.Warnings = append(result.Warnings, fmt.Sprintf("defaultPackage %q may be invalid", c.DefaultPackage))
+	}
+
+	return result
 }
 
 // DefaultTesterLimits returns the default tester limits.
@@ -121,24 +194,53 @@ func GetLegacyConfigDir() string {
 }
 
 // Load loads the configuration from the config file.
-func Load() (*Config, error) {
+// Returns loadWarn for parse errors (not for missing files), returns error only for validation failures.
+func Load() (cfg *Config, loadWarn error) {
 	paths := GetPaths()
 
-	// Try primary config location
-	cfg, err := loadFromFile(paths.ConfigFile)
-	if err == nil {
-		return cfg, nil
+	cfg, loadErr := loadFromFile(paths.ConfigFile)
+	if loadErr == nil {
+		validatedCfg, valErr := validateAndNormalize(cfg, paths.ConfigFile)
+		if valErr != nil {
+			return nil, valErr
+		}
+		return validatedCfg, nil
 	}
 
 	// Try legacy location
 	legacyConfig := filepath.Join(GetLegacyConfigDir(), "config.json")
-	cfg, err = loadFromFile(legacyConfig)
+	cfg, err := loadFromFile(legacyConfig)
 	if err == nil {
-		return cfg, nil
+		validatedCfg, valErr := validateAndNormalize(cfg, legacyConfig)
+		if valErr != nil {
+			return nil, valErr
+		}
+		return validatedCfg, nil
 	}
 
-	// Return default config
+	// Both configs failed - build warning for non-not-exist errors
+	var warnings []string
+	if !os.IsNotExist(loadErr) {
+		warnings = append(warnings, fmt.Sprintf("failed to load config from %s: %v", paths.ConfigFile, loadErr))
+	}
+	if !os.IsNotExist(err) {
+		warnings = append(warnings, fmt.Sprintf("failed to load config from %s: %v", legacyConfig, err))
+	}
+
+	if len(warnings) > 0 {
+		return DefaultConfig(), fmt.Errorf("%s", strings.Join(warnings, "; "))
+	}
+
 	return DefaultConfig(), nil
+}
+
+func validateAndNormalize(cfg *Config, source string) (*Config, error) {
+	validation := cfg.Validate()
+	if len(validation.Errors) > 0 {
+		return nil, fmt.Errorf("invalid config in %s: %s", source, strings.Join(validation.Errors, ", "))
+	}
+	// Warnings are handled by correcting the values in Validate()
+	return cfg, nil
 }
 
 func loadFromFile(path string) (*Config, error) {

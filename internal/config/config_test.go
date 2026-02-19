@@ -470,3 +470,110 @@ func TestInitProjectGitignoreError(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+func TestConfigValidate(t *testing.T) {
+	tests := []struct {
+		name       string
+		config     *Config
+		wantErrors int
+		wantWarn   int
+		check      func(t *testing.T, cfg *Config)
+	}{
+		{
+			name:       "valid config",
+			config:     &Config{OutputFormat: "json", StoreTokens: "auto", TimeoutSeconds: 30},
+			wantErrors: 0,
+			wantWarn:   0,
+			check:      func(t *testing.T, cfg *Config) {},
+		},
+		{
+			name:       "invalid storeTokens",
+			config:     &Config{StoreTokens: "invalid"},
+			wantErrors: 0,
+			wantWarn:   1,
+			check: func(t *testing.T, cfg *Config) {
+				if cfg.StoreTokens != "auto" {
+					t.Errorf("StoreTokens = %q, want auto", cfg.StoreTokens)
+				}
+			},
+		},
+		{
+			name:       "invalid outputFormat",
+			config:     &Config{OutputFormat: "invalid"},
+			wantErrors: 0,
+			wantWarn:   1,
+			check: func(t *testing.T, cfg *Config) {
+				if cfg.OutputFormat != "json" {
+					t.Errorf("OutputFormat = %q, want json", cfg.OutputFormat)
+				}
+			},
+		},
+		{
+			name:       "timeout out of range low",
+			config:     &Config{TimeoutSeconds: 2},
+			wantErrors: 0,
+			wantWarn:   1,
+			check: func(t *testing.T, cfg *Config) {
+				if cfg.TimeoutSeconds != 30 {
+					t.Errorf("TimeoutSeconds = %d, want 30", cfg.TimeoutSeconds)
+				}
+			},
+		},
+		{
+			name:       "timeout out of range high",
+			config:     &Config{TimeoutSeconds: 500},
+			wantErrors: 0,
+			wantWarn:   1,
+			check: func(t *testing.T, cfg *Config) {
+				if cfg.TimeoutSeconds != 30 {
+					t.Errorf("TimeoutSeconds = %d, want 30", cfg.TimeoutSeconds)
+				}
+			},
+		},
+		{
+			name:       "testerLimits negative internal",
+			config:     &Config{TesterLimits: &TesterLimits{Internal: -5}},
+			wantErrors: 0,
+			wantWarn:   1,
+			check: func(t *testing.T, cfg *Config) {
+				if cfg.TesterLimits.Internal != 200 {
+					t.Errorf("TesterLimits.Internal = %d, want 200", cfg.TesterLimits.Internal)
+				}
+			},
+		},
+		{
+			name:       "activeProfile invalid char",
+			config:     &Config{ActiveProfile: "test@profile"},
+			wantErrors: 1,
+			wantWarn:   0,
+			check:      func(t *testing.T, cfg *Config) {},
+		},
+		{
+			name:       "defaultPackage invalid start",
+			config:     &Config{DefaultPackage: "InvalidPackage"},
+			wantErrors: 0,
+			wantWarn:   1,
+			check:      func(t *testing.T, cfg *Config) {},
+		},
+		{
+			name:       "defaultPackage valid",
+			config:     &Config{DefaultPackage: "com.example.app"},
+			wantErrors: 0,
+			wantWarn:   0,
+			check:      func(t *testing.T, cfg *Config) {},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.config.Validate()
+			if len(result.Errors) != tt.wantErrors {
+				t.Errorf("Validate() errors = %d, want %d", len(result.Errors), tt.wantErrors)
+			}
+			if len(result.Warnings) != tt.wantWarn {
+				t.Errorf("Validate() warnings = %d, want %d", len(result.Warnings), tt.wantWarn)
+			}
+			tt.check(t, tt.config)
+		})
+	}
+}

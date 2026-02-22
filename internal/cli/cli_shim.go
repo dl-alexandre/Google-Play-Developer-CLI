@@ -8,12 +8,12 @@ import (
 	"os"
 	"time"
 
-	"github.com/dl-alexandre/gpd/internal/api"
+	"google.golang.org/api/androidpublisher/v3"
+
 	"github.com/dl-alexandre/gpd/internal/auth"
 	"github.com/dl-alexandre/gpd/internal/errors"
 	"github.com/dl-alexandre/gpd/internal/output"
 	"github.com/dl-alexandre/gpd/internal/storage"
-	"google.golang.org/api/androidpublisher/v3"
 )
 
 // CLI provides a shim for the old Cobra-based CLI to support Kong migration.
@@ -26,8 +26,6 @@ type CLI struct {
 	timeout      time.Duration
 	keyPath      string
 	authMgr      *auth.Manager
-	apiClient    *api.Client
-	outputMgr    *output.Manager
 	stdout       io.Writer
 	stderr       io.Writer
 }
@@ -66,13 +64,13 @@ func (c *CLI) getPublisherService(ctx context.Context) (*androidpublisher.Servic
 
 // Output outputs a result.
 func (c *CLI) Output(result *output.Result) error {
-	fmt.Fprintln(c.stdout, result)
+	_, _ = fmt.Fprintln(c.stdout, result)
 	return nil
 }
 
 // OutputError outputs an error.
 func (c *CLI) OutputError(err *errors.APIError) error {
-	fmt.Fprintf(c.stderr, "Error: %s\n", err.Message)
+	_, _ = fmt.Fprintf(c.stderr, "Error: %s\n", err.Message)
 	return err
 }
 

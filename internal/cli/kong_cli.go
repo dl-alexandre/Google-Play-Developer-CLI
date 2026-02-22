@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/alecthomas/kong"
+
 	"github.com/dl-alexandre/gpd/internal/errors"
 )
 

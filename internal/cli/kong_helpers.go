@@ -5,26 +5,17 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/olekukonko/tablewriter"
+
 	"github.com/dl-alexandre/gpd/internal/auth"
-	"github.com/dl-alexandre/gpd/internal/config"
 	"github.com/dl-alexandre/gpd/internal/output"
 	"github.com/dl-alexandre/gpd/internal/storage"
-	"github.com/olekukonko/tablewriter"
 )
 
 // newAuthManager creates a new auth manager instance.
 func newAuthManager() *auth.Manager {
 	secureStorage := storage.New()
 	return auth.NewManager(secureStorage)
-}
-
-// newConfig loads the configuration.
-func newConfig() *config.Config {
-	cfg, _ := config.Load()
-	if cfg == nil {
-		return config.DefaultConfig()
-	}
-	return cfg
 }
 
 // outputResult formats and outputs a result based on the format.
@@ -71,10 +62,10 @@ func outputTable(result *output.Result) error {
 	table.Header([]string{"Key", "Value"})
 
 	for key, value := range data {
-		table.Append([]string{key, fmt.Sprintf("%v", value)})
+		_ = table.Append([]string{key, fmt.Sprintf("%v", value)})
 	}
 
-	table.Render()
+	_ = table.Render()
 	return nil
 }
 

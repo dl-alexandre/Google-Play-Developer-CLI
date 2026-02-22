@@ -10,11 +10,12 @@ import (
 	"strings"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/dl-alexandre/gpd/internal/config"
 	"github.com/dl-alexandre/gpd/internal/errors"
 	"github.com/dl-alexandre/gpd/internal/output"
 	"github.com/dl-alexandre/gpd/internal/storage"
-	"gopkg.in/yaml.v3"
 )
 
 // Note: ConfigCmd is declared in kong_commands.go as a placeholder.

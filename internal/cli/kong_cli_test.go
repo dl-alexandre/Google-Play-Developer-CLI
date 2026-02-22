@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/alecthomas/kong"
+
 	"github.com/dl-alexandre/gpd/internal/errors"
 )
 
@@ -416,35 +417,35 @@ func TestGlobalsParsing(t *testing.T) {
 				return
 			}
 
-			if tt.wantPackage != "" && cli.Globals.Package != tt.wantPackage {
-				t.Errorf("Package = %v, want %v", cli.Globals.Package, tt.wantPackage)
+			if tt.wantPackage != "" && cli.Package != tt.wantPackage {
+				t.Errorf("Package = %v, want %v", cli.Package, tt.wantPackage)
 			}
-			if tt.wantOutput != "" && cli.Globals.Output != tt.wantOutput {
-				t.Errorf("Output = %v, want %v", cli.Globals.Output, tt.wantOutput)
+			if tt.wantOutput != "" && cli.Output != tt.wantOutput {
+				t.Errorf("Output = %v, want %v", cli.Output, tt.wantOutput)
 			}
-			if cli.Globals.Pretty != tt.wantPretty {
-				t.Errorf("Pretty = %v, want %v", cli.Globals.Pretty, tt.wantPretty)
+			if cli.Pretty != tt.wantPretty {
+				t.Errorf("Pretty = %v, want %v", cli.Pretty, tt.wantPretty)
 			}
-			if tt.wantTimeout != 0 && cli.Globals.Timeout != tt.wantTimeout {
-				t.Errorf("Timeout = %v, want %v", cli.Globals.Timeout, tt.wantTimeout)
+			if tt.wantTimeout != 0 && cli.Timeout != tt.wantTimeout {
+				t.Errorf("Timeout = %v, want %v", cli.Timeout, tt.wantTimeout)
 			}
-			if tt.wantStore != "" && cli.Globals.StoreTokens != tt.wantStore {
-				t.Errorf("StoreTokens = %v, want %v", cli.Globals.StoreTokens, tt.wantStore)
+			if tt.wantStore != "" && cli.StoreTokens != tt.wantStore {
+				t.Errorf("StoreTokens = %v, want %v", cli.StoreTokens, tt.wantStore)
 			}
-			if tt.wantFields != "" && cli.Globals.Fields != tt.wantFields {
-				t.Errorf("Fields = %v, want %v", cli.Globals.Fields, tt.wantFields)
+			if tt.wantFields != "" && cli.Fields != tt.wantFields {
+				t.Errorf("Fields = %v, want %v", cli.Fields, tt.wantFields)
 			}
-			if cli.Globals.Quiet != tt.wantQuiet {
-				t.Errorf("Quiet = %v, want %v", cli.Globals.Quiet, tt.wantQuiet)
+			if cli.Quiet != tt.wantQuiet {
+				t.Errorf("Quiet = %v, want %v", cli.Quiet, tt.wantQuiet)
 			}
-			if cli.Globals.Verbose != tt.wantVerbose {
-				t.Errorf("Verbose = %v, want %v", cli.Globals.Verbose, tt.wantVerbose)
+			if cli.Verbose != tt.wantVerbose {
+				t.Errorf("Verbose = %v, want %v", cli.Verbose, tt.wantVerbose)
 			}
-			if tt.wantKeyPath != "" && cli.Globals.KeyPath != tt.wantKeyPath {
-				t.Errorf("KeyPath = %v, want %v", cli.Globals.KeyPath, tt.wantKeyPath)
+			if tt.wantKeyPath != "" && cli.KeyPath != tt.wantKeyPath {
+				t.Errorf("KeyPath = %v, want %v", cli.KeyPath, tt.wantKeyPath)
 			}
-			if tt.wantProfile != "" && cli.Globals.Profile != tt.wantProfile {
-				t.Errorf("Profile = %v, want %v", cli.Globals.Profile, tt.wantProfile)
+			if tt.wantProfile != "" && cli.Profile != tt.wantProfile {
+				t.Errorf("Profile = %v, want %v", cli.Profile, tt.wantProfile)
 			}
 		})
 	}

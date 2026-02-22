@@ -151,8 +151,8 @@ func TestCLIOutput(t *testing.T) {
 		t.Errorf("Output() error = %v, want nil", err)
 	}
 
-	output := stdout.String()
-	if output == "" {
+	got := stdout.String()
+	if got == "" {
 		t.Error("Output() should write to stdout")
 	}
 }
@@ -186,9 +186,9 @@ func TestCLIOutputError(t *testing.T) {
 		t.Error("OutputError() should return the same error")
 	}
 
-	output := stderr.String()
-	if !strings.Contains(output, "Error: test error") {
-		t.Errorf("stderr = %q, should contain 'Error: test error'", output)
+	got := stderr.String()
+	if !strings.Contains(got, "Error: test error") {
+		t.Errorf("stderr = %q, should contain 'Error: test error'", got)
 	}
 }
 
@@ -250,7 +250,9 @@ func TestPublishStubMethods(t *testing.T) {
 		fn   func() error
 	}{
 		{"publishUpload", func() error { return cli.publishUpload(ctx, "file.apk", obbOptions{}, "edit1", false, false) }},
-		{"publishRelease", func() error { return cli.publishRelease(ctx, "internal", "v1.0", "draft", []string{"1"}, []string{}, 0, "", "edit1", false, false, false, "") }},
+		{"publishRelease", func() error {
+			return cli.publishRelease(ctx, "internal", "v1.0", "draft", []string{"1"}, []string{}, 0, "", "edit1", false, false, false, "")
+		}},
 		{"publishRollout", func() error { return cli.publishRollout(ctx, "internal", 50.0, "edit1", false, false) }},
 		{"publishPromote", func() error { return cli.publishPromote(ctx, "internal", "alpha", 100.0, "edit1", false, false) }},
 		{"publishHalt", func() error { return cli.publishHalt(ctx, "internal", "edit1", false, false) }},
@@ -258,30 +260,48 @@ func TestPublishStubMethods(t *testing.T) {
 		{"publishStatus", func() error { return cli.publishStatus(ctx, "internal") }},
 		{"publishTracks", func() error { return cli.publishTracks(ctx) }},
 		{"publishCapabilities", func() error { return cli.publishCapabilities(ctx) }},
-		{"publishListingUpdate", func() error { return cli.publishListingUpdate(ctx, "en", "Title", "Short", "Full", "edit1", false, false) }},
+		{"publishListingUpdate", func() error {
+			return cli.publishListingUpdate(ctx, "en", "Title", "Short", "Full", "edit1", false, false)
+		}},
 		{"publishListingGet", func() error { return cli.publishListingGet(ctx, "en") }},
 		{"publishListingDelete", func() error { return cli.publishListingDelete(ctx, "en", "edit1", false, false, false) }},
 		{"publishListingDeleteAll", func() error { return cli.publishListingDeleteAll(ctx, "edit1", false, false, false) }},
 		{"publishDetailsGet", func() error { return cli.publishDetailsGet(ctx) }},
-		{"publishDetailsUpdate", func() error { return cli.publishDetailsUpdate(ctx, "test@example.com", "123", "http://example.com", "en", "edit1", false, false) }},
-		{"publishDetailsPatch", func() error { return cli.publishDetailsPatch(ctx, "test@example.com", "123", "http://example.com", "en", "email", "edit1", false, false) }},
-		{"publishImagesUpload", func() error { return cli.publishImagesUpload(ctx, "icon", "file.png", "en", false, "edit1", false, false) }},
+		{"publishDetailsUpdate", func() error {
+			return cli.publishDetailsUpdate(ctx, "test@example.com", "123", "http://example.com", "en", "edit1", false, false)
+		}},
+		{"publishDetailsPatch", func() error {
+			return cli.publishDetailsPatch(ctx, "test@example.com", "123", "http://example.com", "en", "email", "edit1", false, false)
+		}},
+		{"publishImagesUpload", func() error {
+			return cli.publishImagesUpload(ctx, "icon", "file.png", "en", false, "edit1", false, false)
+		}},
 		{"publishImagesList", func() error { return cli.publishImagesList(ctx, "icon", "en", "edit1") }},
 		{"publishImagesDelete", func() error { return cli.publishImagesDelete(ctx, "icon", "img1", "en", "edit1", false, false) }},
 		{"publishImagesDeleteAll", func() error { return cli.publishImagesDeleteAll(ctx, "icon", "en", "edit1", false, false) }},
 		{"publishAssetsUpload", func() error { return cli.publishAssetsUpload(ctx, "asset", "file", "edit1", false) }},
 		{"publishAssetsSpec", func() error { return cli.publishAssetsSpec(ctx, "asset") }},
-		{"publishDeobfuscationUpload", func() error { return cli.publishDeobfuscationUpload(ctx, 1, "mapping.txt", "proguard", false, "edit1", false) }},
+		{"publishDeobfuscationUpload", func() error {
+			return cli.publishDeobfuscationUpload(ctx, 1, "mapping.txt", "proguard", false, "edit1", false)
+		}},
 		{"publishTestersList", func() error { return cli.publishTestersList(ctx, "internal") }},
-		{"publishTestersAdd", func() error { return cli.publishTestersAdd(ctx, "internal", []string{"test@example.com"}, "edit1", false) }},
-		{"publishTestersRemove", func() error { return cli.publishTestersRemove(ctx, "internal", []string{"test@example.com"}, "edit1", false) }},
+		{"publishTestersAdd", func() error {
+			return cli.publishTestersAdd(ctx, "internal", []string{"test@example.com"}, "edit1", false)
+		}},
+		{"publishTestersRemove", func() error {
+			return cli.publishTestersRemove(ctx, "internal", []string{"test@example.com"}, "edit1", false)
+		}},
 		{"publishInternalShareUpload", func() error { return cli.publishInternalShareUpload(ctx, "file.apk", time.Hour) }},
 		{"publishBuildsList", func() error { return cli.publishBuildsList(ctx, "apk", 10, "", false) }},
 		{"publishBuildsGet", func() error { return cli.publishBuildsGet(ctx, 1, "apk") }},
 		{"publishBuildsExpire", func() error { return cli.publishBuildsExpire(ctx, 1, "apk", false) }},
 		{"publishBuildsExpireAll", func() error { return cli.publishBuildsExpireAll(ctx, "apk", false) }},
-		{"publishBetaGroupsAdd", func() error { return cli.publishBetaGroupsAdd(ctx, "group1", []string{"test@example.com"}, "edit1", false) }},
-		{"publishBetaGroupsRemove", func() error { return cli.publishBetaGroupsRemove(ctx, "group1", []string{"test@example.com"}, "edit1", false) }},
+		{"publishBetaGroupsAdd", func() error {
+			return cli.publishBetaGroupsAdd(ctx, "group1", []string{"test@example.com"}, "edit1", false)
+		}},
+		{"publishBetaGroupsRemove", func() error {
+			return cli.publishBetaGroupsRemove(ctx, "group1", []string{"test@example.com"}, "edit1", false)
+		}},
 		{"publishBetaGroupsList", func() error { return cli.publishBetaGroupsList(ctx, "group1") }},
 	}
 
@@ -316,19 +336,39 @@ func TestVitalsStubMethods(t *testing.T) {
 		name string
 		fn   func() error
 	}{
-		{"vitalsCrashes", func() error { return cli.vitalsCrashes(ctx, "2024-01-01", "2024-01-31", []string{}, "json", 10, "", false) }},
-		{"vitalsANRs", func() error { return cli.vitalsANRs(ctx, "2024-01-01", "2024-01-31", []string{}, "json", 10, "", false) }},
-		{"vitalsExcessiveWakeups", func() error { return cli.vitalsExcessiveWakeups(ctx, "2024-01-01", "2024-01-31", []string{}, "json", 10, "", false) }},
-		{"vitalsLmkRate", func() error { return cli.vitalsLmkRate(ctx, "2024-01-01", "2024-01-31", []string{}, "json", 10, "", false) }},
-		{"vitalsSlowRendering", func() error { return cli.vitalsSlowRendering(ctx, "2024-01-01", "2024-01-31", []string{}, "json", 10, "", false) }},
-		{"vitalsSlowStart", func() error { return cli.vitalsSlowStart(ctx, "2024-01-01", "2024-01-31", []string{}, "json", 10, "", false) }},
-		{"vitalsStuckWakelocks", func() error { return cli.vitalsStuckWakelocks(ctx, "2024-01-01", "2024-01-31", []string{}, "json", 10, "", false) }},
+		{"vitalsCrashes", func() error {
+			return cli.vitalsCrashes(ctx, "2024-01-01", "2024-01-31", []string{}, "json", 10, "", false)
+		}},
+		{"vitalsANRs", func() error {
+			return cli.vitalsANRs(ctx, "2024-01-01", "2024-01-31", []string{}, "json", 10, "", false)
+		}},
+		{"vitalsExcessiveWakeups", func() error {
+			return cli.vitalsExcessiveWakeups(ctx, "2024-01-01", "2024-01-31", []string{}, "json", 10, "", false)
+		}},
+		{"vitalsLmkRate", func() error {
+			return cli.vitalsLmkRate(ctx, "2024-01-01", "2024-01-31", []string{}, "json", 10, "", false)
+		}},
+		{"vitalsSlowRendering", func() error {
+			return cli.vitalsSlowRendering(ctx, "2024-01-01", "2024-01-31", []string{}, "json", 10, "", false)
+		}},
+		{"vitalsSlowStart", func() error {
+			return cli.vitalsSlowStart(ctx, "2024-01-01", "2024-01-31", []string{}, "json", 10, "", false)
+		}},
+		{"vitalsStuckWakelocks", func() error {
+			return cli.vitalsStuckWakelocks(ctx, "2024-01-01", "2024-01-31", []string{}, "json", 10, "", false)
+		}},
 		{"vitalsErrorsIssuesSearch", func() error { return cli.vitalsErrorsIssuesSearch(ctx, "crash", "cluster1", 10, "", false) }},
 		{"vitalsErrorsReportsSearch", func() error { return cli.vitalsErrorsReportsSearch(ctx, "crash", "cluster1", "1", 10, "", false) }},
 		{"vitalsErrorsCountsGet", func() error { return cli.vitalsErrorsCountsGet(ctx, "metrics", "count") }},
-		{"vitalsErrorsCountsQuery", func() error { return cli.vitalsErrorsCountsQuery(ctx, "metrics", []string{"count"}, "day", map[string]string{}) }},
-		{"vitalsAnomaliesList", func() error { return cli.vitalsAnomaliesList(ctx, "crash", time.Now().Add(-7*24*time.Hour), time.Now()) }},
-		{"vitalsQuery", func() error { return cli.vitalsQuery(ctx, "crash", "2024-01-01", "2024-01-31", []string{}, "json", 10, "", false) }},
+		{"vitalsErrorsCountsQuery", func() error {
+			return cli.vitalsErrorsCountsQuery(ctx, "metrics", []string{"count"}, "day", map[string]string{})
+		}},
+		{"vitalsAnomaliesList", func() error {
+			return cli.vitalsAnomaliesList(ctx, "crash", time.Now().Add(-7*24*time.Hour), time.Now())
+		}},
+		{"vitalsQuery", func() error {
+			return cli.vitalsQuery(ctx, "crash", "2024-01-01", "2024-01-31", []string{}, "json", 10, "", false)
+		}},
 		{"vitalsCapabilities", func() error { return cli.vitalsCapabilities(ctx) }},
 	}
 
@@ -437,7 +477,9 @@ func TestAnalyticsStubMethods(t *testing.T) {
 		name string
 		fn   func() error
 	}{
-		{"analyticsQuery", func() error { return cli.analyticsQuery(ctx, "2024-01-01", "2024-01-31", []string{"metric"}, []string{}, "json", 10, "", false) }},
+		{"analyticsQuery", func() error {
+			return cli.analyticsQuery(ctx, "2024-01-01", "2024-01-31", []string{"metric"}, []string{}, "json", 10, "", false)
+		}},
 		{"analyticsCapabilities", func() error { return cli.analyticsCapabilities(ctx) }},
 	}
 
@@ -604,11 +646,17 @@ func TestStubMethodErrorMessages(t *testing.T) {
 		expectedMessage string
 	}{
 		{"publishUpload", func() error { return cli.publishUpload(ctx, "file.apk", obbOptions{}, "edit1", false, false) }, "publish upload"},
-		{"publishRelease", func() error { return cli.publishRelease(ctx, "internal", "v1.0", "draft", []string{"1"}, []string{}, 0, "", "edit1", false, false, false, "") }, "publish release"},
-		{"vitalsCrashes", func() error { return cli.vitalsCrashes(ctx, "2024-01-01", "2024-01-31", []string{}, "json", 10, "", false) }, "vitals crashes"},
+		{"publishRelease", func() error {
+			return cli.publishRelease(ctx, "internal", "v1.0", "draft", []string{"1"}, []string{}, 0, "", "edit1", false, false, false, "")
+		}, "publish release"},
+		{"vitalsCrashes", func() error {
+			return cli.vitalsCrashes(ctx, "2024-01-01", "2024-01-31", []string{}, "json", 10, "", false)
+		}, "vitals crashes"},
 		{"gamesAchievementsReset", func() error { return cli.gamesAchievementsReset(ctx, "achievement1") }, "games achievements reset"},
 		{"reviewsList", func() error { return cli.reviewsList(ctx, reviewsListParams{}) }, "reviews list"},
-		{"analyticsQuery", func() error { return cli.analyticsQuery(ctx, "2024-01-01", "2024-01-31", []string{"metric"}, []string{}, "json", 10, "", false) }, "analytics query"},
+		{"analyticsQuery", func() error {
+			return cli.analyticsQuery(ctx, "2024-01-01", "2024-01-31", []string{"metric"}, []string{}, "json", 10, "", false)
+		}, "analytics query"},
 		{"appsList", func() error { return cli.appsList(ctx, 10, "", false) }, "apps list"},
 	}
 
@@ -655,14 +703,14 @@ func TestCLICustomWriters(t *testing.T) {
 	}
 
 	result := output.NewResult(map[string]interface{}{"key": "value"})
-	cli.Output(result)
+	_ = cli.Output(result)
 
 	if stdout.Len() == 0 {
 		t.Error("stdout should have content after Output()")
 	}
 
 	apiErr := errors.NewAPIError(errors.CodeValidationError, "test")
-	cli.OutputError(apiErr)
+	_ = cli.OutputError(apiErr)
 
 	if stderr.Len() == 0 {
 		t.Error("stderr should have content after OutputError()")

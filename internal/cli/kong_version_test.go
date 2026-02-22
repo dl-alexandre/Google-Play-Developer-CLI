@@ -45,7 +45,7 @@ func TestVersionCmd_Run_OutputFormat(t *testing.T) {
 
 	err := cmd.Run(globals)
 
-	w.Close()
+	_ = w.Close()
 	os.Stdout = oldStdout
 
 	if err != nil {
@@ -53,7 +53,7 @@ func TestVersionCmd_Run_OutputFormat(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+	_, _ = io.Copy(&buf, r)
 	output := strings.TrimSpace(buf.String())
 
 	expected := fmt.Sprintf("gpd %s (%s) built %s", version.Version, version.GitCommit, version.BuildTime)
@@ -128,7 +128,7 @@ func TestVersionCmd_Run_IgnoresGlobals(t *testing.T) {
 
 			err := cmd.Run(tc.globals)
 
-			w.Close()
+			_ = w.Close()
 			os.Stdout = oldStdout
 
 			if err != nil {
@@ -136,7 +136,7 @@ func TestVersionCmd_Run_IgnoresGlobals(t *testing.T) {
 			}
 
 			var buf bytes.Buffer
-			io.Copy(&buf, r)
+			_, _ = io.Copy(&buf, r)
 			output := buf.String()
 
 			if !strings.Contains(output, "gpd") {
@@ -149,10 +149,8 @@ func TestVersionCmd_Run_IgnoresGlobals(t *testing.T) {
 func TestKongCLI_VersionCmdAccessible(t *testing.T) {
 	cli := KongCLI{}
 
-	if _, ok := interface{}(cli.Version).(VersionCmd); !ok {
-		// The Version field exists and is of type VersionCmd
-		// Type assertion above will fail at compile time if types don't match
-	}
+	// Verify Version field is of correct type via compile-time type assertion
+	_ = cli.Version
 
 	var versionField interface{} = cli.Version
 	if _, ok := versionField.(VersionCmd); !ok {
@@ -170,7 +168,7 @@ func TestVersionCmd_Run_OutputContainsExpectedFields(t *testing.T) {
 
 	err := cmd.Run(globals)
 
-	w.Close()
+	_ = w.Close()
 	os.Stdout = oldStdout
 
 	if err != nil {
@@ -178,7 +176,7 @@ func TestVersionCmd_Run_OutputContainsExpectedFields(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+	_, _ = io.Copy(&buf, r)
 	output := buf.String()
 
 	if !strings.Contains(output, "gpd") {
@@ -204,7 +202,7 @@ func TestVersionCmd_Run_ProducesNonEmptyOutput(t *testing.T) {
 
 	err := cmd.Run(globals)
 
-	w.Close()
+	_ = w.Close()
 	os.Stdout = oldStdout
 
 	if err != nil {
@@ -212,7 +210,7 @@ func TestVersionCmd_Run_ProducesNonEmptyOutput(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+	_, _ = io.Copy(&buf, r)
 	output := strings.TrimSpace(buf.String())
 
 	if output == "" {
@@ -240,7 +238,7 @@ func TestVersionCmd_Run_MultipleCalls(t *testing.T) {
 
 		err := cmd.Run(globals)
 
-		w.Close()
+		_ = w.Close()
 		os.Stdout = oldStdout
 
 		if err != nil {
@@ -249,7 +247,7 @@ func TestVersionCmd_Run_MultipleCalls(t *testing.T) {
 		}
 
 		var buf bytes.Buffer
-		io.Copy(&buf, r)
+		_, _ = io.Copy(&buf, r)
 		output := strings.TrimSpace(buf.String())
 
 		if !strings.HasPrefix(output, "gpd ") {
@@ -267,7 +265,7 @@ func TestVersionCmd_Run_WithNilGlobals(t *testing.T) {
 
 	err := cmd.Run(nil)
 
-	w.Close()
+	_ = w.Close()
 	os.Stdout = oldStdout
 
 	if err != nil {
@@ -275,7 +273,7 @@ func TestVersionCmd_Run_WithNilGlobals(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+	_, _ = io.Copy(&buf, r)
 	output := strings.TrimSpace(buf.String())
 
 	if !strings.HasPrefix(output, "gpd ") {

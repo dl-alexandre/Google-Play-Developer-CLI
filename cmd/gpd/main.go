@@ -12,6 +12,6 @@ func main() {
 }
 
 func run() int {
-	app := cli.New()
-	return app.Execute()
+	// Use Kong-based CLI
+	return cli.RunKongCLI()
 }

@@ -14,25 +14,11 @@ import (
 	"time"
 
 	"github.com/alecthomas/kong"
-	"golang.org/x/oauth2"
 )
 
 // ============================================================================
 // Test Helpers and Mocks
 // ============================================================================
-
-// mockTokenSource provides a mock OAuth2 token source for testing.
-type mockTokenSource struct {
-	token *oauth2.Token
-	err   error
-}
-
-func (m *mockTokenSource) Token() (*oauth2.Token, error) {
-	if m.err != nil {
-		return nil, m.err
-	}
-	return m.token, nil
-}
 
 // captureOutput captures stdout during test execution.
 func captureOutput(t *testing.T, fn func()) string {

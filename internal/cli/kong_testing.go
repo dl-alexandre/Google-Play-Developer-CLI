@@ -262,7 +262,7 @@ func (cmd *TestingValidateCmd) Run(globals *Globals) error {
 	// Run validation checks
 	for _, check := range cmd.Checks {
 		switch check {
-		case "all", "aab":
+		case checkAll, "aab":
 			result.Checks = append(result.Checks, testingValidateCheck{
 				Name:    "aab_format",
 				Status:  "pass",
@@ -377,17 +377,18 @@ func (cmd *TestingCompatibilityCmd) Run(globals *Globals) error {
 		CheckedAt:      time.Now(),
 	}
 
-	result.DeviceGroups = append(result.DeviceGroups, testingCompatibilityGroup{
-		Name:    "Phones",
-		Count:   8000,
-		Percent: 80.0,
-	})
-
-	result.DeviceGroups = append(result.DeviceGroups, testingCompatibilityGroup{
-		Name:    "Tablets",
-		Count:   1500,
-		Percent: 15.0,
-	})
+	result.DeviceGroups = append(result.DeviceGroups,
+		testingCompatibilityGroup{
+			Name:    "Phones",
+			Count:   8000,
+			Percent: 80.0,
+		},
+		testingCompatibilityGroup{
+			Name:    "Tablets",
+			Count:   1500,
+			Percent: 15.0,
+		},
+	)
 
 	return writeOutput(globals, output.NewResult(result).
 		WithServices("androidpublisher").

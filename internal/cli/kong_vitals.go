@@ -6,12 +6,14 @@ import (
 	"strings"
 	"time"
 
-	"google.golang.org/api/playdeveloperreporting/v1beta1"
+	playdeveloperreporting "google.golang.org/api/playdeveloperreporting/v1beta1"
 
 	"github.com/dl-alexandre/gpd/internal/api"
 	"github.com/dl-alexandre/gpd/internal/errors"
 	"github.com/dl-alexandre/gpd/internal/output"
 )
+
+const formatCSV = "csv"
 
 // VitalsCrashesCmd queries crash rate data.
 type VitalsCrashesCmd struct {
@@ -113,8 +115,8 @@ func (cmd *VitalsCrashesCmd) Run(globals *Globals) error {
 		WithDuration(time.Since(startTime)).
 		WithServices("playdeveloperreporting")
 
-	if cmd.Format == "csv" {
-		return outputResult(result, "csv", globals.Pretty)
+	if cmd.Format == formatCSV {
+		return outputResult(result, formatCSV, globals.Pretty)
 	}
 	return outputResult(result, globals.Output, globals.Pretty)
 }
@@ -232,8 +234,8 @@ func (cmd *VitalsAnrsCmd) Run(globals *Globals) error {
 		WithDuration(time.Since(startTime)).
 		WithServices("playdeveloperreporting")
 
-	if cmd.Format == "csv" {
-		return outputResult(result, "csv", globals.Pretty)
+	if cmd.Format == formatCSV {
+		return outputResult(result, formatCSV, globals.Pretty)
 	}
 	return outputResult(result, globals.Output, globals.Pretty)
 }
@@ -350,7 +352,7 @@ func (cmd *VitalsErrorsIssuesCmd) Run(globals *Globals) error {
 func (cmd *VitalsErrorsIssuesCmd) buildFilter() string {
 	var filters []string
 	if cmd.Query != "" {
-		filters = append(filters, fmt.Sprintf("(cause =~ \"%s\" OR location =~ \"%s\")", cmd.Query, cmd.Query))
+		filters = append(filters, fmt.Sprintf("(cause =~ %q OR location =~ %q)", cmd.Query, cmd.Query))
 	}
 	if cmd.Interval != "" {
 		filters = append(filters, fmt.Sprintf("activeBetween(%s)", cmd.intervalToDateRange()))
@@ -480,9 +482,8 @@ func (cmd *VitalsErrorsReportsCmd) Run(globals *Globals) error {
 	return outputResult(result, globals.Output, globals.Pretty)
 }
 
-func (cmd *VitalsErrorsReportsCmd) getIntervalDates() (time.Time, time.Time) {
-	endDate := time.Now().UTC()
-	var startDate time.Time
+func (cmd *VitalsErrorsReportsCmd) getIntervalDates() (startDate, endDate time.Time) {
+	endDate = time.Now().UTC()
 
 	switch cmd.Interval {
 	case "last7Days":
@@ -796,8 +797,8 @@ func (cmd *VitalsMetricsExcessiveWakeupsCmd) Run(globals *Globals) error {
 		WithDuration(time.Since(startTime)).
 		WithServices("playdeveloperreporting")
 
-	if cmd.Format == "csv" {
-		return outputResult(result, "csv", globals.Pretty)
+	if cmd.Format == formatCSV {
+		return outputResult(result, formatCSV, globals.Pretty)
 	}
 	return outputResult(result, globals.Output, globals.Pretty)
 }
@@ -912,8 +913,8 @@ func (cmd *VitalsMetricsSlowRenderingCmd) Run(globals *Globals) error {
 		WithDuration(time.Since(startTime)).
 		WithServices("playdeveloperreporting")
 
-	if cmd.Format == "csv" {
-		return outputResult(result, "csv", globals.Pretty)
+	if cmd.Format == formatCSV {
+		return outputResult(result, formatCSV, globals.Pretty)
 	}
 	return outputResult(result, globals.Output, globals.Pretty)
 }
@@ -1028,8 +1029,8 @@ func (cmd *VitalsMetricsSlowStartCmd) Run(globals *Globals) error {
 		WithDuration(time.Since(startTime)).
 		WithServices("playdeveloperreporting")
 
-	if cmd.Format == "csv" {
-		return outputResult(result, "csv", globals.Pretty)
+	if cmd.Format == formatCSV {
+		return outputResult(result, formatCSV, globals.Pretty)
 	}
 	return outputResult(result, globals.Output, globals.Pretty)
 }
@@ -1144,8 +1145,8 @@ func (cmd *VitalsMetricsStuckWakelocksCmd) Run(globals *Globals) error {
 		WithDuration(time.Since(startTime)).
 		WithServices("playdeveloperreporting")
 
-	if cmd.Format == "csv" {
-		return outputResult(result, "csv", globals.Pretty)
+	if cmd.Format == formatCSV {
+		return outputResult(result, formatCSV, globals.Pretty)
 	}
 	return outputResult(result, globals.Output, globals.Pretty)
 }
@@ -1213,7 +1214,7 @@ func (cmd *VitalsAnomaliesListCmd) Run(globals *Globals) error {
 			PageToken(cmd.PageToken)
 
 		if cmd.Metric != "" {
-			call = call.Filter(fmt.Sprintf("metric = \"%s\"", cmd.Metric))
+			call = call.Filter(fmt.Sprintf("metric = %q", cmd.Metric))
 		}
 
 		resp, err := call.Do()
@@ -1251,21 +1252,6 @@ func (cmd *VitalsAnomaliesListCmd) Run(globals *Globals) error {
 		WithServices("playdeveloperreporting")
 
 	return outputResult(result, globals.Output, globals.Pretty)
-}
-
-func (cmd *VitalsAnomaliesListCmd) fetchAllPages(ctx context.Context, svc *playdeveloperreporting.Service, parent string, pageSize int64, pageToken string, allAnomalies *[]*playdeveloperreporting.GooglePlayDeveloperReportingV1beta1Anomaly) error {
-	for pageToken != "" {
-		resp, err := svc.Anomalies.List(parent).Context(ctx).
-			PageSize(pageSize).
-			PageToken(pageToken).
-			Do()
-		if err != nil {
-			return err
-		}
-		*allAnomalies = append(*allAnomalies, resp.Anomalies...)
-		pageToken = resp.NextPageToken
-	}
-	return nil
 }
 
 // anomaliesPageResponse wraps the anomalies list response to implement PageResponse.

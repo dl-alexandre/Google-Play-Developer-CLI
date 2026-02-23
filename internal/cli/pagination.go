@@ -84,18 +84,3 @@ func fetchAllPages[T any, R PageResponse[T]](
 		}
 	}
 }
-
-// fetchSinglePageResult is a wrapper for APIs that return a single page result
-// and we need to extract items and next token from it.
-type fetchSinglePageResult[T any] struct {
-	items     []T
-	nextToken string
-}
-
-func (r fetchSinglePageResult[T]) GetNextPageToken() string {
-	return r.nextToken
-}
-
-func (r fetchSinglePageResult[T]) GetItems() []T {
-	return r.items
-}

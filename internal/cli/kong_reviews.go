@@ -117,7 +117,7 @@ func (cmd *ReviewsListCmd) Run(globals *Globals) error {
 	err = client.DoWithRetry(ctx, func() error {
 		call := svc.Reviews.List(globals.Package)
 		if cmd.PageSize > 0 {
-			call = call.MaxResults(int64(cmd.PageSize))
+			call = call.MaxResults(cmd.PageSize)
 		}
 		if cmd.TranslationLanguage != "" {
 			call = call.TranslationLanguage(cmd.TranslationLanguage)
@@ -138,7 +138,7 @@ func (cmd *ReviewsListCmd) Run(globals *Globals) error {
 				pageCall := svc.Reviews.List(globals.Package).
 					Token(pageToken)
 				if cmd.PageSize > 0 {
-					pageCall = pageCall.MaxResults(int64(cmd.PageSize))
+					pageCall = pageCall.MaxResults(cmd.PageSize)
 				}
 				if cmd.TranslationLanguage != "" {
 					pageCall = pageCall.TranslationLanguage(cmd.TranslationLanguage)
@@ -278,7 +278,7 @@ func (cmd *ReviewsListCmd) parseTimestamp(ts *androidpublisher.Timestamp) time.T
 	if ts == nil {
 		return time.Time{}
 	}
-	return time.Unix(ts.Seconds, int64(ts.Nanos))
+	return time.Unix(ts.Seconds, ts.Nanos)
 }
 
 // convertReview converts API review to output format.
@@ -480,7 +480,7 @@ func (cmd *ReviewsReplyCmd) Run(globals *Globals) error {
 	}
 
 	if resp.Result != nil && resp.Result.LastEdited != nil {
-		result.LastEdited = time.Unix(resp.Result.LastEdited.Seconds, int64(resp.Result.LastEdited.Nanos))
+		result.LastEdited = time.Unix(resp.Result.LastEdited.Seconds, resp.Result.LastEdited.Nanos)
 	}
 
 	return outputResult(output.NewResult(result).WithServices("androidpublisher"), globals.Output, globals.Pretty)
@@ -549,7 +549,7 @@ func (cmd *ReviewsResponseGetCmd) Run(globals *Globals) error {
 				result.HasResponse = true
 				result.ReplyText = c.DeveloperComment.Text
 				if c.DeveloperComment.LastModified != nil {
-					result.LastModified = time.Unix(c.DeveloperComment.LastModified.Seconds, int64(c.DeveloperComment.LastModified.Nanos))
+					result.LastModified = time.Unix(c.DeveloperComment.LastModified.Seconds, c.DeveloperComment.LastModified.Nanos)
 				}
 				break
 			}

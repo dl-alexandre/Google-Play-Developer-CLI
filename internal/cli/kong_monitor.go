@@ -8,11 +8,29 @@ import (
 	"strings"
 	"time"
 
-	"google.golang.org/api/playdeveloperreporting/v1beta1"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
+	playdeveloperreporting "google.golang.org/api/playdeveloperreporting/v1beta1"
 
 	"github.com/dl-alexandre/gpd/internal/api"
 	"github.com/dl-alexandre/gpd/internal/errors"
 	"github.com/dl-alexandre/gpd/internal/output"
+)
+
+const (
+	metricCrash         = "crash"
+	metricAnr           = "anr"
+	metricError         = "error"
+	metricCrashes       = "crashes"
+	metricAnrs          = "anrs"
+	metricErrors        = "errors"
+	metricCrashRate     = "crashRate"
+	metricAnrRate       = "anrRate"
+	metricErrorCount    = "errorCount"
+	severityHigh        = "high"
+	severityLow         = "low"
+	metricDistinctUsers = "distinctUsers"
+	trendStable         = "stable"
 )
 
 // MonitorCmd contains monitoring and alerting commands.
@@ -159,13 +177,13 @@ func (cmd *MonitorWatchCmd) normalizeMetrics() []string {
 	for _, m := range cmd.Metrics {
 		switch strings.ToLower(m) {
 		case "all":
-			return []string{"crashes", "anrs", "errors"}
-		case "crashes", "crash":
-			result = append(result, "crashes")
-		case "anrs", "anr":
-			result = append(result, "anrs")
-		case "errors", "error":
-			result = append(result, "errors")
+			return []string{metricCrashes, metricAnrs, metricErrors}
+		case metricCrashes, metricCrash:
+			result = append(result, metricCrashes)
+		case metricAnrs, metricAnr:
+			result = append(result, metricAnrs)
+		case metricErrors, metricError:
+			result = append(result, metricErrors)
 		}
 	}
 	return result
@@ -196,11 +214,11 @@ func (cmd *MonitorWatchCmd) pollMetric(ctx context.Context, client *api.Client, 
 	}
 
 	switch metric {
-	case "crashes":
+	case metricCrashes:
 		return cmd.checkCrashThreshold(ctx, client, svc, pkg, timelineSpec, result)
-	case "anrs":
+	case metricAnrs:
 		return cmd.checkAnrThreshold(ctx, client, svc, pkg, timelineSpec, result)
-	case "errors":
+	case metricErrors:
 		return cmd.checkErrorThreshold(ctx, client, svc, pkg, timelineSpec, result)
 	}
 	return nil
@@ -210,7 +228,7 @@ func (cmd *MonitorWatchCmd) checkCrashThreshold(ctx context.Context, client *api
 	name := fmt.Sprintf("apps/%s/crashRateMetricSet", pkg)
 	req := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryCrashRateMetricSetRequest{
 		TimelineSpec: timelineSpec,
-		Metrics:      []string{"crashRate", "userPerceivedCrashRate", "distinctUsers"},
+		Metrics:      []string{metricCrashRate, "userPerceivedCrashRate", metricDistinctUsers},
 		PageSize:     1,
 	}
 
@@ -222,7 +240,7 @@ func (cmd *MonitorWatchCmd) checkCrashThreshold(ctx context.Context, client *api
 		}
 		if len(resp.Rows) > 0 && len(resp.Rows[0].Metrics) > 0 {
 			for _, m := range resp.Rows[0].Metrics {
-				if m.Metric == "crashRate" {
+				if m.Metric == metricCrashRate {
 					crashRate = parseDecimalValue(m)
 					break
 				}
@@ -235,11 +253,11 @@ func (cmd *MonitorWatchCmd) checkCrashThreshold(ctx context.Context, client *api
 		return err
 	}
 
-	result.Metrics["crashRate"] = crashRate
+	result.Metrics[metricCrashRate] = crashRate
 
 	if crashRate > cmd.CrashThreshold {
 		alert := monitorAlert{
-			Metric:      "crashRate",
+			Metric:      metricCrashRate,
 			Threshold:   cmd.CrashThreshold,
 			ActualValue: crashRate,
 			Severity:    cmd.calculateSeverity(crashRate, cmd.CrashThreshold),
@@ -256,7 +274,7 @@ func (cmd *MonitorWatchCmd) checkAnrThreshold(ctx context.Context, client *api.C
 	name := fmt.Sprintf("apps/%s/anrRateMetricSet", pkg)
 	req := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryAnrRateMetricSetRequest{
 		TimelineSpec: timelineSpec,
-		Metrics:      []string{"anrRate", "userPerceivedAnrRate", "distinctUsers"},
+		Metrics:      []string{metricAnrRate, "userPerceivedAnrRate", metricDistinctUsers},
 		PageSize:     1,
 	}
 
@@ -268,7 +286,7 @@ func (cmd *MonitorWatchCmd) checkAnrThreshold(ctx context.Context, client *api.C
 		}
 		if len(resp.Rows) > 0 && len(resp.Rows[0].Metrics) > 0 {
 			for _, m := range resp.Rows[0].Metrics {
-				if m.Metric == "anrRate" {
+				if m.Metric == metricAnrRate {
 					anrRate = parseDecimalValue(m)
 					break
 				}
@@ -281,11 +299,11 @@ func (cmd *MonitorWatchCmd) checkAnrThreshold(ctx context.Context, client *api.C
 		return err
 	}
 
-	result.Metrics["anrRate"] = anrRate
+	result.Metrics[metricAnrRate] = anrRate
 
 	if anrRate > cmd.AnrThreshold {
 		alert := monitorAlert{
-			Metric:      "anrRate",
+			Metric:      metricAnrRate,
 			Threshold:   cmd.AnrThreshold,
 			ActualValue: anrRate,
 			Severity:    cmd.calculateSeverity(anrRate, cmd.AnrThreshold),
@@ -302,7 +320,7 @@ func (cmd *MonitorWatchCmd) checkErrorThreshold(ctx context.Context, client *api
 	name := fmt.Sprintf("apps/%s/errorCountMetricSet", pkg)
 	req := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryErrorCountMetricSetRequest{
 		TimelineSpec: timelineSpec,
-		Metrics:      []string{"errorCount", "distinctUsers"},
+		Metrics:      []string{metricErrorCount, metricDistinctUsers},
 		PageSize:     1,
 	}
 
@@ -314,7 +332,7 @@ func (cmd *MonitorWatchCmd) checkErrorThreshold(ctx context.Context, client *api
 		}
 		if len(resp.Rows) > 0 && len(resp.Rows[0].Metrics) > 0 {
 			for _, m := range resp.Rows[0].Metrics {
-				if m.Metric == "errorCount" {
+				if m.Metric == metricErrorCount {
 					errorCount = parseDecimalValue(m)
 					break
 				}
@@ -327,11 +345,11 @@ func (cmd *MonitorWatchCmd) checkErrorThreshold(ctx context.Context, client *api
 		return err
 	}
 
-	result.Metrics["errorCount"] = errorCount
+	result.Metrics[metricErrorCount] = errorCount
 
 	if float64(errorCount) > cmd.ErrorThreshold {
 		alert := monitorAlert{
-			Metric:      "errorCount",
+			Metric:      metricErrorCount,
 			Threshold:   cmd.ErrorThreshold,
 			ActualValue: float64(errorCount),
 			Severity:    cmd.calculateSeverity(float64(errorCount), cmd.ErrorThreshold),
@@ -350,11 +368,11 @@ func (cmd *MonitorWatchCmd) calculateSeverity(actual, threshold float64) string 
 	case ratio >= 3.0:
 		return "critical"
 	case ratio >= 2.0:
-		return "high"
+		return severityHigh
 	case ratio >= 1.5:
 		return "medium"
 	default:
-		return "low"
+		return severityLow
 	}
 }
 
@@ -466,13 +484,13 @@ func (cmd *MonitorAnomaliesCmd) normalizeMetrics() []string {
 	for _, m := range cmd.Metrics {
 		switch strings.ToLower(m) {
 		case "all":
-			return []string{"crashes", "anrs", "errors"}
-		case "crashes", "crash":
-			result = append(result, "crashes")
-		case "anrs", "anr":
-			result = append(result, "anrs")
-		case "errors", "error":
-			result = append(result, "errors")
+			return []string{metricCrashes, metricAnrs, metricErrors}
+		case metricCrashes, metricCrash:
+			result = append(result, metricCrashes)
+		case metricAnrs, metricAnr:
+			result = append(result, metricAnrs)
+		case metricErrors, metricError:
+			result = append(result, metricErrors)
 		}
 	}
 	return result
@@ -482,11 +500,11 @@ func (cmd *MonitorAnomaliesCmd) detectAnomalies(ctx context.Context, client *api
 	multiplier := cmd.getSensitivityMultiplier()
 
 	switch metric {
-	case "crashes":
+	case metricCrashes:
 		return cmd.detectCrashAnomalies(ctx, client, svc, pkg, baselineStart, baselineEnd, currentStart, currentEnd, multiplier, result)
-	case "anrs":
+	case metricAnrs:
 		return cmd.detectAnrAnomalies(ctx, client, svc, pkg, baselineStart, baselineEnd, currentStart, currentEnd, multiplier, result)
-	case "errors":
+	case metricErrors:
 		return cmd.detectErrorAnomalies(ctx, client, svc, pkg, baselineStart, baselineEnd, currentStart, currentEnd, multiplier, result)
 	}
 	return nil
@@ -812,11 +830,11 @@ func (cmd *MonitorDashboardCmd) Run(globals *Globals) error {
 	// Aggregate all requested metrics
 	for _, metric := range metrics {
 		switch metric {
-		case "crashes":
+		case metricCrashes:
 			cmd.aggregateCrashes(ctx, client, svc, globals.Package, startDate, endDate, result)
-		case "anrs":
+		case metricAnrs:
 			cmd.aggregateAnrs(ctx, client, svc, globals.Package, startDate, endDate, result)
-		case "errors":
+		case metricErrors:
 			cmd.aggregateErrors(ctx, client, svc, globals.Package, startDate, endDate, result)
 		case "slow-rendering":
 			cmd.aggregateSlowRendering(ctx, client, svc, globals.Package, startDate, endDate, result)
@@ -830,7 +848,7 @@ func (cmd *MonitorDashboardCmd) Run(globals *Globals) error {
 	}
 
 	// Calculate trends
-	cmd.calculateTrends(result, startDate, endDate)
+	cmd.calculateTrends(result)
 
 	outputResult := output.NewResult(result).
 		WithDuration(time.Since(startTime)).
@@ -848,13 +866,13 @@ func (cmd *MonitorDashboardCmd) normalizeDashboardMetrics() []string {
 	for _, m := range cmd.Metrics {
 		switch strings.ToLower(m) {
 		case "all":
-			return []string{"crashes", "anrs", "errors", "slow-rendering", "slow-start", "wakeups", "wakelocks"}
-		case "crashes", "crash":
-			result = append(result, "crashes")
-		case "anrs", "anr":
-			result = append(result, "anrs")
-		case "errors", "error":
-			result = append(result, "errors")
+			return []string{metricCrashes, metricAnrs, metricErrors, "slow-rendering", "slow-start", "wakeups", "wakelocks"}
+		case metricCrashes, metricCrash:
+			result = append(result, metricCrashes)
+		case metricAnrs, metricAnr:
+			result = append(result, metricAnrs)
+		case metricErrors, metricError:
+			result = append(result, metricErrors)
 		case "slow-rendering", "slowrendering":
 			result = append(result, "slow-rendering")
 		case "slow-start", "slowstart":
@@ -872,7 +890,7 @@ func (cmd *MonitorDashboardCmd) aggregateCrashes(ctx context.Context, client *ap
 	name := fmt.Sprintf("apps/%s/crashRateMetricSet", pkg)
 	req := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryCrashRateMetricSetRequest{
 		TimelineSpec: cmd.buildTimelineSpec(start, end),
-		Metrics:      []string{"crashRate", "distinctUsers"},
+		Metrics:      []string{metricCrashRate, metricDistinctUsers},
 		PageSize:     100,
 	}
 
@@ -887,11 +905,11 @@ func (cmd *MonitorDashboardCmd) aggregateCrashes(ctx context.Context, client *ap
 		}
 		for _, row := range resp.Rows {
 			for _, m := range row.Metrics {
-				if m.Metric == "crashRate" {
+				if m.Metric == metricCrashRate {
 					totalRate += parseDecimalValue(m)
 					count++
 				}
-				if m.Metric == "distinctUsers" {
+				if m.Metric == metricDistinctUsers {
 					affectedUsers += parseDecimalValue(m)
 				}
 			}
@@ -914,7 +932,7 @@ func (cmd *MonitorDashboardCmd) aggregateAnrs(ctx context.Context, client *api.C
 	name := fmt.Sprintf("apps/%s/anrRateMetricSet", pkg)
 	req := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryAnrRateMetricSetRequest{
 		TimelineSpec: cmd.buildTimelineSpec(start, end),
-		Metrics:      []string{"anrRate", "distinctUsers"},
+		Metrics:      []string{metricAnrRate, metricDistinctUsers},
 		PageSize:     100,
 	}
 
@@ -929,11 +947,11 @@ func (cmd *MonitorDashboardCmd) aggregateAnrs(ctx context.Context, client *api.C
 		}
 		for _, row := range resp.Rows {
 			for _, m := range row.Metrics {
-				if m.Metric == "anrRate" {
+				if m.Metric == metricAnrRate {
 					totalRate += parseDecimalValue(m)
 					count++
 				}
-				if m.Metric == "distinctUsers" {
+				if m.Metric == metricDistinctUsers {
 					affectedUsers += parseDecimalValue(m)
 				}
 			}
@@ -956,7 +974,7 @@ func (cmd *MonitorDashboardCmd) aggregateErrors(ctx context.Context, client *api
 	name := fmt.Sprintf("apps/%s/errorCountMetricSet", pkg)
 	req := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryErrorCountMetricSetRequest{
 		TimelineSpec: cmd.buildTimelineSpec(start, end),
-		Metrics:      []string{"errorCount", "distinctUsers"},
+		Metrics:      []string{metricErrorCount, metricDistinctUsers},
 		PageSize:     100,
 	}
 
@@ -970,10 +988,10 @@ func (cmd *MonitorDashboardCmd) aggregateErrors(ctx context.Context, client *api
 		}
 		for _, row := range resp.Rows {
 			for _, m := range row.Metrics {
-				if m.Metric == "errorCount" {
+				if m.Metric == metricErrorCount {
 					totalErrors += parseDecimalValue(m)
 				}
-				if m.Metric == "distinctUsers" {
+				if m.Metric == metricDistinctUsers {
 					affectedUsers += parseDecimalValue(m)
 				}
 			}
@@ -1138,12 +1156,12 @@ func (cmd *MonitorDashboardCmd) aggregateWakelocks(ctx context.Context, client *
 	}
 }
 
-func (cmd *MonitorDashboardCmd) calculateTrends(result *dashboardResult, start, end time.Time) {
+func (cmd *MonitorDashboardCmd) calculateTrends(result *dashboardResult) {
 	// Simplified trend calculation based on metric values
 	// In a real implementation, you'd compare current period vs previous period
-	result.Trends.CrashTrend = "stable"
-	result.Trends.AnrTrend = "stable"
-	result.Trends.ErrorTrend = "stable"
+	result.Trends.CrashTrend = trendStable
+	result.Trends.AnrTrend = trendStable
+	result.Trends.ErrorTrend = trendStable
 
 	if result.Summary.AvgCrashRate > 0.02 {
 		result.Trends.CrashTrend = "increasing"
@@ -1311,10 +1329,9 @@ func (cmd *MonitorReportCmd) gatherReportData(ctx context.Context, client *api.C
 	result.Summary.OverallHealth = cmd.calculateOverallHealth(crashRate, anrRate, errorCount)
 
 	// Get error issues count
-	issuesOpen, issuesResolved, err := cmd.getErrorIssuesStatus(ctx, client, svc, pkg)
+	issuesOpen, err := cmd.getErrorIssuesStatus(ctx, client, svc, pkg)
 	if err == nil {
 		result.Summary.IssuesOpen = issuesOpen
-		result.Summary.IssuesResolved = issuesResolved
 	}
 
 	if cmd.IncludeRawData {
@@ -1429,42 +1446,42 @@ func (cmd *MonitorReportCmd) getReportErrorCount(ctx context.Context, client *ap
 	return int64(totalCount), err
 }
 
-func (cmd *MonitorReportCmd) getReportActiveUsers(ctx context.Context, client *api.Client, svc *playdeveloperreporting.Service, pkg string, start, end time.Time) (int64, error) {
+func (cmd *MonitorReportCmd) getReportActiveUsers(ctx context.Context, client *api.Client, svc *playdeveloperreporting.Service, pkg string, start, end time.Time) (totalUsers int64, err error) {
 	name := fmt.Sprintf("apps/%s/crashRateMetricSet", pkg)
 	req := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryCrashRateMetricSetRequest{
 		TimelineSpec: cmd.buildTimelineSpec(start, end),
-		Metrics:      []string{"distinctUsers"},
+		Metrics:      []string{metricDistinctUsers},
 		PageSize:     100,
 	}
 
-	var totalUsers float64
+	var users float64
 
-	err := client.DoWithRetry(ctx, func() error {
+	err = client.DoWithRetry(ctx, func() error {
 		resp, err := svc.Vitals.Crashrate.Query(name, req).Context(ctx).Do()
 		if err != nil {
 			return err
 		}
 		for _, row := range resp.Rows {
 			for _, m := range row.Metrics {
-				if m.Metric == "distinctUsers" {
-					totalUsers += parseDecimalValue(m)
+				if m.Metric == metricDistinctUsers {
+					users += parseDecimalValue(m)
 				}
 			}
 		}
 		return nil
 	})
 
-	return int64(totalUsers), err
+	return int64(users), err
 }
 
-func (cmd *MonitorReportCmd) getErrorIssuesStatus(ctx context.Context, client *api.Client, svc *playdeveloperreporting.Service, pkg string) (int, int, error) {
+func (cmd *MonitorReportCmd) getErrorIssuesStatus(ctx context.Context, client *api.Client, svc *playdeveloperreporting.Service, pkg string) (openCount int, err error) {
 	parent := fmt.Sprintf("apps/%s/errorIssues", pkg)
 
 	var allIssues []*playdeveloperreporting.GooglePlayDeveloperReportingV1beta1ErrorIssue
 
-	err := client.DoWithRetry(ctx, func() error {
+	err = client.DoWithRetry(ctx, func() error {
 		resp, err := svc.Vitals.Errors.Issues.Search(parent).Context(ctx).
-			Filter(fmt.Sprintf("activeBetween(\"%s\", \"%s\")",
+			Filter(fmt.Sprintf("activeBetween(%q, %q)",
 				time.Now().AddDate(0, 0, -30).Format("2006-01-02")+"T00:00:00Z",
 				time.Now().Format("2006-01-02")+"T00:00:00Z")).
 			PageSize(100).
@@ -1477,14 +1494,12 @@ func (cmd *MonitorReportCmd) getErrorIssuesStatus(ctx context.Context, client *a
 	})
 
 	if err != nil {
-		return 0, 0, err
+		return 0, err
 	}
 
-	// Count open vs resolved (simplified - all are considered open in the API)
-	openCount := len(allIssues)
-	resolvedCount := 0
+	openCount = len(allIssues)
 
-	return openCount, resolvedCount, nil
+	return openCount, nil
 }
 
 func (cmd *MonitorReportCmd) calculateOverallHealth(crashRate, anrRate float64, errorCount int64) string {
@@ -1673,7 +1688,7 @@ func parseDecimalValue(m *playdeveloperreporting.GooglePlayDeveloperReportingV1b
 func outputResultResult(result *output.Result, format string, pretty bool) error {
 	switch format {
 	case "html":
-		return outputHTML(result, pretty)
+		return outputHTML(result)
 	case "markdown", "md":
 		return outputMarkdown(result)
 	default:
@@ -1682,7 +1697,7 @@ func outputResultResult(result *output.Result, format string, pretty bool) error
 }
 
 // outputHTML outputs result as HTML.
-func outputHTML(result *output.Result, pretty bool) error {
+func outputHTML(result *output.Result) error {
 	html := fmt.Sprintf(`<!DOCTYPE html>
 <html>
 <head>
@@ -1720,7 +1735,7 @@ func outputMarkdown(result *output.Result) error {
 	switch data := result.Data.(type) {
 	case map[string]interface{}:
 		for k, v := range data {
-			fmt.Printf("## %s\n\n", strings.Title(k))
+			fmt.Printf("## %s\n\n", cases.Title(language.English).String(k))
 			fmt.Printf("```\n%v\n```\n\n", v)
 		}
 	default:

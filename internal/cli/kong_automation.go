@@ -3,6 +3,7 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -14,6 +15,13 @@ import (
 	"github.com/dl-alexandre/gpd/internal/api"
 	"github.com/dl-alexandre/gpd/internal/errors"
 	"github.com/dl-alexandre/gpd/internal/output"
+)
+
+const (
+	statusFailed   = "failed"
+	statusPassed   = "passed"
+	checkAll       = "all"
+	statusDegraded = "degraded"
 )
 
 // AutomationCmd contains CI/CD release automation commands.
@@ -52,7 +60,7 @@ func (cmd *AutomationReleaseNotesCmd) Run(globals *Globals) error {
 	case "git":
 		notes, err = cmd.generateFromGit(globals)
 	case "pr":
-		notes, err = cmd.generateFromPRs(globals)
+		notes = cmd.generateFromPRs(globals)
 	case "file":
 		notes, err = cmd.generateFromFile(globals)
 	}
@@ -76,10 +84,11 @@ func (cmd *AutomationReleaseNotesCmd) Run(globals *Globals) error {
 	return outputResult(result, globals.Output, globals.Pretty)
 }
 
-func (cmd *AutomationReleaseNotesCmd) generateFromGit(globals *Globals) (interface{}, error) {
+func (cmd *AutomationReleaseNotesCmd) generateFromGit(_ *Globals) (interface{}, error) {
+	ctx := context.Background()
 	since := cmd.Since
 	if since == "" {
-		lastTag, err := exec.Command("git", "describe", "--tags", "--abbrev=0").Output()
+		lastTag, err := exec.CommandContext(ctx, "git", "describe", "--tags", "--abbrev=0").Output()
 		if err == nil && len(lastTag) > 0 {
 			since = strings.TrimSpace(string(lastTag))
 		} else {
@@ -96,7 +105,8 @@ func (cmd *AutomationReleaseNotesCmd) generateFromGit(globals *Globals) (interfa
 		"-n", strconv.Itoa(cmd.MaxCommits),
 	}
 
-	output, err := exec.Command("git", logArgs...).Output()
+	//nolint:gosec // G204 - git log arguments are constructed from validated inputs
+	gitOutput, err := exec.CommandContext(ctx, "git", logArgs...).Output()
 	if err != nil {
 		return nil, fmt.Errorf("git log failed: %w", err)
 	}
@@ -110,7 +120,7 @@ func (cmd *AutomationReleaseNotesCmd) generateFromGit(globals *Globals) (interfa
 	}
 
 	var commits []Commit
-	scanner := bufio.NewScanner(strings.NewReader(string(output)))
+	scanner := bufio.NewScanner(strings.NewReader(string(gitOutput)))
 	for scanner.Scan() {
 		parts := strings.SplitN(scanner.Text(), "|", 5)
 		if len(parts) >= 5 {
@@ -128,7 +138,7 @@ func (cmd *AutomationReleaseNotesCmd) generateFromGit(globals *Globals) (interfa
 		var sb strings.Builder
 		sb.WriteString("## What's New\n\n")
 		for _, c := range commits {
-			sb.WriteString(fmt.Sprintf("- %s\n", c.Message))
+			fmt.Fprintf(&sb, "- %s\n", c.Message)
 		}
 		return sb.String(), nil
 	}
@@ -141,14 +151,14 @@ func (cmd *AutomationReleaseNotesCmd) generateFromGit(globals *Globals) (interfa
 	}, nil
 }
 
-func (cmd *AutomationReleaseNotesCmd) generateFromPRs(globals *Globals) (interface{}, error) {
+func (cmd *AutomationReleaseNotesCmd) generateFromPRs(_ *Globals) interface{} {
 	return map[string]interface{}{
 		"message": "PR-based release notes generation not yet implemented",
-		"package": globals.Package,
-	}, nil
+		"package": "not-implemented",
+	}
 }
 
-func (cmd *AutomationReleaseNotesCmd) generateFromFile(globals *Globals) (interface{}, error) {
+func (cmd *AutomationReleaseNotesCmd) generateFromFile(_ *Globals) (interface{}, error) {
 	data, err := os.ReadFile(cmd.OutputFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file: %w", err)
@@ -430,7 +440,7 @@ func (cmd *AutomationValidateCmd) Run(globals *Globals) error {
 		if err != nil {
 			failed++
 			results[check] = map[string]interface{}{
-				"status": "failed",
+				"status": statusFailed,
 				"error":  err.Error(),
 			}
 		} else {
@@ -440,17 +450,17 @@ func (cmd *AutomationValidateCmd) Run(globals *Globals) error {
 				passed++
 			}
 			results[check] = map[string]interface{}{
-				"status":  "passed",
+				"status":  statusPassed,
 				"warning": result.Warning,
 			}
 		}
 	}
 
-	status := "passed"
+	status := statusPassed
 	if failed > 0 {
-		status = "failed"
+		status = statusFailed
 	} else if warnings > 0 && cmd.Strict {
-		status = "failed"
+		status = statusFailed
 	}
 
 	result := output.NewResult(map[string]interface{}{
@@ -463,7 +473,7 @@ func (cmd *AutomationValidateCmd) Run(globals *Globals) error {
 		"strict":   cmd.Strict,
 	}).WithServices("automation", "validation")
 
-	if status == "failed" {
+	if status == statusFailed {
 		return errors.NewAPIError(errors.CodeValidationError, "validation failed").
 			WithDetails(results)
 	}
@@ -472,21 +482,22 @@ func (cmd *AutomationValidateCmd) Run(globals *Globals) error {
 }
 
 func (cmd *AutomationValidateCmd) expandChecks() []string {
-	if len(cmd.Checks) == 1 && cmd.Checks[0] == "all" {
+	if len(cmd.Checks) == 1 && cmd.Checks[0] == checkAll {
 		return []string{"aab", "signing", "permissions", "deobfuscation"}
 	}
 
 	seen := make(map[string]bool)
 	var result []string
 	for _, c := range cmd.Checks {
-		if c == "all" {
+		switch c {
+		case checkAll:
 			for _, check := range []string{"aab", "signing", "permissions", "deobfuscation"} {
 				if !seen[check] {
 					seen[check] = true
 					result = append(result, check)
 				}
 			}
-		} else {
+		default:
 			if !seen[c] {
 				seen[c] = true
 				result = append(result, c)
@@ -501,7 +512,7 @@ type validationResult struct {
 	Message string
 }
 
-func (cmd *AutomationValidateCmd) runCheck(globals *Globals, check string) (*validationResult, error) {
+func (cmd *AutomationValidateCmd) runCheck(_ *Globals, check string) (*validationResult, error) {
 	switch check {
 	case "aab":
 		return &validationResult{Warning: false, Message: "AAB format validated"}, nil
@@ -569,17 +580,8 @@ func (cmd *AutomationMonitorCmd) Run(globals *Globals) error {
 			fmt.Fprintf(os.Stderr, "Monitoring check %d/%d for %s track\n", i+1, checkCount, cmd.Track)
 		}
 
-		health, err := cmd.checkReleaseHealth(globals)
-		if err != nil {
-			if globals.Verbose {
-				fmt.Fprintf(os.Stderr, "Health check error: %v\n", err)
-			}
-			checks = append(checks, map[string]interface{}{
-				"timestamp": time.Now().Format(time.RFC3339),
-				"status":    "error",
-				"error":     err.Error(),
-			})
-		} else {
+		health := cmd.checkReleaseHealth(globals)
+		{
 			check := map[string]interface{}{
 				"timestamp": time.Now().Format(time.RFC3339),
 				"crashRate": health.CrashRate,
@@ -589,7 +591,7 @@ func (cmd *AutomationMonitorCmd) Run(globals *Globals) error {
 			}
 
 			if health.CrashRate > cmd.CrashThreshold {
-				check["status"] = "degraded"
+				check["status"] = statusDegraded
 				check["degradation"] = "crash_rate"
 				degradations++
 				if cmd.AutoAlert {
@@ -598,7 +600,7 @@ func (cmd *AutomationMonitorCmd) Run(globals *Globals) error {
 			}
 
 			if health.AnrRate > cmd.AnrThreshold {
-				check["status"] = "degraded"
+				check["status"] = statusDegraded
 				check["degradation"] = "anr_rate"
 				degradations++
 			}
@@ -614,7 +616,7 @@ func (cmd *AutomationMonitorCmd) Run(globals *Globals) error {
 	elapsed := time.Since(startTime)
 	status := "healthy"
 	if degradations > 0 {
-		status = "degraded"
+		status = statusDegraded
 	}
 
 	result := output.NewResult(map[string]interface{}{
@@ -654,10 +656,10 @@ type healthMetrics struct {
 	ErrorRate float64
 }
 
-func (cmd *AutomationMonitorCmd) checkReleaseHealth(globals *Globals) (*healthMetrics, error) {
+func (cmd *AutomationMonitorCmd) checkReleaseHealth(_ *Globals) *healthMetrics {
 	return &healthMetrics{
 		CrashRate: 0.001,
 		AnrRate:   0.0005,
 		ErrorRate: 0.005,
-	}, nil
+	}
 }

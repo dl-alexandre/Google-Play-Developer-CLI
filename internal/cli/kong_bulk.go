@@ -149,11 +149,12 @@ func (cmd *BulkUploadCmd) Run(globals *Globals) error {
 
 			mu.Lock()
 			result.Uploads = append(result.Uploads, item)
-			if item.Status == "success" {
+			switch item.Status {
+			case "success":
 				result.SuccessCount++
-			} else if item.Status == "skipped" {
+			case "skipped":
 				result.SkippedCount++
-			} else {
+			default:
 				result.FailureCount++
 			}
 			mu.Unlock()
@@ -186,7 +187,7 @@ func (cmd *BulkUploadCmd) Run(globals *Globals) error {
 	return writeOutput(globals, outputResult)
 }
 
-func (cmd *BulkUploadCmd) uploadFile(ctx context.Context, client *api.Client, pkg, editID, file string, verbose bool) bulkUploadItemResult {
+func (cmd *BulkUploadCmd) uploadFile(_ context.Context, _ *api.Client, _, _, file string, _ bool) bulkUploadItemResult {
 	// Full implementation would handle AAB vs APK detection and proper upload via Android Publisher API
 	return bulkUploadItemResult{
 		File:   file,

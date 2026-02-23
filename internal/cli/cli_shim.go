@@ -236,10 +236,6 @@ func (c *CLI) vitalsExcessiveWakeups(ctx context.Context, startDate, endDate str
 	return errors.NewAPIError(errors.CodeGeneralError, "vitals excessive wakeups not yet implemented in Kong migration")
 }
 
-func (c *CLI) vitalsLmkRate(ctx context.Context, startDate, endDate string, dimensions []string, format string, pageSize int64, pageToken string, all bool) error {
-	return errors.NewAPIError(errors.CodeGeneralError, "vitals LMK rate not yet implemented in Kong migration")
-}
-
 func (c *CLI) vitalsSlowRendering(ctx context.Context, startDate, endDate string, dimensions []string, format string, pageSize int64, pageToken string, all bool) error {
 	return errors.NewAPIError(errors.CodeGeneralError, "vitals slow rendering not yet implemented in Kong migration")
 }

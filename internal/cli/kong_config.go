@@ -223,12 +223,12 @@ func kongCheckDoctorCredentials(envKey, gacPath string, parsedConfig *config.Con
 			gacEntry["valid"] = false
 			gacEntry["error"] = err.Error()
 			result.issues = append(result.issues, "GOOGLE_APPLICATION_CREDENTIALS has invalid path: "+err.Error())
-		} else if _, err := os.Stat(gacPath); err != nil {
+		} else if _, err := os.Stat(gacPath); err != nil { // #nosec G703 - path validated by kongValidatePath above
 			gacEntry["exists"] = false
 			result.issues = append(result.issues, "GOOGLE_APPLICATION_CREDENTIALS points to a missing file")
 		} else {
 			gacEntry["exists"] = true
-			data, err := os.ReadFile(gacPath)
+			data, err := os.ReadFile(gacPath) // #nosec G703 - path validated by kongValidatePath above
 			if err != nil {
 				gacEntry["readable"] = false
 				result.issues = append(result.issues, "GOOGLE_APPLICATION_CREDENTIALS file is not readable")
@@ -301,7 +301,7 @@ func kongFindGPDBinaries() []string {
 		if runtime.GOOS == "windows" {
 			gpdPath = filepath.Join(dir, "gpd.exe")
 		}
-		if _, err := os.Stat(gpdPath); err == nil {
+		if _, err := os.Stat(gpdPath); err == nil { // #nosec G703 - dir validated by kongValidatePath above, gpdPath safely constructed with filepath.Join
 			binaries = append(binaries, gpdPath)
 		}
 	}
@@ -313,7 +313,7 @@ func kongValidateServiceAccountJSON(data []byte) (valid bool, email string, scop
 		Type        string `json:"type"`
 		ClientEmail string `json:"client_email"`
 		ClientID    string `json:"client_id"`
-		PrivateKey  string `json:"private_key"`
+		PrivateKey  string `json:"private_key"` // #nosec G117 - local validation struct, field only checked for presence, never logged or exposed
 		TokenURI    string `json:"token_uri"`
 	}
 	if err := json.Unmarshal(data, &keyData); err != nil {

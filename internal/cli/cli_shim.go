@@ -91,7 +91,7 @@ func (c *CLI) publishUpload(ctx context.Context, file string, opts obbOptions, e
 	return errors.NewAPIError(errors.CodeGeneralError, "publish upload not yet implemented in Kong migration")
 }
 
-func (c *CLI) publishRelease(ctx context.Context, track, name, status string, versionCodes, retainVersionCodes []string, priority int, notesFile string, editID string, noAutoCommit, dryRun, wait bool, waitTimeout string) error {
+func (c *CLI) publishRelease(ctx context.Context, track, name, status string, versionCodes, retainVersionCodes []string, priority int, notesFile, editID string, noAutoCommit, dryRun, wait bool, waitTimeout string) error {
 	return errors.NewAPIError(errors.CodeGeneralError, "publish release not yet implemented in Kong migration")
 }
 
@@ -103,11 +103,11 @@ func (c *CLI) publishPromote(ctx context.Context, fromTrack, toTrack string, per
 	return errors.NewAPIError(errors.CodeGeneralError, "publish promote not yet implemented in Kong migration")
 }
 
-func (c *CLI) publishHalt(ctx context.Context, track string, editID string, noAutoCommit bool, force bool) error {
+func (c *CLI) publishHalt(ctx context.Context, track, editID string, noAutoCommit, force bool) error {
 	return errors.NewAPIError(errors.CodeGeneralError, "publish halt not yet implemented in Kong migration")
 }
 
-func (c *CLI) publishRollback(ctx context.Context, track string, versionCode string, editID string, noAutoCommit bool, dryRun bool) error {
+func (c *CLI) publishRollback(ctx context.Context, track, versionCode, editID string, noAutoCommit, dryRun bool) error {
 	return errors.NewAPIError(errors.CodeGeneralError, "publish rollback not yet implemented in Kong migration")
 }
 
@@ -123,7 +123,7 @@ func (c *CLI) publishCapabilities(ctx context.Context) error {
 	return errors.NewAPIError(errors.CodeGeneralError, "publish capabilities not yet implemented in Kong migration")
 }
 
-func (c *CLI) publishListingUpdate(ctx context.Context, locale, title, shortDesc, fullDesc, editID string, noAutoCommit bool, dryRun bool) error {
+func (c *CLI) publishListingUpdate(ctx context.Context, locale, title, shortDesc, fullDesc, editID string, noAutoCommit, dryRun bool) error {
 	return errors.NewAPIError(errors.CodeGeneralError, "publish listing update not yet implemented in Kong migration")
 }
 
@@ -131,11 +131,11 @@ func (c *CLI) publishListingGet(ctx context.Context, locale string) error {
 	return errors.NewAPIError(errors.CodeGeneralError, "publish listing get not yet implemented in Kong migration")
 }
 
-func (c *CLI) publishListingDelete(ctx context.Context, locale string, editID string, noAutoCommit bool, dryRun bool, confirm bool) error {
+func (c *CLI) publishListingDelete(ctx context.Context, locale, editID string, noAutoCommit, dryRun, confirm bool) error {
 	return errors.NewAPIError(errors.CodeGeneralError, "publish listing delete not yet implemented in Kong migration")
 }
 
-func (c *CLI) publishListingDeleteAll(ctx context.Context, editID string, noAutoCommit bool, dryRun bool, confirm bool) error {
+func (c *CLI) publishListingDeleteAll(ctx context.Context, editID string, noAutoCommit, dryRun, confirm bool) error {
 	return errors.NewAPIError(errors.CodeGeneralError, "publish listing delete all not yet implemented in Kong migration")
 }
 
@@ -143,31 +143,31 @@ func (c *CLI) publishDetailsGet(ctx context.Context) error {
 	return errors.NewAPIError(errors.CodeGeneralError, "publish details get not yet implemented in Kong migration")
 }
 
-func (c *CLI) publishDetailsUpdate(ctx context.Context, email, phone, website, defaultLanguage string, editID string, noAutoCommit bool, dryRun bool) error {
+func (c *CLI) publishDetailsUpdate(ctx context.Context, email, phone, website, defaultLanguage, editID string, noAutoCommit, dryRun bool) error {
 	return errors.NewAPIError(errors.CodeGeneralError, "publish details update not yet implemented in Kong migration")
 }
 
-func (c *CLI) publishDetailsPatch(ctx context.Context, email, phone, website, defaultLanguage, updateMask string, editID string, noAutoCommit bool, dryRun bool) error {
+func (c *CLI) publishDetailsPatch(ctx context.Context, email, phone, website, defaultLanguage, updateMask, editID string, noAutoCommit, dryRun bool) error {
 	return errors.NewAPIError(errors.CodeGeneralError, "publish details patch not yet implemented in Kong migration")
 }
 
-func (c *CLI) publishImagesUpload(ctx context.Context, imageType, file, locale string, syncImages bool, editID string, noAutoCommit bool, dryRun bool) error {
+func (c *CLI) publishImagesUpload(ctx context.Context, imageType, file, locale string, syncImages bool, editID string, noAutoCommit, dryRun bool) error {
 	return errors.NewAPIError(errors.CodeGeneralError, "publish images upload not yet implemented in Kong migration")
 }
 
-func (c *CLI) publishImagesList(ctx context.Context, imageType, locale string, editID string) error {
+func (c *CLI) publishImagesList(ctx context.Context, imageType, locale, editID string) error {
 	return errors.NewAPIError(errors.CodeGeneralError, "publish images list not yet implemented in Kong migration")
 }
 
-func (c *CLI) publishImagesDelete(ctx context.Context, imageType, imageID, locale string, editID string, noAutoCommit bool, dryRun bool) error {
+func (c *CLI) publishImagesDelete(ctx context.Context, imageType, imageID, locale, editID string, noAutoCommit, dryRun bool) error {
 	return errors.NewAPIError(errors.CodeGeneralError, "publish images delete not yet implemented in Kong migration")
 }
 
-func (c *CLI) publishImagesDeleteAll(ctx context.Context, imageType, locale string, editID string, noAutoCommit bool, dryRun bool) error {
+func (c *CLI) publishImagesDeleteAll(ctx context.Context, imageType, locale, editID string, noAutoCommit, dryRun bool) error {
 	return errors.NewAPIError(errors.CodeGeneralError, "publish images delete all not yet implemented in Kong migration")
 }
 
-func (c *CLI) publishAssetsUpload(ctx context.Context, assetType, file string, editID string, noAutoCommit bool) error {
+func (c *CLI) publishAssetsUpload(ctx context.Context, assetType, file, editID string, noAutoCommit bool) error {
 	return errors.NewAPIError(errors.CodeGeneralError, "publish assets upload not yet implemented in Kong migration")
 }
 
@@ -364,7 +364,7 @@ func (c *CLI) reviewsList(ctx context.Context, params reviewsListParams) error {
 	return errors.NewAPIError(errors.CodeGeneralError, "reviews list not yet implemented in Kong migration")
 }
 
-func (c *CLI) reviewsGet(ctx context.Context, reviewID string, translate string) error {
+func (c *CLI) reviewsGet(ctx context.Context, reviewID, translate string) error {
 	return errors.NewAPIError(errors.CodeGeneralError, "reviews get not yet implemented in Kong migration")
 }
 

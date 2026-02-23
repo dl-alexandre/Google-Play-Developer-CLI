@@ -491,11 +491,13 @@ func (m *Manager) writeExcel(r *Result) error {
 
 	// Create a new Excel file
 	f := excelize.NewFile()
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	// Set the sheet name
 	sheetName := "Data"
-	f.SetSheetName("Sheet1", sheetName)
+	if err := f.SetSheetName("Sheet1", sheetName); err != nil {
+		return fmt.Errorf("failed to set sheet name: %w", err)
+	}
 
 	// Process data into Excel if data is not nil
 	if r.Data != nil {
@@ -552,14 +554,21 @@ func (m *Manager) writeExcelSlice(f *excelize.File, sheetName string, data []int
 	}
 
 	// Write headers with bold formatting
-	boldStyle, _ := f.NewStyle(&excelize.Style{
+	boldStyle, err := f.NewStyle(&excelize.Style{
 		Font: &excelize.Font{Bold: true},
 	})
+	if err != nil {
+		return fmt.Errorf("failed to create bold style: %w", err)
+	}
 
 	for i, header := range headers {
 		cell := fmt.Sprintf("%s%d", string(rune('A'+i)), 1)
-		f.SetCellValue(sheetName, cell, header)
-		f.SetCellStyle(sheetName, cell, cell, boldStyle)
+		if err := f.SetCellValue(sheetName, cell, header); err != nil {
+			return fmt.Errorf("failed to set header cell value: %w", err)
+		}
+		if err := f.SetCellStyle(sheetName, cell, cell, boldStyle); err != nil {
+			return fmt.Errorf("failed to set header cell style: %w", err)
+		}
 	}
 
 	// Write data rows
@@ -571,14 +580,18 @@ func (m *Manager) writeExcelSlice(f *excelize.File, sheetName string, data []int
 		for colIdx, header := range headers {
 			cell := fmt.Sprintf("%s%d", string(rune('A'+colIdx)), rowIdx+2)
 			value := row[header]
-			f.SetCellValue(sheetName, cell, value)
+			if err := f.SetCellValue(sheetName, cell, value); err != nil {
+				return fmt.Errorf("failed to set data cell value: %w", err)
+			}
 		}
 	}
 
 	// Auto-size columns
 	for i := range headers {
 		col := string(rune('A' + i))
-		f.SetColWidth(sheetName, col, col, 15)
+		if err := f.SetColWidth(sheetName, col, col, 15); err != nil {
+			return fmt.Errorf("failed to set column width: %w", err)
+		}
 	}
 
 	return nil
@@ -586,63 +599,105 @@ func (m *Manager) writeExcelSlice(f *excelize.File, sheetName string, data []int
 
 func (m *Manager) writeExcelMap(f *excelize.File, sheetName string, data map[string]interface{}) error {
 	// Write key-value pairs
-	boldStyle, _ := f.NewStyle(&excelize.Style{
+	boldStyle, err := f.NewStyle(&excelize.Style{
 		Font: &excelize.Font{Bold: true},
 	})
+	if err != nil {
+		return fmt.Errorf("failed to create bold style: %w", err)
+	}
 
 	rowIdx := 1
 	for key, value := range data {
 		keyCell := fmt.Sprintf("A%d", rowIdx)
 		valueCell := fmt.Sprintf("B%d", rowIdx)
 
-		f.SetCellValue(sheetName, keyCell, key)
-		f.SetCellStyle(sheetName, keyCell, keyCell, boldStyle)
-		f.SetCellValue(sheetName, valueCell, value)
+		if err := f.SetCellValue(sheetName, keyCell, key); err != nil {
+			return fmt.Errorf("failed to set key cell value: %w", err)
+		}
+		if err := f.SetCellStyle(sheetName, keyCell, keyCell, boldStyle); err != nil {
+			return fmt.Errorf("failed to set key cell style: %w", err)
+		}
+		if err := f.SetCellValue(sheetName, valueCell, value); err != nil {
+			return fmt.Errorf("failed to set value cell value: %w", err)
+		}
 
 		rowIdx++
 	}
 
 	// Auto-size columns
-	f.SetColWidth(sheetName, "A", "A", 20)
-	f.SetColWidth(sheetName, "B", "B", 30)
+	if err := f.SetColWidth(sheetName, "A", "A", 20); err != nil {
+		return fmt.Errorf("failed to set column A width: %w", err)
+	}
+	if err := f.SetColWidth(sheetName, "B", "B", 30); err != nil {
+		return fmt.Errorf("failed to set column B width: %w", err)
+	}
 
 	return nil
 }
 
 func (m *Manager) writeExcelMetadata(f *excelize.File, meta *Metadata) error {
 	sheetName := "Metadata"
-	f.NewSheet(sheetName)
+	if _, err := f.NewSheet(sheetName); err != nil {
+		return fmt.Errorf("failed to create metadata sheet: %w", err)
+	}
 
-	boldStyle, _ := f.NewStyle(&excelize.Style{
+	boldStyle, err := f.NewStyle(&excelize.Style{
 		Font: &excelize.Font{Bold: true},
 	})
+	if err != nil {
+		return fmt.Errorf("failed to create bold style: %w", err)
+	}
 
 	rowIdx := 1
 
 	// Add basic metadata
 	if meta.DurationMs > 0 {
-		f.SetCellValue(sheetName, fmt.Sprintf("A%d", rowIdx), "Duration (ms)")
-		f.SetCellStyle(sheetName, fmt.Sprintf("A%d", rowIdx), fmt.Sprintf("A%d", rowIdx), boldStyle)
-		f.SetCellValue(sheetName, fmt.Sprintf("B%d", rowIdx), meta.DurationMs)
+		if err := f.SetCellValue(sheetName, fmt.Sprintf("A%d", rowIdx), "Duration (ms)"); err != nil {
+			return fmt.Errorf("failed to set duration label: %w", err)
+		}
+		if err := f.SetCellStyle(sheetName, fmt.Sprintf("A%d", rowIdx), fmt.Sprintf("A%d", rowIdx), boldStyle); err != nil {
+			return fmt.Errorf("failed to set duration label style: %w", err)
+		}
+		if err := f.SetCellValue(sheetName, fmt.Sprintf("B%d", rowIdx), meta.DurationMs); err != nil {
+			return fmt.Errorf("failed to set duration value: %w", err)
+		}
 		rowIdx++
 	}
 
 	if len(meta.Services) > 0 {
-		f.SetCellValue(sheetName, fmt.Sprintf("A%d", rowIdx), "Services")
-		f.SetCellStyle(sheetName, fmt.Sprintf("A%d", rowIdx), fmt.Sprintf("A%d", rowIdx), boldStyle)
-		f.SetCellValue(sheetName, fmt.Sprintf("B%d", rowIdx), strings.Join(meta.Services, ", "))
+		if err := f.SetCellValue(sheetName, fmt.Sprintf("A%d", rowIdx), "Services"); err != nil {
+			return fmt.Errorf("failed to set services label: %w", err)
+		}
+		if err := f.SetCellStyle(sheetName, fmt.Sprintf("A%d", rowIdx), fmt.Sprintf("A%d", rowIdx), boldStyle); err != nil {
+			return fmt.Errorf("failed to set services label style: %w", err)
+		}
+		if err := f.SetCellValue(sheetName, fmt.Sprintf("B%d", rowIdx), strings.Join(meta.Services, ", ")); err != nil {
+			return fmt.Errorf("failed to set services value: %w", err)
+		}
 		rowIdx++
 	}
 
 	if meta.NoOp {
-		f.SetCellValue(sheetName, fmt.Sprintf("A%d", rowIdx), "NoOp")
-		f.SetCellStyle(sheetName, fmt.Sprintf("A%d", rowIdx), fmt.Sprintf("A%d", rowIdx), boldStyle)
-		f.SetCellValue(sheetName, fmt.Sprintf("B%d", rowIdx), "true")
+		if err := f.SetCellValue(sheetName, fmt.Sprintf("A%d", rowIdx), "NoOp"); err != nil {
+			return fmt.Errorf("failed to set noop label: %w", err)
+		}
+		if err := f.SetCellStyle(sheetName, fmt.Sprintf("A%d", rowIdx), fmt.Sprintf("A%d", rowIdx), boldStyle); err != nil {
+			return fmt.Errorf("failed to set noop label style: %w", err)
+		}
+		if err := f.SetCellValue(sheetName, fmt.Sprintf("B%d", rowIdx), "true"); err != nil {
+			return fmt.Errorf("failed to set noop value: %w", err)
+		}
 		if meta.NoOpReason != "" {
 			rowIdx++
-			f.SetCellValue(sheetName, fmt.Sprintf("A%d", rowIdx), "NoOp Reason")
-			f.SetCellStyle(sheetName, fmt.Sprintf("A%d", rowIdx), fmt.Sprintf("A%d", rowIdx), boldStyle)
-			f.SetCellValue(sheetName, fmt.Sprintf("B%d", rowIdx), meta.NoOpReason)
+			if err := f.SetCellValue(sheetName, fmt.Sprintf("A%d", rowIdx), "NoOp Reason"); err != nil {
+				return fmt.Errorf("failed to set noop reason label: %w", err)
+			}
+			if err := f.SetCellStyle(sheetName, fmt.Sprintf("A%d", rowIdx), fmt.Sprintf("A%d", rowIdx), boldStyle); err != nil {
+				return fmt.Errorf("failed to set noop reason label style: %w", err)
+			}
+			if err := f.SetCellValue(sheetName, fmt.Sprintf("B%d", rowIdx), meta.NoOpReason); err != nil {
+				return fmt.Errorf("failed to set noop reason value: %w", err)
+			}
 		}
 		rowIdx++
 	}
@@ -650,18 +705,28 @@ func (m *Manager) writeExcelMetadata(f *excelize.File, meta *Metadata) error {
 	// Add warnings if present
 	if len(meta.Warnings) > 0 {
 		rowIdx += 2
-		f.SetCellValue(sheetName, fmt.Sprintf("A%d", rowIdx), "Warnings")
-		f.SetCellStyle(sheetName, fmt.Sprintf("A%d", rowIdx), fmt.Sprintf("A%d", rowIdx), boldStyle)
+		if err := f.SetCellValue(sheetName, fmt.Sprintf("A%d", rowIdx), "Warnings"); err != nil {
+			return fmt.Errorf("failed to set warnings label: %w", err)
+		}
+		if err := f.SetCellStyle(sheetName, fmt.Sprintf("A%d", rowIdx), fmt.Sprintf("A%d", rowIdx), boldStyle); err != nil {
+			return fmt.Errorf("failed to set warnings label style: %w", err)
+		}
 		rowIdx++
 		for _, warning := range meta.Warnings {
-			f.SetCellValue(sheetName, fmt.Sprintf("A%d", rowIdx), warning)
+			if err := f.SetCellValue(sheetName, fmt.Sprintf("A%d", rowIdx), warning); err != nil {
+				return fmt.Errorf("failed to set warning value: %w", err)
+			}
 			rowIdx++
 		}
 	}
 
 	// Auto-size columns
-	f.SetColWidth(sheetName, "A", "A", 20)
-	f.SetColWidth(sheetName, "B", "B", 40)
+	if err := f.SetColWidth(sheetName, "A", "A", 20); err != nil {
+		return fmt.Errorf("failed to set column A width: %w", err)
+	}
+	if err := f.SetColWidth(sheetName, "B", "B", 40); err != nil {
+		return fmt.Errorf("failed to set column B width: %w", err)
+	}
 
 	return nil
 }

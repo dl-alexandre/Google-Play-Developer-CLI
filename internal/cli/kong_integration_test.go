@@ -43,11 +43,11 @@ func captureOutput(t *testing.T, fn func()) string {
 
 	fn()
 
-	w.Close()
+	_ = w.Close()
 	os.Stdout = oldStdout
 
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+	_, _ = io.Copy(&buf, r)
 	return buf.String()
 }
 
@@ -218,7 +218,7 @@ func TestIntegration_VitalsCrashesCmd_WithMockAPI(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}))
 	defer server.Close()
 
@@ -290,7 +290,7 @@ func TestIntegration_VitalsAnrsCmd_WithMockAPI(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}))
 	defer server.Close()
 
@@ -347,7 +347,7 @@ func TestIntegration_ReviewsListCmd_WithMockAPI(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}))
 	defer server.Close()
 
@@ -621,7 +621,7 @@ func TestIntegration_ErrorHandling_AuthFailure(t *testing.T) {
 	// Try to run a command that requires auth without being logged in
 	// First ensure we're logged out
 	logoutCmd := &AuthLogoutCmd{}
-	logoutCmd.Run(&Globals{})
+	_ = logoutCmd.Run(&Globals{})
 
 	cmd := &VitalsCrashesCmd{
 		StartDate: "2024-01-01",
@@ -653,7 +653,7 @@ func TestIntegration_OutputFormats_JSON(t *testing.T) {
 	}
 
 	output := captureOutput(t, func() {
-		cmd.Run(globals)
+		_ = cmd.Run(globals)
 	})
 
 	result := parseJSONOutput(t, output)
@@ -673,7 +673,7 @@ func TestIntegration_OutputFormats_PrettyJSON(t *testing.T) {
 	}
 
 	output := captureOutput(t, func() {
-		cmd.Run(globals)
+		_ = cmd.Run(globals)
 	})
 
 	// Pretty JSON should have newlines and indentation
@@ -693,7 +693,7 @@ func TestIntegration_OutputFormats_Table(t *testing.T) {
 	}
 
 	output := captureOutput(t, func() {
-		cmd.Run(globals)
+		_ = cmd.Run(globals)
 	})
 
 	// Table output should exist (may fall back to JSON for simple data)
@@ -838,7 +838,7 @@ func TestIntegration_NetworkErrors_ServerError(t *testing.T) {
 	// Create a server that returns 500 errors
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"error": map[string]interface{}{
 				"code":    500,
 				"message": "Internal server error",
@@ -855,7 +855,7 @@ func TestIntegration_NetworkErrors_InvalidJSON(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("invalid json{"))
+		_, _ = w.Write([]byte("invalid json{"))
 	}))
 	defer server.Close()
 
@@ -880,7 +880,7 @@ func TestIntegration_ExitCodes_Success(t *testing.T) {
 func TestIntegration_ExitCodes_AuthFailure(t *testing.T) {
 	// Ensure logged out first
 	logoutCmd := &AuthLogoutCmd{}
-	logoutCmd.Run(&Globals{})
+	_ = logoutCmd.Run(&Globals{})
 
 	cmd := &VitalsCrashesCmd{
 		StartDate: "2024-01-01",
@@ -930,7 +930,7 @@ func TestIntegration_Concurrent_Operations(t *testing.T) {
 			defer func() { done <- true }()
 			cmd := &AuthStatusCmd{}
 			globals := &Globals{Output: "json"}
-			cmd.Run(globals)
+			_ = cmd.Run(globals)
 		}()
 	}
 
@@ -1023,12 +1023,12 @@ func TestIntegration_CommandChain_AuthFlow(t *testing.T) {
 
 	// 1. Check status (should be unauthenticated)
 	statusCmd := &AuthStatusCmd{}
-	statusCmd.Run(&Globals{Output: "json"})
+	_ = statusCmd.Run(&Globals{Output: "json"})
 
 	// 2. Login
 	loginCmd := &AuthLoginCmd{Key: keyPath}
 	loginOutput := captureOutput(t, func() {
-		loginCmd.Run(&Globals{Output: "json"})
+		_ = loginCmd.Run(&Globals{Output: "json"})
 	})
 
 	if !strings.Contains(loginOutput, "Authentication successful") {
@@ -1037,14 +1037,14 @@ func TestIntegration_CommandChain_AuthFlow(t *testing.T) {
 
 	// 3. Check status (should be authenticated)
 	statusOutput := captureOutput(t, func() {
-		statusCmd.Run(&Globals{Output: "json"})
+		_ = statusCmd.Run(&Globals{Output: "json"})
 	})
 	t.Logf("Status after login: %s", statusOutput)
 
 	// 4. Logout
 	logoutCmd := &AuthLogoutCmd{}
 	logoutOutput := captureOutput(t, func() {
-		logoutCmd.Run(&Globals{Output: "json"})
+		_ = logoutCmd.Run(&Globals{Output: "json"})
 	})
 
 	if !strings.Contains(logoutOutput, "Signed out successfully") {
@@ -1053,7 +1053,7 @@ func TestIntegration_CommandChain_AuthFlow(t *testing.T) {
 
 	// 5. Check status (should be unauthenticated again)
 	finalStatusOutput := captureOutput(t, func() {
-		statusCmd.Run(&Globals{Output: "json"})
+		_ = statusCmd.Run(&Globals{Output: "json"})
 	})
 	t.Logf("Status after logout: %s", finalStatusOutput)
 }
@@ -1082,8 +1082,8 @@ func TestIntegration_EnvironmentVariables(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Set and restore env var
 			oldValue := os.Getenv(tt.envVar)
-			os.Setenv(tt.envVar, tt.envValue)
-			defer os.Setenv(tt.envVar, oldValue)
+			_ = os.Setenv(tt.envVar, tt.envValue)
+			defer func() { _ = os.Setenv(tt.envVar, oldValue) }()
 
 			// Verify it's set
 			if got := os.Getenv(tt.envVar); got != tt.envValue {
@@ -1207,7 +1207,9 @@ func TestIntegration_DryRunMode_BulkOperations(t *testing.T) {
 		},
 	}
 	data, _ := json.Marshal(listingsData)
-	os.WriteFile(listingsFile, data, 0644)
+	if err := os.WriteFile(listingsFile, data, 0644); err != nil {
+		t.Fatalf("Failed to write listings file: %v", err)
+	}
 
 	tests := []struct {
 		name string

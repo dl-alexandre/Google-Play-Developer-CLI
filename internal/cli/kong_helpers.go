@@ -91,10 +91,14 @@ func outputExcel(result *output.Result) error {
 	}
 
 	f := excelize.NewFile()
-	defer f.Close()
+	defer func() {
+		_ = f.Close()
+	}()
 
 	sheetName := "Data"
-	f.SetSheetName("Sheet1", sheetName)
+	if err := f.SetSheetName("Sheet1", sheetName); err != nil {
+		return err
+	}
 
 	switch v := data.(type) {
 	case []interface{}:
@@ -147,14 +151,21 @@ func writeExcelSlice(f *excelize.File, sheetName string, data []interface{}) err
 		headers = append(headers, k)
 	}
 
-	boldStyle, _ := f.NewStyle(&excelize.Style{
+	boldStyle, err := f.NewStyle(&excelize.Style{
 		Font: &excelize.Font{Bold: true},
 	})
+	if err != nil {
+		return err
+	}
 
 	for i, header := range headers {
 		cell := fmt.Sprintf("%s%d", string(rune('A'+i)), 1)
-		f.SetCellValue(sheetName, cell, header)
-		f.SetCellStyle(sheetName, cell, cell, boldStyle)
+		if err := f.SetCellValue(sheetName, cell, header); err != nil {
+			return err
+		}
+		if err := f.SetCellStyle(sheetName, cell, cell, boldStyle); err != nil {
+			return err
+		}
 	}
 
 	for rowIdx, item := range data {
@@ -165,91 +176,147 @@ func writeExcelSlice(f *excelize.File, sheetName string, data []interface{}) err
 		for colIdx, header := range headers {
 			cell := fmt.Sprintf("%s%d", string(rune('A'+colIdx)), rowIdx+2)
 			value := row[header]
-			f.SetCellValue(sheetName, cell, value)
+			if err := f.SetCellValue(sheetName, cell, value); err != nil {
+				return err
+			}
 		}
 	}
 
 	for i := range headers {
 		col := string(rune('A' + i))
-		f.SetColWidth(sheetName, col, col, 15)
+		if err := f.SetColWidth(sheetName, col, col, 15); err != nil {
+			return err
+		}
 	}
 
 	return nil
 }
 
 func writeExcelMap(f *excelize.File, sheetName string, data map[string]interface{}) error {
-	boldStyle, _ := f.NewStyle(&excelize.Style{
+	boldStyle, err := f.NewStyle(&excelize.Style{
 		Font: &excelize.Font{Bold: true},
 	})
+	if err != nil {
+		return err
+	}
 
 	rowIdx := 1
 	for key, value := range data {
 		keyCell := fmt.Sprintf("A%d", rowIdx)
 		valueCell := fmt.Sprintf("B%d", rowIdx)
 
-		f.SetCellValue(sheetName, keyCell, key)
-		f.SetCellStyle(sheetName, keyCell, keyCell, boldStyle)
-		f.SetCellValue(sheetName, valueCell, value)
+		if err := f.SetCellValue(sheetName, keyCell, key); err != nil {
+			return err
+		}
+		if err := f.SetCellStyle(sheetName, keyCell, keyCell, boldStyle); err != nil {
+			return err
+		}
+		if err := f.SetCellValue(sheetName, valueCell, value); err != nil {
+			return err
+		}
 
 		rowIdx++
 	}
 
-	f.SetColWidth(sheetName, "A", "A", 20)
-	f.SetColWidth(sheetName, "B", "B", 30)
+	if err := f.SetColWidth(sheetName, "A", "A", 20); err != nil {
+		return err
+	}
+	if err := f.SetColWidth(sheetName, "B", "B", 30); err != nil {
+		return err
+	}
 
 	return nil
 }
 
 func writeExcelMetadata(f *excelize.File, meta *output.Metadata) error {
 	sheetName := "Metadata"
-	f.NewSheet(sheetName)
+	if _, err := f.NewSheet(sheetName); err != nil {
+		return err
+	}
 
-	boldStyle, _ := f.NewStyle(&excelize.Style{
+	boldStyle, err := f.NewStyle(&excelize.Style{
 		Font: &excelize.Font{Bold: true},
 	})
+	if err != nil {
+		return err
+	}
 
 	rowIdx := 1
 
 	if meta.DurationMs > 0 {
-		f.SetCellValue(sheetName, fmt.Sprintf("A%d", rowIdx), "Duration (ms)")
-		f.SetCellStyle(sheetName, fmt.Sprintf("A%d", rowIdx), fmt.Sprintf("A%d", rowIdx), boldStyle)
-		f.SetCellValue(sheetName, fmt.Sprintf("B%d", rowIdx), meta.DurationMs)
+		if err := f.SetCellValue(sheetName, fmt.Sprintf("A%d", rowIdx), "Duration (ms)"); err != nil {
+			return err
+		}
+		if err := f.SetCellStyle(sheetName, fmt.Sprintf("A%d", rowIdx), fmt.Sprintf("A%d", rowIdx), boldStyle); err != nil {
+			return err
+		}
+		if err := f.SetCellValue(sheetName, fmt.Sprintf("B%d", rowIdx), meta.DurationMs); err != nil {
+			return err
+		}
 		rowIdx++
 	}
 
 	if len(meta.Services) > 0 {
-		f.SetCellValue(sheetName, fmt.Sprintf("A%d", rowIdx), "Services")
-		f.SetCellStyle(sheetName, fmt.Sprintf("A%d", rowIdx), fmt.Sprintf("A%d", rowIdx), boldStyle)
-		f.SetCellValue(sheetName, fmt.Sprintf("B%d", rowIdx), fmt.Sprintf("%v", meta.Services))
+		if err := f.SetCellValue(sheetName, fmt.Sprintf("A%d", rowIdx), "Services"); err != nil {
+			return err
+		}
+		if err := f.SetCellStyle(sheetName, fmt.Sprintf("A%d", rowIdx), fmt.Sprintf("A%d", rowIdx), boldStyle); err != nil {
+			return err
+		}
+		if err := f.SetCellValue(sheetName, fmt.Sprintf("B%d", rowIdx), fmt.Sprintf("%v", meta.Services)); err != nil {
+			return err
+		}
 		rowIdx++
 	}
 
 	if meta.NoOp {
-		f.SetCellValue(sheetName, fmt.Sprintf("A%d", rowIdx), "NoOp")
-		f.SetCellStyle(sheetName, fmt.Sprintf("A%d", rowIdx), fmt.Sprintf("A%d", rowIdx), boldStyle)
-		f.SetCellValue(sheetName, fmt.Sprintf("B%d", rowIdx), "true")
+		if err := f.SetCellValue(sheetName, fmt.Sprintf("A%d", rowIdx), "NoOp"); err != nil {
+			return err
+		}
+		if err := f.SetCellStyle(sheetName, fmt.Sprintf("A%d", rowIdx), fmt.Sprintf("A%d", rowIdx), boldStyle); err != nil {
+			return err
+		}
+		if err := f.SetCellValue(sheetName, fmt.Sprintf("B%d", rowIdx), "true"); err != nil {
+			return err
+		}
 		if meta.NoOpReason != "" {
 			rowIdx++
-			f.SetCellValue(sheetName, fmt.Sprintf("A%d", rowIdx), "NoOp Reason")
-			f.SetCellStyle(sheetName, fmt.Sprintf("A%d", rowIdx), fmt.Sprintf("A%d", rowIdx), boldStyle)
-			f.SetCellValue(sheetName, fmt.Sprintf("B%d", rowIdx), meta.NoOpReason)
+			if err := f.SetCellValue(sheetName, fmt.Sprintf("A%d", rowIdx), "NoOp Reason"); err != nil {
+				return err
+			}
+			if err := f.SetCellStyle(sheetName, fmt.Sprintf("A%d", rowIdx), fmt.Sprintf("A%d", rowIdx), boldStyle); err != nil {
+				return err
+			}
+			if err := f.SetCellValue(sheetName, fmt.Sprintf("B%d", rowIdx), meta.NoOpReason); err != nil {
+				return err
+			}
 		}
 		rowIdx++
 	}
 
 	if len(meta.Warnings) > 0 {
 		rowIdx += 2
-		f.SetCellValue(sheetName, fmt.Sprintf("A%d", rowIdx), "Warnings")
-		f.SetCellStyle(sheetName, fmt.Sprintf("A%d", rowIdx), fmt.Sprintf("A%d", rowIdx), boldStyle)
+		if err := f.SetCellValue(sheetName, fmt.Sprintf("A%d", rowIdx), "Warnings"); err != nil {
+			return err
+		}
+		if err := f.SetCellStyle(sheetName, fmt.Sprintf("A%d", rowIdx), fmt.Sprintf("A%d", rowIdx), boldStyle); err != nil {
+			return err
+		}
 		rowIdx++
 		for _, warning := range meta.Warnings {
-			f.SetCellValue(sheetName, fmt.Sprintf("A%d", rowIdx), warning)
+			if err := f.SetCellValue(sheetName, fmt.Sprintf("A%d", rowIdx), warning); err != nil {
+				return err
+			}
 			rowIdx++
 		}
 	}
 
-	f.SetColWidth(sheetName, "A", "A", 20)
-	f.SetColWidth(sheetName, "B", "B", 40)
+	if err := f.SetColWidth(sheetName, "A", "A", 20); err != nil {
+		return err
+	}
+	if err := f.SetColWidth(sheetName, "B", "B", 40); err != nil {
+		return err
+	}
 
 	return nil
 }

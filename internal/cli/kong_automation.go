@@ -163,7 +163,9 @@ func (cmd *AutomationReleaseNotesCmd) writeToFile(notes interface{}) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() {
+		_ = f.Close()
+	}()
 
 	var content string
 	switch v := notes.(type) {

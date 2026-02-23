@@ -1035,3 +1035,154 @@ func TestWriteCSVNilData(t *testing.T) {
 		t.Fatal("Expected empty output")
 	}
 }
+
+func TestExcelFormat(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	mgr := NewManager(&buf).SetFormat(FormatExcel)
+
+	data := []interface{}{
+		map[string]interface{}{"name": "app1", "count": 10, "active": true},
+		map[string]interface{}{"name": "app2", "count": 20, "active": false},
+	}
+	result := NewResult(data)
+
+	if err := mgr.Write(result); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	if buf.Len() == 0 {
+		t.Fatal("Excel output should not be empty")
+	}
+
+	// Verify it's a valid XLSX by checking magic number
+	xlsxMagic := []byte{0x50, 0x4B, 0x03, 0x04} // ZIP file magic number
+	if !bytes.HasPrefix(buf.Bytes(), xlsxMagic) {
+		t.Error("Output is not a valid XLSX file (should be a ZIP)")
+	}
+}
+
+func TestExcelFormatEmptySlice(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	mgr := NewManager(&buf).SetFormat(FormatExcel)
+
+	result := NewResult([]interface{}{})
+	if err := mgr.Write(result); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	if buf.Len() == 0 {
+		t.Fatal("Excel output for empty slice should still contain valid XLSX")
+	}
+}
+
+func TestExcelFormatError(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	mgr := NewManager(&buf).SetFormat(FormatExcel)
+
+	err := errors.NewAPIError(errors.CodeValidationError, "test error")
+	result := NewErrorResult(err)
+
+	if err := mgr.Write(result); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	// Errors should fall back to JSON even in Excel mode
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(buf.Bytes(), &parsed); err != nil {
+		t.Fatalf("Error output should be valid JSON: %v", err)
+	}
+}
+
+func TestExcelFormatSingleMap(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	mgr := NewManager(&buf).SetFormat(FormatExcel)
+
+	data := map[string]interface{}{"name": "app1", "version": "1.0", "count": 42}
+	result := NewResult(data)
+
+	if err := mgr.Write(result); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	if buf.Len() == 0 {
+		t.Fatal("Excel output should not be empty")
+	}
+
+	// Verify it's a valid XLSX
+	xlsxMagic := []byte{0x50, 0x4B, 0x03, 0x04}
+	if !bytes.HasPrefix(buf.Bytes(), xlsxMagic) {
+		t.Error("Output is not a valid XLSX file")
+	}
+}
+
+func TestExcelFormatWithMetadata(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	mgr := NewManager(&buf).SetFormat(FormatExcel)
+
+	data := []interface{}{
+		map[string]interface{}{"name": "test"},
+	}
+	result := NewResult(data)
+	result.WithServices("androidpublisher")
+	result.WithDuration(100 * time.Millisecond)
+	result.WithWarnings("test warning")
+
+	if err := mgr.Write(result); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	if buf.Len() == 0 {
+		t.Fatal("Excel output should not be empty")
+	}
+}
+
+func TestExcelFormatNilData(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	mgr := NewManager(&buf).SetFormat(FormatExcel)
+
+	result := NewResult(nil)
+	if err := mgr.Write(result); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	// Should output valid XLSX even with nil data
+	if buf.Len() == 0 {
+		t.Fatal("Excel output for nil data should still contain valid XLSX")
+	}
+}
+
+func TestExcelFormatUnsupportedType(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	mgr := NewManager(&buf).SetFormat(FormatExcel)
+
+	result := NewResult(42) // Unsupported type
+	if err := mgr.Write(result); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	// Should fall back to JSON
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(buf.Bytes(), &parsed); err != nil {
+		t.Fatalf("Fallback output should be JSON: %v", err)
+	}
+}
+
+func TestParseFormatExcel(t *testing.T) {
+	t.Parallel()
+	if got := ParseFormat("excel"); got != FormatExcel {
+		t.Errorf("ParseFormat(\"excel\") = %v, want %v", got, FormatExcel)
+	}
+	if got := ParseFormat("xlsx"); got != FormatExcel {
+		t.Errorf("ParseFormat(\"xlsx\") = %v, want %v", got, FormatExcel)
+	}
+	if got := ParseFormat("EXCEL"); got != FormatExcel {
+		t.Errorf("ParseFormat(\"EXCEL\") = %v, want %v", got, FormatExcel)
+	}
+}

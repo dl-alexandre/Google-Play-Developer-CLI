@@ -340,11 +340,197 @@ This document provides a comprehensive overview of Google Play API coverage in t
 | `players.unhide` | `gpd games players unhide <player-id>` | ✅ | Unhide player from leaderboards |
 | `applications.listHidden` | `gpd games applications list-hidden <app-id>` | ✅ | List hidden players for an application |
 
+## Bulk Operations
+
+### Bulk Upload
+
+| API Endpoint | CLI Command | Status | Notes |
+|--------------|-------------|--------|-------|
+| `edits.bundles.upload` (batch) | `gpd bulk upload <files...>` | ⚠️ | Upload multiple APKs/AABs in parallel with controlled concurrency |
+
+### Bulk Listings
+
+| API Endpoint | CLI Command | Status | Notes |
+|--------------|-------------|--------|-------|
+| `edits.listings.update` (batch) | `gpd bulk listings --data-file <file>` | ⚠️ | Update store listings across multiple locales from JSON file |
+
+### Bulk Images
+
+| API Endpoint | CLI Command | Status | Notes |
+|--------------|-------------|--------|-------|
+| `edits.images.upload` (batch) | `gpd bulk images --image-dir <dir>` | ⚠️ | Batch upload images organized by type/locale directory structure |
+
+### Bulk Tracks
+
+| API Endpoint | CLI Command | Status | Notes |
+|--------------|-------------|--------|-------|
+| `edits.tracks.update` (batch) | `gpd bulk tracks --tracks <tracks...>` | ⚠️ | Update multiple tracks with same release simultaneously |
+
+## App Comparison
+
+### Compare Vitals
+
+| API Endpoint | CLI Command | Status | Notes |
+|--------------|-------------|--------|-------|
+| `vitals.crashrate.query` + `vitals.anrrate.query` | `gpd compare vitals --packages <pkgs...>` | ⚠️ | Compare crash/ANR metrics across multiple apps |
+
+### Compare Reviews
+
+| API Endpoint | CLI Command | Status | Notes |
+|--------------|-------------|--------|-------|
+| `reviews.list` (aggregated) | `gpd compare reviews --packages <pkgs...>` | ⚠️ | Compare review metrics and ratings across apps |
+
+### Compare Releases
+
+| API Endpoint | CLI Command | Status | Notes |
+|--------------|-------------|--------|-------|
+| `edits.tracks.get` (multiple) | `gpd compare releases --packages <pkgs...>` | ⚠️ | Compare release history and timelines across apps |
+
+### Compare Subscriptions
+
+| API Endpoint | CLI Command | Status | Notes |
+|--------------|-------------|--------|-------|
+| `monetization.subscriptions.list` (aggregated) | `gpd compare subscriptions --packages <pkgs...>` | ⚠️ | Compare subscription metrics (MRR, churn, ARPU) across apps |
+
+## Release Management
+
+### Release Calendar
+
+| API Endpoint | CLI Command | Status | Notes |
+|--------------|-------------|--------|-------|
+| `edits.tracks.get` (timeline view) | `gpd release-mgmt calendar` | ⚠️ | Show upcoming and past releases in calendar format |
+
+### Release Conflicts
+
+| API Endpoint | CLI Command | Status | Notes |
+|--------------|-------------|--------|-------|
+| `edits.bundles.list` + `edits.tracks.get` | `gpd release-mgmt conflicts --version-codes <codes...>` | ⚠️ | Detect version code conflicts across tracks |
+
+### Release Strategy
+
+| API Endpoint | CLI Command | Status | Notes |
+|--------------|-------------|--------|-------|
+| `vitals.*.query` + `edits.tracks.get` | `gpd release-mgmt strategy --track <track>` | ⚠️ | Get rollback/roll-forward recommendations based on health metrics |
+
+### Release History
+
+| API Endpoint | CLI Command | Status | Notes |
+|--------------|-------------|--------|-------|
+| `edits.tracks.get` (historical) | `gpd release-mgmt history --track <track>` | ⚠️ | Show detailed release history with optional vitals |
+
+### Release Notes
+
+| API Endpoint | CLI Command | Status | Notes |
+|--------------|-------------|--------|-------|
+| N/A (Play Console feature) | `gpd release-mgmt notes <action>` | ⚠️ | Manage release notes across locales (get, set, copy, list) |
+
+## Testing Tools
+
+### Pre-launch Report
+
+| API Endpoint | CLI Command | Status | Notes |
+|--------------|-------------|--------|-------|
+| Limited API access | `gpd testing prelaunch <action>` | ⚠️ | Trigger or check pre-launch report. Limited API access, primarily Play Console UI |
+
+### Device Lab
+
+| API Endpoint | CLI Command | Status | Notes |
+|--------------|-------------|--------|-------|
+| Firebase Test Lab API | `gpd testing device-lab --app-file <file>` | ⚠️ | Run tests on Firebase Test Lab. Requires Firebase project setup |
+
+### Screenshots
+
+| API Endpoint | CLI Command | Status | Notes |
+|--------------|-------------|--------|-------|
+| Firebase Test Lab / Play Console | `gpd testing screenshots --app-file <file>` | ⚠️ | Capture screenshots across devices. Requires Firebase Test Lab integration |
+
+### Validate
+
+| API Endpoint | CLI Command | Status | Notes |
+|--------------|-------------|--------|-------|
+| Local validation | `gpd testing validate --app-file <file>` | ✅ | Comprehensive app validation (AAB format, signing, permissions, size, API level) |
+
+### Compatibility
+
+| API Endpoint | CLI Command | Status | Notes |
+|--------------|-------------|--------|-------|
+| Device catalog API | `gpd testing compatibility --app-file <file>` | ⚠️ | Check device compatibility against Play Store device catalog |
+
+## Release Automation
+
+### Automated Release Notes
+
+| API Endpoint | CLI Command | Status | Notes |
+|--------------|-------------|--------|-------|
+| Git / GitHub API | `gpd automation release-notes --source <git|pr|file>` | ✅ | Generate release notes from git history, PRs, or file |
+
+### Automated Rollout
+
+| API Endpoint | CLI Command | Status | Notes |
+|--------------|-------------|--------|-------|
+| `edits.tracks.update` (staged) | `gpd automation rollout --track <track>` | ✅ | Automated staged rollout with health checks and auto-rollback |
+
+### Smart Promote
+
+| API Endpoint | CLI Command | Status | Notes |
+|--------------|-------------|--------|-------|
+| `edits.tracks.update` (promotion) | `gpd automation promote --from-track <track> --to-track <track>` | ✅ | Smart promote with optional verification and health checks |
+
+### Pre-release Validation
+
+| API Endpoint | CLI Command | Status | Notes |
+|--------------|-------------|--------|-------|
+| Multiple validation checks | `gpd automation validate --checks <checks...>` | ✅ | Comprehensive pre-release validation (AAB, signing, permissions, deobfuscation) |
+
+### Post-release Monitoring
+
+| API Endpoint | CLI Command | Status | Notes |
+|--------------|-------------|--------|-------|
+| `vitals.*.query` | `gpd automation monitor --track <track>` | ✅ | Monitor release health after rollout with threshold-based alerting |
+
+## Monitoring
+
+### Continuous Watch
+
+| API Endpoint | CLI Command | Status | Notes |
+|--------------|-------------|--------|-------|
+| `vitals.crashrate.query` + `vitals.anrrate.query` + `vitals.errors.counts.query` | `gpd monitor watch` | ✅ | Continuous vitals monitoring with configurable thresholds and alerting |
+
+### Anomaly Detection
+
+| API Endpoint | CLI Command | Status | Notes |
+|--------------|-------------|--------|-------|
+| `vitals.*.query` (statistical analysis) | `gpd monitor anomalies` | ✅ | Detect statistical anomalies in vitals metrics with baseline comparison |
+
+### Dashboard
+
+| API Endpoint | CLI Command | Status | Notes |
+|--------------|-------------|--------|-------|
+| All vitals metrics APIs | `gpd monitor dashboard` | ✅ | Generate comprehensive monitoring dashboard data with trends |
+
+### Scheduled Reports
+
+| API Endpoint | CLI Command | Status | Notes |
+|--------------|-------------|--------|-------|
+| All vitals metrics APIs | `gpd monitor report --period <period>` | ✅ | Generate scheduled monitoring reports (daily, weekly, monthly) with findings and recommendations |
+
+### Webhooks
+
+| API Endpoint | CLI Command | Status | Notes |
+|--------------|-------------|--------|-------|
+| N/A (Play Console UI only) | `gpd monitor webhooks list` | ⚠️ | Google Play webhooks are configured via Play Console UI, not API. Command shows example format only |
+
 ## Summary
 
 - **Android Publisher API v3**: Comprehensive coverage of publishing, monetization, purchases, reviews, permissions, and recovery operations
 - **Play Developer Reporting API v1beta1**: Full coverage of vitals metrics, error reporting, and anomalies (except LMK Rate which is not available in the API)
 - **Games Management API v1**: Complete coverage of achievement, score, event resets, and player visibility management
+- **Bulk Operations**: Batch processing commands for uploads, listings, images, and tracks (stubs ready for implementation)
+- **App Comparison**: Cross-app analysis for vitals, reviews, releases, and subscriptions (stubs ready for implementation)
+- **Release Management**: Enhanced release lifecycle tools including calendar, conflict detection, strategy recommendations, history, and notes management (stubs ready for implementation)
+- **Testing Tools**: Pre-launch reports, Firebase Test Lab integration, screenshot capture, validation, and compatibility checking (partial implementation)
+- **Release Automation**: CI/CD-ready commands for automated release notes generation, staged rollouts with health checks, smart promotion, validation, and monitoring (fully implemented)
+- **Monitoring**: Real-time vitals monitoring with threshold alerting, anomaly detection, dashboard generation, and scheduled reporting (fully implemented)
 
 ## Notes
 

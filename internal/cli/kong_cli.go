@@ -14,7 +14,7 @@ import (
 // Globals contains all global flags shared across all commands.
 type Globals struct {
 	Package     string        `help:"App package name" short:"p"`
-	Output      string        `help:"Output format: json, table, markdown, csv" default:"json" enum:"json,table,markdown,csv"`
+	Output      string        `help:"Output format: json, table, markdown, csv, excel" default:"json" enum:"json,table,markdown,csv,excel"`
 	Pretty      bool          `help:"Pretty print JSON output"`
 	Timeout     time.Duration `help:"Network timeout" default:"30s"`
 	StoreTokens string        `help:"Token storage: auto, never, secure" default:"auto" enum:"auto,never,secure"`
@@ -35,6 +35,7 @@ type KongCLI struct {
 	Publish      PublishCmd      `cmd:"" help:"Publishing commands"`
 	Reviews      ReviewsCmd      `cmd:"" help:"Review management commands"`
 	Vitals       VitalsCmd       `cmd:"" help:"Android vitals commands"`
+	Monitor      MonitorCmd      `cmd:"" help:"Monitoring and alerting commands"`
 	Analytics    AnalyticsCmd    `cmd:"" help:"Analytics commands"`
 	Purchases    PurchasesCmd    `cmd:"" help:"Purchase verification commands"`
 	Monetization MonetizationCmd `cmd:"" help:"Monetization commands"`
@@ -47,6 +48,13 @@ type KongCLI struct {
 	CustomApp    CustomAppCmd    `cmd:"" help:"Custom app publishing" aliases:"customapp"`
 	Grouping     GroupingCmd     `cmd:"" help:"App access grouping"`
 	Version      VersionCmd      `cmd:"" help:"Show version information"`
+
+	// New advanced commands
+	Bulk        BulkCmd        `cmd:"" help:"Batch operations for uploads and updates"`
+	Compare     CompareCmd     `cmd:"" help:"Compare metrics across multiple apps"`
+	ReleaseMgmt ReleaseMgmtCmd `cmd:"" name:"release-mgmt" help:"Advanced release management"`
+	Testing     TestingCmd     `cmd:"" help:"Testing and QA tools"`
+	Automation  AutomationCmd  `cmd:"" help:"CI/CD release automation"`
 
 	// Help is automatically provided by Kong
 }

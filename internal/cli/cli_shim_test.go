@@ -345,9 +345,6 @@ func TestVitalsStubMethods(t *testing.T) {
 		{"vitalsExcessiveWakeups", func() error {
 			return cli.vitalsExcessiveWakeups(ctx, "2024-01-01", "2024-01-31", []string{}, "json", 10, "", false)
 		}},
-		{"vitalsLmkRate", func() error {
-			return cli.vitalsLmkRate(ctx, "2024-01-01", "2024-01-31", []string{}, "json", 10, "", false)
-		}},
 		{"vitalsSlowRendering", func() error {
 			return cli.vitalsSlowRendering(ctx, "2024-01-01", "2024-01-31", []string{}, "json", 10, "", false)
 		}},

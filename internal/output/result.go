@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/xuri/excelize/v2"
+
 	"github.com/dl-alexandre/gpd/internal/errors"
 )
 
@@ -20,7 +22,8 @@ const (
 	FormatJSON     Format = "json"
 	FormatTable    Format = "table"
 	FormatMarkdown Format = "markdown"
-	FormatCSV      Format = "csv" // Only for analytics/vitals
+	FormatCSV      Format = "csv"   // Only for analytics/vitals
+	FormatExcel    Format = "excel" // Excel (.xlsx) format
 )
 
 // Metadata contains response metadata.
@@ -212,6 +215,8 @@ func (m *Manager) Write(r *Result) error {
 		return m.writeMarkdown(r)
 	case FormatCSV:
 		return m.writeCSV(r)
+	case FormatExcel:
+		return m.writeExcel(r)
 	default:
 		return m.writeJSON(r)
 	}
@@ -479,6 +484,188 @@ func (m *Manager) writeCSV(r *Result) error {
 	return m.writeWarnings(r)
 }
 
+func (m *Manager) writeExcel(r *Result) error {
+	if r.Error != nil {
+		return m.writeJSON(r)
+	}
+
+	// Create a new Excel file
+	f := excelize.NewFile()
+	defer f.Close()
+
+	// Set the sheet name
+	sheetName := "Data"
+	f.SetSheetName("Sheet1", sheetName)
+
+	// Process data into Excel if data is not nil
+	if r.Data != nil {
+		switch v := r.Data.(type) {
+		case []interface{}:
+			if err := m.writeExcelSlice(f, sheetName, v); err != nil {
+				return err
+			}
+		case []map[string]interface{}:
+			if err := m.writeExcelSlice(f, sheetName, m.mapSliceToInterface(v)); err != nil {
+				return err
+			}
+		case map[string]interface{}:
+			// For single objects, create a key-value sheet
+			if err := m.writeExcelMap(f, sheetName, v); err != nil {
+				return err
+			}
+		default:
+			// Fall back to JSON for unsupported types
+			return m.writeJSON(r)
+		}
+	}
+
+	// Add metadata sheet if there are warnings or metadata
+	if r.Meta != nil && (len(r.Meta.Warnings) > 0 || r.Meta.DurationMs > 0) {
+		if err := m.writeExcelMetadata(f, r.Meta); err != nil {
+			return err
+		}
+	}
+
+	// Write to stdout
+	if err := f.Write(m.writer); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (m *Manager) writeExcelSlice(f *excelize.File, sheetName string, data []interface{}) error {
+	if len(data) == 0 {
+		return nil
+	}
+
+	// Get headers from first item
+	first, ok := data[0].(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("cannot convert data to Excel format: first item is not a map")
+	}
+
+	// Collect and sort headers for consistent ordering
+	var headers []string
+	for k := range first {
+		headers = append(headers, k)
+	}
+
+	// Write headers with bold formatting
+	boldStyle, _ := f.NewStyle(&excelize.Style{
+		Font: &excelize.Font{Bold: true},
+	})
+
+	for i, header := range headers {
+		cell := fmt.Sprintf("%s%d", string(rune('A'+i)), 1)
+		f.SetCellValue(sheetName, cell, header)
+		f.SetCellStyle(sheetName, cell, cell, boldStyle)
+	}
+
+	// Write data rows
+	for rowIdx, item := range data {
+		row, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		for colIdx, header := range headers {
+			cell := fmt.Sprintf("%s%d", string(rune('A'+colIdx)), rowIdx+2)
+			value := row[header]
+			f.SetCellValue(sheetName, cell, value)
+		}
+	}
+
+	// Auto-size columns
+	for i := range headers {
+		col := string(rune('A' + i))
+		f.SetColWidth(sheetName, col, col, 15)
+	}
+
+	return nil
+}
+
+func (m *Manager) writeExcelMap(f *excelize.File, sheetName string, data map[string]interface{}) error {
+	// Write key-value pairs
+	boldStyle, _ := f.NewStyle(&excelize.Style{
+		Font: &excelize.Font{Bold: true},
+	})
+
+	rowIdx := 1
+	for key, value := range data {
+		keyCell := fmt.Sprintf("A%d", rowIdx)
+		valueCell := fmt.Sprintf("B%d", rowIdx)
+
+		f.SetCellValue(sheetName, keyCell, key)
+		f.SetCellStyle(sheetName, keyCell, keyCell, boldStyle)
+		f.SetCellValue(sheetName, valueCell, value)
+
+		rowIdx++
+	}
+
+	// Auto-size columns
+	f.SetColWidth(sheetName, "A", "A", 20)
+	f.SetColWidth(sheetName, "B", "B", 30)
+
+	return nil
+}
+
+func (m *Manager) writeExcelMetadata(f *excelize.File, meta *Metadata) error {
+	sheetName := "Metadata"
+	f.NewSheet(sheetName)
+
+	boldStyle, _ := f.NewStyle(&excelize.Style{
+		Font: &excelize.Font{Bold: true},
+	})
+
+	rowIdx := 1
+
+	// Add basic metadata
+	if meta.DurationMs > 0 {
+		f.SetCellValue(sheetName, fmt.Sprintf("A%d", rowIdx), "Duration (ms)")
+		f.SetCellStyle(sheetName, fmt.Sprintf("A%d", rowIdx), fmt.Sprintf("A%d", rowIdx), boldStyle)
+		f.SetCellValue(sheetName, fmt.Sprintf("B%d", rowIdx), meta.DurationMs)
+		rowIdx++
+	}
+
+	if len(meta.Services) > 0 {
+		f.SetCellValue(sheetName, fmt.Sprintf("A%d", rowIdx), "Services")
+		f.SetCellStyle(sheetName, fmt.Sprintf("A%d", rowIdx), fmt.Sprintf("A%d", rowIdx), boldStyle)
+		f.SetCellValue(sheetName, fmt.Sprintf("B%d", rowIdx), strings.Join(meta.Services, ", "))
+		rowIdx++
+	}
+
+	if meta.NoOp {
+		f.SetCellValue(sheetName, fmt.Sprintf("A%d", rowIdx), "NoOp")
+		f.SetCellStyle(sheetName, fmt.Sprintf("A%d", rowIdx), fmt.Sprintf("A%d", rowIdx), boldStyle)
+		f.SetCellValue(sheetName, fmt.Sprintf("B%d", rowIdx), "true")
+		if meta.NoOpReason != "" {
+			rowIdx++
+			f.SetCellValue(sheetName, fmt.Sprintf("A%d", rowIdx), "NoOp Reason")
+			f.SetCellStyle(sheetName, fmt.Sprintf("A%d", rowIdx), fmt.Sprintf("A%d", rowIdx), boldStyle)
+			f.SetCellValue(sheetName, fmt.Sprintf("B%d", rowIdx), meta.NoOpReason)
+		}
+		rowIdx++
+	}
+
+	// Add warnings if present
+	if len(meta.Warnings) > 0 {
+		rowIdx += 2
+		f.SetCellValue(sheetName, fmt.Sprintf("A%d", rowIdx), "Warnings")
+		f.SetCellStyle(sheetName, fmt.Sprintf("A%d", rowIdx), fmt.Sprintf("A%d", rowIdx), boldStyle)
+		rowIdx++
+		for _, warning := range meta.Warnings {
+			f.SetCellValue(sheetName, fmt.Sprintf("A%d", rowIdx), warning)
+			rowIdx++
+		}
+	}
+
+	// Auto-size columns
+	f.SetColWidth(sheetName, "A", "A", 20)
+	f.SetColWidth(sheetName, "B", "B", 40)
+
+	return nil
+}
+
 func (m *Manager) mapSliceToInterface(data []map[string]interface{}) []interface{} {
 	slice := make([]interface{}, 0, len(data))
 	for _, item := range data {
@@ -648,6 +835,8 @@ func ParseFormat(s string) Format {
 		return FormatMarkdown
 	case "csv":
 		return FormatCSV
+	case "excel", "xlsx":
+		return FormatExcel
 	default:
 		return FormatJSON
 	}

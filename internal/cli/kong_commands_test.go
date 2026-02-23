@@ -377,18 +377,68 @@ func TestPublishCommands_ReturnNotImplemented(t *testing.T) {
 	}
 }
 
-func TestReviewsCommands_ReturnNotImplemented(t *testing.T) {
-	globals := &Globals{}
+func TestReviewsCommands_RequireAuth(t *testing.T) {
+	globals := &Globals{Package: "com.example.app"}
 
 	commands := []struct {
 		name string
 		cmd  interface{ Run(*Globals) error }
 	}{
 		{"ReviewsListCmd", &ReviewsListCmd{}},
+	}
+
+	for _, tc := range commands {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.cmd.Run(globals)
+			if err == nil {
+				t.Errorf("%s.Run() should return error without auth, got nil", tc.name)
+				return
+			}
+
+			if !strings.Contains(err.Error(), "authentication not configured") {
+				t.Errorf("%s.Run() error should contain 'authentication not configured', got: %v", tc.name, err)
+			}
+		})
+	}
+}
+
+func TestReviewsCommands_RequireReviewID(t *testing.T) {
+	globals := &Globals{Package: "com.example.app"}
+
+	commands := []struct {
+		name string
+		cmd  interface{ Run(*Globals) error }
+	}{
 		{"ReviewsGetCmd", &ReviewsGetCmd{}},
 		{"ReviewsReplyCmd", &ReviewsReplyCmd{}},
 		{"ReviewsResponseGetCmd", &ReviewsResponseGetCmd{}},
 		{"ReviewsResponseDeleteCmd", &ReviewsResponseDeleteCmd{}},
+	}
+
+	for _, tc := range commands {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.cmd.Run(globals)
+			if err == nil {
+				t.Errorf("%s.Run() should return error without review ID, got nil", tc.name)
+				return
+			}
+
+			if !strings.Contains(err.Error(), "review ID is required") {
+				t.Errorf("%s.Run() error should contain 'review ID is required', got: %v", tc.name, err)
+			}
+		})
+	}
+}
+
+func TestVitalsCommands_ReturnNotImplemented(t *testing.T) {
+	globals := &Globals{Package: "com.example.app"}
+
+	commands := []struct {
+		name string
+		cmd  interface{ Run(*Globals) error }
+	}{
+		{"VitalsQueryCmd", &VitalsQueryCmd{}},
+		{"VitalsCapabilitiesCmd", &VitalsCapabilitiesCmd{}},
 	}
 
 	for _, tc := range commands {
@@ -406,7 +456,7 @@ func TestReviewsCommands_ReturnNotImplemented(t *testing.T) {
 	}
 }
 
-func TestVitalsCommands_ReturnNotImplemented(t *testing.T) {
+func TestVitalsCommands_RequireAuth(t *testing.T) {
 	globals := &Globals{Package: "com.example.app"}
 
 	commands := []struct {
@@ -420,25 +470,22 @@ func TestVitalsCommands_ReturnNotImplemented(t *testing.T) {
 		{"VitalsErrorsCountsGetCmd", &VitalsErrorsCountsGetCmd{}},
 		{"VitalsErrorsCountsQueryCmd", &VitalsErrorsCountsQueryCmd{}},
 		{"VitalsMetricsExcessiveWakeupsCmd", &VitalsMetricsExcessiveWakeupsCmd{}},
-		{"VitalsMetricsLmkRateCmd", &VitalsMetricsLmkRateCmd{}},
 		{"VitalsMetricsSlowRenderingCmd", &VitalsMetricsSlowRenderingCmd{}},
 		{"VitalsMetricsSlowStartCmd", &VitalsMetricsSlowStartCmd{}},
 		{"VitalsMetricsStuckWakelocksCmd", &VitalsMetricsStuckWakelocksCmd{}},
 		{"VitalsAnomaliesListCmd", &VitalsAnomaliesListCmd{}},
-		{"VitalsQueryCmd", &VitalsQueryCmd{}},
-		{"VitalsCapabilitiesCmd", &VitalsCapabilitiesCmd{}},
 	}
 
 	for _, tc := range commands {
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.cmd.Run(globals)
 			if err == nil {
-				t.Errorf("%s.Run() should return error, got nil", tc.name)
+				t.Errorf("%s.Run() should return error without auth, got nil", tc.name)
 				return
 			}
 
-			if !strings.Contains(err.Error(), "not yet implemented") {
-				t.Errorf("%s.Run() error should contain 'not yet implemented', got: %v", tc.name, err)
+			if !strings.Contains(err.Error(), "authentication not configured") {
+				t.Errorf("%s.Run() error should contain 'authentication not configured', got: %v", tc.name, err)
 			}
 		})
 	}
@@ -803,7 +850,7 @@ func TestGlobals_FieldTags(t *testing.T) {
 		fieldName string
 		enum      string
 	}{
-		{"Output", "json,table,markdown,csv"},
+		{"Output", "json,table,markdown,csv,excel"},
 		{"StoreTokens", "auto,never,secure"},
 	}
 
@@ -889,7 +936,7 @@ func TestVitalsMetricsCmd_NestedStructure(t *testing.T) {
 	typeOfCmd := v.Type()
 
 	expectedSubcommands := []string{
-		"ExcessiveWakeups", "LmkRate", "SlowRendering", "SlowStart", "StuckWakelocks",
+		"ExcessiveWakeups", "SlowRendering", "SlowStart", "StuckWakelocks",
 	}
 
 	for _, name := range expectedSubcommands {

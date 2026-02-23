@@ -12,6 +12,11 @@ import (
 	"github.com/dl-alexandre/gpd/internal/storage"
 )
 
+const (
+	formatJSON  = "json"
+	formatTable = "table"
+)
+
 // newAuthManager creates a new auth manager instance.
 func newAuthManager() *auth.Manager {
 	secureStorage := storage.New()
@@ -21,9 +26,9 @@ func newAuthManager() *auth.Manager {
 // outputResult formats and outputs a result based on the format.
 func outputResult(result *output.Result, format string, pretty bool) error {
 	switch format {
-	case "json":
+	case formatJSON:
 		return outputJSON(result, pretty)
-	case "table":
+	case formatTable:
 		return outputTable(result)
 	default:
 		return outputJSON(result, pretty)

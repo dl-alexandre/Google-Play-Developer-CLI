@@ -511,7 +511,7 @@ func TestReviewsStubMethods(t *testing.T) {
 		name string
 		fn   func() error
 	}{
-		{"reviewsList", func() error { return cli.reviewsList(ctx, reviewsListParams{}) }},
+		{"reviewsList", func() error { return cli.reviewsList(ctx, &reviewsListParams{}) }},
 		{"reviewsGet", func() error { return cli.reviewsGet(ctx, "review1", "en") }},
 		{"reviewsReply", func() error { return cli.reviewsReply(ctx, "review1", "Thank you", "", time.Second, false) }},
 		{"reviewsResponseGet", func() error { return cli.reviewsResponseGet(ctx, "review1") }},
@@ -653,7 +653,7 @@ func TestStubMethodErrorMessages(t *testing.T) {
 			return cli.vitalsCrashes(ctx, "2024-01-01", "2024-01-31", []string{}, "json", 10, "", false)
 		}, "vitals crashes"},
 		{"gamesAchievementsReset", func() error { return cli.gamesAchievementsReset(ctx, "achievement1") }, "games achievements reset"},
-		{"reviewsList", func() error { return cli.reviewsList(ctx, reviewsListParams{}) }, "reviews list"},
+		{"reviewsList", func() error { return cli.reviewsList(ctx, &reviewsListParams{}) }, "reviews list"},
 		{"analyticsQuery", func() error {
 			return cli.analyticsQuery(ctx, "2024-01-01", "2024-01-31", []string{"metric"}, []string{}, "json", 10, "", false)
 		}, "analytics query"},

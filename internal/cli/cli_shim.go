@@ -360,7 +360,7 @@ func (c *CLI) analyticsCapabilities(ctx context.Context) error {
 }
 
 // Reviews stubs
-func (c *CLI) reviewsList(ctx context.Context, params reviewsListParams) error {
+func (c *CLI) reviewsList(ctx context.Context, params *reviewsListParams) error {
 	return errors.NewAPIError(errors.CodeGeneralError, "reviews list not yet implemented in Kong migration")
 }
 

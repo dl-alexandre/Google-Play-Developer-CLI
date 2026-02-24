@@ -477,13 +477,13 @@ func (cmd *MonitorAnomaliesCmd) Run(globals *Globals) error {
 
 func (cmd *MonitorAnomaliesCmd) normalizeMetrics() []string {
 	if len(cmd.Metrics) == 0 {
-		return []string{"all"}
+		return []string{checkAll}
 	}
 
 	var result []string
 	for _, m := range cmd.Metrics {
 		switch strings.ToLower(m) {
-		case "all":
+		case checkAll:
 			return []string{metricCrashes, metricAnrs, metricErrors}
 		case metricCrashes, metricCrash:
 			result = append(result, metricCrashes)
@@ -859,13 +859,13 @@ func (cmd *MonitorDashboardCmd) Run(globals *Globals) error {
 
 func (cmd *MonitorDashboardCmd) normalizeDashboardMetrics() []string {
 	if len(cmd.Metrics) == 0 {
-		return []string{"all"}
+		return []string{checkAll}
 	}
 
 	var result []string
 	for _, m := range cmd.Metrics {
 		switch strings.ToLower(m) {
-		case "all":
+		case checkAll:
 			return []string{metricCrashes, metricAnrs, metricErrors, "slow-rendering", "slow-start", "wakeups", "wakelocks"}
 		case metricCrashes, metricCrash:
 			result = append(result, metricCrashes)

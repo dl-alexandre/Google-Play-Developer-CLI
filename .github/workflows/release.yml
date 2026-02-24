@@ -7,13 +7,24 @@ on:
 
 permissions:
   contents: write
-  packages: write
 
 jobs:
-  release:
-    name: GoReleaser
+  build-release:
     runs-on: ubuntu-latest
-
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: darwin
+            arch: arm64
+          - os: darwin
+            arch: amd64
+          - os: linux
+            arch: amd64
+          - os: linux
+            arch: arm64
+          - os: windows
+            arch: amd64
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -26,17 +37,44 @@ jobs:
           go-version-file: 'go.mod'
           cache: true
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+      - name: Build binaries
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          VERSION: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+          DATE: ${{ github.event.head_commit.timestamp }}
+        run: |
+          mkdir -p dist
+          LDFLAGS="-s -w -X github.com/dl-alexandre/gpd/pkg/version.Version=${VERSION} -X github.com/dl-alexandre/gpd/pkg/version.GitCommit=${COMMIT} -X github.com/dl-alexandre/gpd/pkg/version.BuildTime=${DATE}"
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            go build -ldflags="${LDFLAGS}" -o dist/gpd-${{ matrix.os }}-${{ matrix.arch }}.exe ./cmd/gpd
+          else
+            go build -ldflags="${LDFLAGS}" -o dist/gpd-${{ matrix.os }}-${{ matrix.arch }} ./cmd/gpd
+          fi
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Package
+        run: |
+          cd dist
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            mv gpd-${{ matrix.os }}-${{ matrix.arch }}.exe gpd.exe
+            zip gpd-${{ matrix.os }}-${{ matrix.arch }}.zip gpd.exe
+            rm gpd.exe
+          else
+            mv gpd-${{ matrix.os }}-${{ matrix.arch }} gpd
+            tar -czf gpd-${{ matrix.os }}-${{ matrix.arch }}.tar.gz gpd
+            rm gpd
+          fi
 
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum gpd-* > checksums.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          version: latest
-          args: release --clean
+          files: dist/*
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}

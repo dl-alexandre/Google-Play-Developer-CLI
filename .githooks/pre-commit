@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+export PATH="$(go env GOPATH)/bin:$PATH"
+
+echo "Running format checks..."
+make format
+if ! git diff --quiet; then
+  echo "Formatting changed files. Please review and re-stage:"
+  git --no-pager diff --name-only
+  exit 1
+fi
+
+echo "Running lint checks..."
+make lint
+
+echo "Running short test suite..."
+go test -short ./...

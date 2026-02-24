@@ -25,7 +25,7 @@ LDFLAGS = -ldflags "-X github.com/dl-alexandre/gpd/pkg/version.Version=$(VERSION
 # Platforms
 PLATFORMS = linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
 
-.PHONY: all build clean test deps tidy lint install help
+.PHONY: all build clean test deps tidy lint install help format install-hooks
 
 # Default target
 all: deps build
@@ -99,6 +99,22 @@ checksums:
 		fi \
 	done
 	@echo "Checksums written to $(BINARY_DIR)/checksums.txt"
+
+# Format code
+format:
+	@echo "Formatting code..."
+	@gofmt -w -s .
+	@if command -v goimports >/dev/null 2>&1; then \
+		goimports -w .; \
+	else \
+		echo "goimports not installed. Install: go install golang.org/x/tools/cmd/goimports@latest"; \
+	fi
+
+# Install git hooks
+install-hooks:
+	@echo "Installing git hooks..."
+	@git config core.hooksPath .githooks
+	@echo "Hooks installed from .githooks/"
 
 # Show version
 version:

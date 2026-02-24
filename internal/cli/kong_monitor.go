@@ -170,13 +170,13 @@ finish:
 
 func (cmd *MonitorWatchCmd) normalizeMetrics() []string {
 	if len(cmd.Metrics) == 0 {
-		return []string{"all"}
+		return []string{checkAll}
 	}
 
 	var result []string
 	for _, m := range cmd.Metrics {
 		switch strings.ToLower(m) {
-		case "all":
+		case checkAll:
 			return []string{metricCrashes, metricAnrs, metricErrors}
 		case metricCrashes, metricCrash:
 			result = append(result, metricCrashes)

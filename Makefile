@@ -25,7 +25,9 @@ LDFLAGS = -ldflags "-X github.com/dl-alexandre/gpd/pkg/version.Version=$(VERSION
 # Platforms
 PLATFORMS = linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
 
-.PHONY: all build clean test deps tidy lint install help format install-hooks
+.PHONY: all build clean test deps tidy lint install help format install-hooks \
+	benchmark benchmark-compare benchmark-regression benchmark-baseline \
+	test-unit test-integration test-e2e test-coverage-threshold test-flaky
 
 # Default target
 all: deps build
@@ -57,9 +59,47 @@ tidy:
 	$(GOMOD) tidy
 
 # Run tests
+# By default, run only unit tests (exclude integration tests for speed)
 test:
-	@echo "Running tests..."
+	@echo "Running unit tests..."
+	@bash -o pipefail -c '$(GOTEST) -v -race -cover -tags=unit ./... 2>&1 | sed "/malformed LC_DYSYMTAB/d"'
+
+# Run all tests including integration (slower)
+test-all:
+	@echo "Running all tests (unit + integration)..."
 	@bash -o pipefail -c '$(GOTEST) -v -race -cover ./... 2>&1 | sed "/malformed LC_DYSYMTAB/d"'
+
+# Run only unit tests
+test-unit:
+	@echo "Running unit tests..."
+	@bash -o pipefail -c '$(GOTEST) -v -race -cover -tags=unit -count=1 ./... 2>&1 | sed "/malformed LC_DYSYMTAB/d"'
+
+# Run only integration tests
+test-integration:
+	@echo "Running integration tests..."
+	@bash -o pipefail -c '$(GOTEST) -v -race -tags=integration -count=1 ./... 2>&1 | sed "/malformed LC_DYSYMTAB/d"'
+
+# Run E2E tests (if any)
+test-e2e:
+	@echo "Running E2E tests..."
+	@bash -o pipefail -c '$(GOTEST) -v -race -tags=e2e -count=1 ./... 2>&1 | sed "/malformed LC_DYSYMTAB/d"'
+
+# Run tests multiple times to detect flakiness
+test-flaky:
+	@echo "Running tests 5 times to detect flaky tests..."
+	@bash -o pipefail -c '$(GOTEST) -race -count=5 ./... 2>&1 | sed "/malformed LC_DYSYMTAB/d"'
+
+# Run tests with coverage threshold check (fails if coverage < 70%)
+test-coverage-threshold: test-coverage
+	@echo "Checking coverage threshold..."
+	@coverage=$$(go tool cover -func=coverage.out | grep total | awk '{print $$3}' | sed 's/%//'); \
+	threshold=70.0; \
+	if (( $$(echo "$$coverage < $$threshold" | bc -l) )); then \
+		echo "❌ Coverage $$coverage% is below threshold $$threshold%"; \
+		exit 1; \
+	else \
+		echo "✅ Coverage $$coverage% meets threshold $$threshold%"; \
+	fi
 
 # Run tests with coverage
 test-coverage:
@@ -143,29 +183,94 @@ completions: build
 	@./$(BINARY_DIR)/$(BINARY_NAME) config completion fish > completions/$(BINARY_NAME).fish
 	@echo "Shell completions generated in completions/"
 
+# Run benchmarks
+benchmark:
+	@echo "Running benchmarks..."
+	@mkdir -p .artifacts/benchmarks
+	@$(GOTEST) -run '^$$' -bench . -benchmem -count=5 ./cmd/... ./internal/... ./pkg/... | tee .artifacts/benchmarks/benchmark-$(shell date +%Y%m%d-%H%M%S).txt
+	@echo "Results saved to .artifacts/benchmarks/"
+
+# Compare current benchmarks against main branch
+benchmark-compare:
+	@echo "Building benchcheck tool..."
+	@$(GOBUILD) -o $(BINARY_DIR)/benchcheck ./cmd/benchcheck
+	@echo "Saving current branch benchmarks..."
+	@mkdir -p .artifacts/benchmarks
+	@$(GOTEST) -run '^$$' -bench . -benchmem -count=5 ./cmd/... ./internal/... ./pkg/... | tee .artifacts/benchmarks/current.txt
+	@echo "Checking out main branch..."
+	@git stash
+	@git checkout main
+	@echo "Running main branch benchmarks..."
+	@$(GOTEST) -run '^$$' -bench . -benchmem -count=5 ./cmd/... ./internal/... ./pkg/... | tee .artifacts/benchmarks/main.txt
+	@echo "Restoring working branch..."
+	@git checkout -
+	@git stash pop
+	@echo "\n=== Benchmark Comparison ==="
+	@$(BINARY_DIR)/benchcheck --baseline .artifacts/benchmarks/main.txt --current .artifacts/benchmarks/current.txt
+
+# Quick benchmark regression check (use saved baseline)
+benchmark-regression:
+	@if [ ! -f .artifacts/benchmarks/baseline.txt ]; then \
+		echo "No baseline found. Run: make benchmark && cp .artifacts/benchmarks/benchmark-*.txt .artifacts/benchmarks/baseline.txt"; \
+		exit 1; \
+	fi
+	@echo "Building benchcheck tool..."
+	@$(GOBUILD) -o $(BINARY_DIR)/benchcheck ./cmd/benchcheck
+	@echo "Running current benchmarks..."
+	@mkdir -p .artifacts/benchmarks
+	@$(GOTEST) -run '^$$' -bench . -benchmem -count=5 ./cmd/... ./internal/... ./pkg/... | tee .artifacts/benchmarks/current.txt
+	@echo "\n=== Regression Check ==="
+	@$(BINARY_DIR)/benchcheck --baseline .artifacts/benchmarks/baseline.txt --current .artifacts/benchmarks/current.txt
+
+# Save current benchmark as new baseline
+benchmark-baseline:
+	@mkdir -p .artifacts/benchmarks
+	@latest=$$(ls -t .artifacts/benchmarks/benchmark-*.txt 2>/dev/null | head -1); \
+	if [ -z "$$latest" ]; then \
+		echo "No benchmark files found. Run: make benchmark"; \
+		exit 1; \
+	fi; \
+	cp "$$latest" .artifacts/benchmarks/baseline.txt; \
+	echo "Set $$latest as new baseline"
+
 # Help
 help:
 	@echo "Google Play Developer CLI (gpd) Makefile"
 	@echo ""
-	@echo "Targets:"
+	@echo "Build Targets:"
 	@echo "  all          - Build the binary (default)"
 	@echo "  build        - Build for current platform"
 	@echo "  build-all    - Build for all platforms"
+	@echo ""
+	@echo "Test & Quality:"
+	@echo "  test              - Run tests"
+	@echo "  test-coverage     - Run tests with coverage report"
+	@echo "  lint              - Run linter"
+	@echo "  benchmark         - Run all benchmarks"
+	@echo "  benchmark-compare - Compare against main branch"
+	@echo "  benchmark-regression - Check for regressions vs baseline"
+	@echo "  benchmark-baseline   - Save current benchmark as baseline"
+	@echo ""
+	@echo "Maintenance:"
 	@echo "  deps         - Download dependencies"
 	@echo "  tidy         - Tidy go modules"
-	@echo "  test         - Run tests"
-	@echo "  test-coverage - Run tests with coverage report"
-	@echo "  lint         - Run linter"
+	@echo "  format       - Format code with gofmt and goimports"
 	@echo "  clean        - Clean build artifacts"
 	@echo "  install      - Install binary to GOPATH/bin"
 	@echo "  checksums    - Generate SHA256 checksums"
-	@echo "  version      - Show version info"
-	@echo "  run          - Build and run (use ARGS=... for arguments)"
 	@echo "  completions  - Generate shell completions"
+	@echo "  install-hooks - Install git hooks"
+	@echo ""
+	@echo "Development:"
+	@echo "  run          - Build and run (use ARGS=... for arguments)"
+	@echo "  watch        - Watch and rebuild (requires 'air')"
+	@echo "  version      - Show version info"
 	@echo "  help         - Show this help"
 	@echo ""
 	@echo "Examples:"
 	@echo "  make build"
 	@echo "  make test"
+	@echo "  make benchmark"
+	@echo "  make benchmark-regression"
 	@echo "  make run ARGS='version'"
 	@echo "  make build-all"

@@ -81,7 +81,10 @@ func (cmd *MonitorWatchCmd) Run(globals *Globals) error {
 		return err
 	}
 
-	ctx := context.Background()
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	authMgr := newAuthManager()
 
 	creds, err := authMgr.Authenticate(ctx, globals.KeyPath)
@@ -89,7 +92,9 @@ func (cmd *MonitorWatchCmd) Run(globals *Globals) error {
 		return err
 	}
 
-	client, err := api.NewClient(ctx, creds.TokenSource, api.WithTimeout(globals.Timeout))
+	client, err := api.NewClient(ctx, creds.TokenSource,
+		api.WithTimeout(globals.Timeout),
+		api.WithVerboseLogging(globals.Verbose))
 	if err != nil {
 		return errors.NewAPIError(errors.CodeAuthFailure, fmt.Sprintf("failed to create API client: %v", err))
 	}
@@ -410,7 +415,10 @@ func (cmd *MonitorAnomaliesCmd) Run(globals *Globals) error {
 		return err
 	}
 
-	ctx := context.Background()
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	authMgr := newAuthManager()
 
 	creds, err := authMgr.Authenticate(ctx, globals.KeyPath)
@@ -418,7 +426,9 @@ func (cmd *MonitorAnomaliesCmd) Run(globals *Globals) error {
 		return err
 	}
 
-	client, err := api.NewClient(ctx, creds.TokenSource, api.WithTimeout(globals.Timeout))
+	client, err := api.NewClient(ctx, creds.TokenSource,
+		api.WithTimeout(globals.Timeout),
+		api.WithVerboseLogging(globals.Verbose))
 	if err != nil {
 		return errors.NewAPIError(errors.CodeAuthFailure, fmt.Sprintf("failed to create API client: %v", err))
 	}
@@ -797,7 +807,10 @@ func (cmd *MonitorDashboardCmd) Run(globals *Globals) error {
 		return err
 	}
 
-	ctx := context.Background()
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	authMgr := newAuthManager()
 
 	creds, err := authMgr.Authenticate(ctx, globals.KeyPath)
@@ -805,7 +818,9 @@ func (cmd *MonitorDashboardCmd) Run(globals *Globals) error {
 		return err
 	}
 
-	client, err := api.NewClient(ctx, creds.TokenSource, api.WithTimeout(globals.Timeout))
+	client, err := api.NewClient(ctx, creds.TokenSource,
+		api.WithTimeout(globals.Timeout),
+		api.WithVerboseLogging(globals.Verbose))
 	if err != nil {
 		return errors.NewAPIError(errors.CodeAuthFailure, fmt.Sprintf("failed to create API client: %v", err))
 	}

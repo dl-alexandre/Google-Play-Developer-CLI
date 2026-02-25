@@ -1,0 +1,127 @@
+name: Benchmark Regression Check
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      threshold:
+        description: 'Regression threshold (e.g., 1.20 = 20%)'
+        required: false
+        default: '1.20'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  benchmark-regression:
+    name: Check for Performance Regressions
+    runs-on: ubuntu-latest
+    env:
+      GPD_REQUIRE_CUSTOM_OAUTH: "1"
+
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache: true
+          check-latest: true
+
+      - name: Build benchcheck tool
+        run: go build -o bin/benchcheck ./cmd/benchcheck
+
+      - name: Run PR benchmarks
+        run: |
+          mkdir -p .artifacts/benchmarks
+          go test -run '^$' -bench . -benchmem -count=10 ./cmd/... ./internal/... ./pkg/... | tee .artifacts/benchmarks/pr.txt
+
+      - name: Checkout main branch
+        run: |
+          git stash
+          git checkout main
+
+      - name: Run main branch benchmarks
+        run: |
+          go test -run '^$' -bench . -benchmem -count=10 ./cmd/... ./internal/... ./pkg/... | tee .artifacts/benchmarks/main.txt
+
+      - name: Compare benchmarks
+        id: compare
+        run: |
+          THRESHOLD="${{ github.event.inputs.threshold || '1.20' }}"
+          echo "Using threshold: $THRESHOLD"
+          
+          bin/benchcheck --baseline .artifacts/benchmarks/main.txt --current .artifacts/benchmarks/pr.txt --threshold "$THRESHOLD" --format github > benchmark_comparison.txt
+          EXIT_CODE=$?
+          
+          # Store output for comment
+          echo "comparison_output<<EOF" >> $GITHUB_OUTPUT
+          cat benchmark_comparison.txt >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          
+          echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+          
+          # Print to console too
+          cat benchmark_comparison.txt
+          
+          exit $EXIT_CODE
+
+      - name: Post PR comment (on regression)
+        if: failure() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const output = fs.readFileSync('benchmark_comparison.txt', 'utf8');
+            
+            const body = `## ⚠️ Performance Regression Detected
+            
+            ${output}
+            
+            **Threshold:** 20% (configurable via workflow dispatch)
+            
+            Please investigate these changes before merging.`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+
+      - name: Post success comment (no regression)
+        if: success() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const output = fs.readFileSync('benchmark_comparison.txt', 'utf8');
+            
+            const body = `## ✅ Benchmark Results
+            
+            ${output}
+            
+            No critical performance regressions detected.`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+
+      - name: Upload comparison results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-regression-report
+          path: |
+            .artifacts/benchmarks/
+            benchmark_comparison.txt
+          retention-days: 30

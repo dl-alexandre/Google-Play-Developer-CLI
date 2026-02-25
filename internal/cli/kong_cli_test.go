@@ -1,3 +1,6 @@
+//go:build unit
+// +build unit
+
 // Package cli provides the Kong-based CLI framework for gpd.
 package cli
 

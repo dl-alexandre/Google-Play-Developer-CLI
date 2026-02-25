@@ -2,6 +2,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/alecthomas/kong"
 
 	"github.com/dl-alexandre/gpd/internal/errors"
+	"github.com/dl-alexandre/gpd/internal/logging"
 )
 
 // Globals contains all global flags shared across all commands.
@@ -23,6 +25,9 @@ type Globals struct {
 	Verbose     bool          `help:"Enable verbose logging" short:"v"`
 	KeyPath     string        `help:"Path to service account key file"`
 	Profile     string        `help:"Configuration profile to use"`
+
+	// Context is set by RunKongCLI and propagated to commands
+	Context context.Context `kong:"-"`
 }
 
 // KongCLI represents the complete Kong CLI structure.
@@ -48,6 +53,7 @@ type KongCLI struct {
 	CustomApp    CustomAppCmd    `cmd:"" help:"Custom app publishing" aliases:"customapp"`
 	Grouping     GroupingCmd     `cmd:"" help:"App access grouping"`
 	Version      VersionCmd      `cmd:"" help:"Show version information"`
+	Completion   CompletionCmd   `cmd:"" help:"Generate shell completion scripts"`
 
 	// New advanced commands
 	Bulk        BulkCmd        `cmd:"" help:"Batch operations for uploads and updates"`
@@ -77,17 +83,31 @@ func RunKongCLI() int {
 		return errors.ExitGeneralError
 	}
 
-	ctx, err := parser.Parse(os.Args[1:])
+	kongCtx, err := parser.Parse(os.Args[1:])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return errors.ExitValidationError
 	}
 
-	// Note: Verbose logging setup would go here
-	// Currently using default logging behavior
+	// Set up verbose logging if requested
+	if cli.Verbose {
+		logger := logging.NewLogger(os.Stderr, true)
+		logger.SetLevel(logging.LevelDebug)
+		logging.SetDefault(logger)
+		logging.Debug("Verbose logging enabled")
+	}
+
+	// Create context with timeout from globals
+	ctx, cancel := context.WithTimeout(context.Background(), cli.Timeout)
+	defer cancel()
+	cli.Context = ctx
+
+	logging.Debug("Command execution started",
+		logging.String("timeout", cli.Timeout.String()),
+	)
 
 	// Execute the selected command
-	err = ctx.Run(&cli.Globals)
+	err = kongCtx.Run(&cli.Globals)
 	if err != nil {
 		if apiErr, ok := err.(*errors.APIError); ok {
 			return apiErr.ExitCode()

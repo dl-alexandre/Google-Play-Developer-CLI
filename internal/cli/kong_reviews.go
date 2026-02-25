@@ -72,7 +72,9 @@ func createAPIClient(ctx context.Context, globals *Globals) (*api.Client, error)
 		return nil, err
 	}
 
-	return api.NewClient(ctx, creds.TokenSource, api.WithTimeout(globals.Timeout))
+	return api.NewClient(ctx, creds.TokenSource,
+		api.WithTimeout(globals.Timeout),
+		api.WithVerboseLogging(globals.Verbose))
 }
 
 // reviewsPageResponse wraps the reviews list response to implement PageResponse.
@@ -93,7 +95,10 @@ func (r reviewsPageResponse) GetItems() []*androidpublisher.Review {
 
 // Run executes the reviews list command.
 func (cmd *ReviewsListCmd) Run(globals *Globals) error {
-	ctx := context.Background()
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
 	if globals.Package == "" {
 		return errors.ErrPackageRequired
@@ -351,7 +356,10 @@ type ReviewsResponseDeleteCmd struct {
 
 // Run executes the reviews get command.
 func (cmd *ReviewsGetCmd) Run(globals *Globals) error {
-	ctx := context.Background()
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
 	if globals.Package == "" {
 		return errors.ErrPackageRequired
@@ -404,7 +412,10 @@ type replyResult struct {
 
 // Run executes the reviews reply command.
 func (cmd *ReviewsReplyCmd) Run(globals *Globals) error {
-	ctx := context.Background()
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
 	if globals.Package == "" {
 		return errors.ErrPackageRequired
@@ -508,7 +519,10 @@ type responseResult struct {
 
 // Run executes the reviews response get command.
 func (cmd *ReviewsResponseGetCmd) Run(globals *Globals) error {
-	ctx := context.Background()
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
 	if globals.Package == "" {
 		return errors.ErrPackageRequired

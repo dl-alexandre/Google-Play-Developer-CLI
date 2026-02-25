@@ -1,3 +1,6 @@
+//go:build integration
+// +build integration
+
 // Package cli provides integration tests for CLI commands.
 package cli
 

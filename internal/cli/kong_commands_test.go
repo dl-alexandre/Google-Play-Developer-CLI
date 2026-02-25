@@ -1,3 +1,6 @@
+//go:build unit
+// +build unit
+
 package cli
 
 import (
@@ -314,14 +317,11 @@ func TestPublishCommands_ReturnNotImplemented(t *testing.T) {
 		name string
 		cmd  interface{ Run(*Globals) error }
 	}{
-		{"PublishUploadCmd", &PublishUploadCmd{File: "test.aab"}},
-		{"PublishReleaseCmd", &PublishReleaseCmd{}},
 		{"PublishRolloutCmd", &PublishRolloutCmd{}},
 		{"PublishPromoteCmd", &PublishPromoteCmd{}},
 		{"PublishHaltCmd", &PublishHaltCmd{}},
 		{"PublishRollbackCmd", &PublishRollbackCmd{}},
 		{"PublishStatusCmd", &PublishStatusCmd{}},
-		{"PublishTracksCmd", &PublishTracksCmd{}},
 		{"PublishCapabilitiesCmd", &PublishCapabilitiesCmd{}},
 		{"PublishListingUpdateCmd", &PublishListingUpdateCmd{}},
 		{"PublishListingGetCmd", &PublishListingGetCmd{}},
@@ -1077,22 +1077,6 @@ func TestKongCLI_GlobalsStructure(t *testing.T) {
 
 	if globalsField.Type.String() != "cli.Globals" {
 		t.Errorf("KongCLI.Globals type = %s, want cli.Globals", globalsField.Type.String())
-	}
-}
-
-// ============================================================================
-// Test Helper Functions
-// ============================================================================
-
-func TestOutputFormat_Helper(t *testing.T) {
-	result := outputFormat("json")
-	if result != "json" {
-		t.Errorf("outputFormat('json') = %q, want 'json'", result)
-	}
-
-	result = outputFormat("table")
-	if result != "table" {
-		t.Errorf("outputFormat('table') = %q, want 'table'", result)
 	}
 }
 

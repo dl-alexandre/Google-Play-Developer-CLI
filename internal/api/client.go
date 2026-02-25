@@ -23,6 +23,132 @@ import (
 	"github.com/dl-alexandre/gpd/internal/logging"
 )
 
+// loggingTransport wraps an http.RoundTripper to log requests and responses.
+type loggingTransport struct {
+	base    http.RoundTripper
+	verbose bool
+}
+
+func (t *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if !t.verbose {
+		return t.base.RoundTrip(req)
+	}
+
+	// Log request
+	logging.Debug("API Request",
+		logging.String("method", req.Method),
+		logging.String("url", req.URL.String()),
+	)
+
+	// Log headers (with PII redaction)
+	redactor := logging.NewPIIRedactor()
+	headers := make(map[string]interface{})
+	for key, values := range req.Header {
+		if len(values) > 0 {
+			headers[key] = redactor.Redact(key, values[0])
+		}
+	}
+	logging.Debug("API Request Headers",
+		logging.String("headers", formatHeaders(headers)),
+	)
+
+	start := time.Now()
+	resp, err := t.base.RoundTrip(req)
+	duration := time.Since(start)
+
+	if err != nil {
+		logging.Debug("API Response Error",
+			logging.Err(err),
+			logging.Duration("duration", duration),
+		)
+		return nil, err
+	}
+
+	// Log response
+	logging.Debug("API Response",
+		logging.String("status", resp.Status),
+		logging.Int("statusCode", resp.StatusCode),
+		logging.Duration("duration", duration),
+	)
+
+	// Log response headers
+	respHeaders := make(map[string]interface{})
+	for key, values := range resp.Header {
+		if len(values) > 0 {
+			respHeaders[key] = values[0]
+		}
+	}
+	logging.Debug("API Response Headers",
+		logging.String("headers", formatHeaders(respHeaders)),
+	)
+
+	// Log body summary for errors or in verbose mode
+	if resp.StatusCode >= 400 || t.verbose {
+		bodySummary := summarizeResponseBody(resp)
+		logging.Debug("API Response Body Summary",
+			logging.String("summary", bodySummary),
+		)
+	}
+
+	return resp, nil
+}
+
+func formatHeaders(headers map[string]interface{}) string {
+	result := "{"
+	first := true
+	for k, v := range headers {
+		if !first {
+			result += ", "
+		}
+		first = false
+		result += k + ": " + formatValue(v)
+	}
+	result += "}"
+	return result
+}
+
+func formatValue(v interface{}) string {
+	switch val := v.(type) {
+	case string:
+		if val == "" {
+			return "\"\""
+		}
+		return "\"" + val + "\""
+	case []string:
+		return "[array]"
+	default:
+		return "[redacted]"
+	}
+}
+
+func summarizeResponseBody(resp *http.Response) string {
+	// Don't consume the body, just indicate if there is content
+	if resp.ContentLength > 0 {
+		return "<body: " + strconv.FormatInt(resp.ContentLength, 10) + " bytes>"
+	}
+	if resp.ContentLength == 0 {
+		return "<empty body>"
+	}
+	return "<chunked body>"
+}
+
+// verboseKey is the context key for verbose mode.
+type verboseKey struct{}
+
+// WithVerbose returns a context with verbose mode enabled.
+func WithVerbose(ctx context.Context, verbose bool) context.Context {
+	return context.WithValue(ctx, verboseKey{}, verbose)
+}
+
+// IsVerbose checks if verbose mode is enabled in the context.
+func IsVerbose(ctx context.Context) bool {
+	if v, ok := ctx.Value(verboseKey{}).(bool); ok {
+		return v
+	}
+	return false
+}
+
+// RetryConfig holds configuration for request retries.
 type RetryConfig struct {
 	MaxAttempts  int
 	InitialDelay time.Duration
@@ -73,6 +199,7 @@ type Client struct {
 	customAppErr  error
 
 	semaphore chan struct{}
+	verbose   bool
 }
 
 // DefaultConcurrentCalls is the default number of concurrent API calls.
@@ -85,6 +212,13 @@ type Option func(*Client)
 func WithTimeout(d time.Duration) Option {
 	return func(c *Client) {
 		c.timeout = d
+	}
+}
+
+// WithVerboseLogging enables verbose logging for API requests.
+func WithVerboseLogging(verbose bool) Option {
+	return func(c *Client) {
+		c.verbose = verbose
 	}
 }
 
@@ -124,9 +258,18 @@ func NewClient(ctx context.Context, tokenSource oauth2.TokenSource, opts ...Opti
 		IdleConnTimeout:     90 * time.Second,
 	}
 
+	// Wrap transport with logging if verbose mode is enabled
+	var baseTransport http.RoundTripper = transport
+	if c.verbose {
+		baseTransport = &loggingTransport{
+			base:    transport,
+			verbose: true,
+		}
+	}
+
 	c.httpClient = &http.Client{
 		Transport: &oauth2.Transport{
-			Base:   transport,
+			Base:   baseTransport,
 			Source: tokenSource,
 		},
 		Timeout: c.timeout,

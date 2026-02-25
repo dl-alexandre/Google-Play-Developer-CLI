@@ -1,0 +1,99 @@
+name: Coverage Report
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  coverage:
+    name: Coverage Analysis
+    runs-on: ubuntu-latest
+    env:
+      GPD_REQUIRE_CUSTOM_OAUTH: "1"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache: true
+
+      - name: Run tests with coverage
+        run: go test -race -coverprofile=coverage.out -covermode=atomic -tags=unit ./...
+
+      - name: Generate coverage report
+        run: go tool cover -html=coverage.out -o coverage.html
+
+      - name: Coverage summary
+        run: |
+          echo "## Coverage Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          go tool cover -func=coverage.out | tail -1 >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Check threshold
+          COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
+          THRESHOLD=70.0
+          
+          if (( $(echo "$COVERAGE < $THRESHOLD" | bc -l) )); then
+            echo "❌ **Coverage $COVERAGE% is below threshold $THRESHOLD%**" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          else
+            echo "✅ **Coverage $COVERAGE% meets threshold $THRESHOLD%**" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload coverage HTML
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.html
+
+      - name: Post coverage comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const coverage = fs.readFileSync('coverage.out', 'utf8');
+            
+            // Extract total coverage
+            const lines = coverage.split('\n');
+            const totalLine = lines.find(l => l.includes('total:'));
+            const coveragePercent = totalLine ? totalLine.match(/(\d+\.?\d*)%/)[1] : 'unknown';
+            
+            const body = `## 📊 Coverage Report
+            
+            **Total Coverage:** ${coveragePercent}%
+            
+            Threshold: 70%
+            
+            <details>
+            <summary>View full report (HTML)</summary>
+            
+            Coverage report is available as an artifact.
+            </details>
+            `;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+
+      - name: Identify uncovered code
+        run: |
+          echo "### Files with low coverage (<50%)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| File | Coverage |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|----------|" >> $GITHUB_STEP_SUMMARY
+          go tool cover -func=coverage.out | awk '$3 < 50 {print "| " $1 " | " $3 "% |"}' >> $GITHUB_STEP_SUMMARY

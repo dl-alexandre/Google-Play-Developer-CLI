@@ -85,14 +85,19 @@ func (cmd *BulkUploadCmd) Run(globals *Globals) error {
 	}
 
 	// Create authenticated API client
-	ctx := context.Background()
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	authMgr := newAuthManager()
 	creds, err := authMgr.Authenticate(ctx, globals.KeyPath)
 	if err != nil {
 		return err
 	}
 
-	client, err := api.NewClient(ctx, creds.TokenSource, api.WithTimeout(globals.Timeout))
+	client, err := api.NewClient(ctx, creds.TokenSource,
+		api.WithTimeout(globals.Timeout),
+		api.WithVerboseLogging(globals.Verbose))
 	if err != nil {
 		return err
 	}

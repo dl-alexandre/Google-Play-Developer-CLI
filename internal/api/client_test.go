@@ -1,8 +1,13 @@
+//go:build unit
+// +build unit
+
 package api
 
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -419,4 +424,252 @@ func TestPlayCustomAppServiceInitialization(t *testing.T) {
 	if svc != svc2 {
 		t.Error("PlayCustomApp() should return the same service instance")
 	}
+}
+
+// ============================================================================
+// Logging Transport Tests
+// ============================================================================
+
+func TestLoggingTransport_NonVerbose(t *testing.T) {
+	t.Parallel()
+	base := &testTransport{response: &http.Response{
+		StatusCode: http.StatusOK,
+		Status:     "200 OK",
+		Body:       http.NoBody,
+		Header:     http.Header{},
+	}}
+
+	transport := &loggingTransport{
+		base:    base,
+		verbose: false,
+	}
+
+	req := httptest.NewRequest("GET", "http://example.com/test", http.NoBody)
+	resp, err := transport.RoundTrip(req)
+
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Expected status 200, got: %d", resp.StatusCode)
+	}
+	if !base.called {
+		t.Error("Expected base transport to be called")
+	}
+}
+
+func TestLoggingTransport_Verbose(t *testing.T) {
+	// Not parallel - tests logging output
+	base := &testTransport{response: &http.Response{
+		StatusCode: http.StatusOK,
+		Status:     "200 OK",
+		Body:       http.NoBody,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Request:    httptest.NewRequest("GET", "http://example.com/test", nil),
+	}}
+
+	transport := &loggingTransport{
+		base:    base,
+		verbose: true,
+	}
+
+	req := httptest.NewRequest("GET", "http://example.com/test", http.NoBody)
+	req.Header.Set("Authorization", "Bearer secret-token")
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := transport.RoundTrip(req)
+
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("Expected non-nil response")
+	}
+	if !base.called {
+		t.Error("Expected base transport to be called")
+	}
+}
+
+func TestLoggingTransport_Error(t *testing.T) {
+	t.Parallel()
+	expectedErr := context.Canceled
+	base := &testTransport{err: expectedErr}
+
+	transport := &loggingTransport{
+		base:    base,
+		verbose: true,
+	}
+
+	req := httptest.NewRequest("GET", "http://example.com/test", http.NoBody)
+	resp, err := transport.RoundTrip(req)
+
+	if err != expectedErr {
+		t.Errorf("Expected error %v, got: %v", expectedErr, err)
+	}
+	if resp != nil {
+		t.Error("Expected nil response on error")
+	}
+}
+
+func TestLoggingTransport_ErrorResponse(t *testing.T) {
+	t.Parallel()
+	base := &testTransport{response: &http.Response{
+		StatusCode: http.StatusInternalServerError,
+		Status:     "500 Internal Server Error",
+		Body:       http.NoBody,
+		Header:     http.Header{},
+	}}
+
+	transport := &loggingTransport{
+		base:    base,
+		verbose: true,
+	}
+
+	req := httptest.NewRequest("GET", "http://example.com/test", http.NoBody)
+	resp, err := transport.RoundTrip(req)
+
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("Expected status 500, got: %d", resp.StatusCode)
+	}
+}
+
+func TestFormatHeaders(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		headers  map[string]interface{}
+		contains string
+	}{
+		{
+			name:     "empty headers",
+			headers:  map[string]interface{}{},
+			contains: "{}",
+		},
+		{
+			name:     "single header",
+			headers:  map[string]interface{}{"Content-Type": "application/json"},
+			contains: "Content-Type",
+		},
+		{
+			name:     "multiple headers",
+			headers:  map[string]interface{}{"Content-Type": "application/json", "Authorization": "Bearer token"},
+			contains: "Content-Type",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := formatHeaders(tt.headers)
+			if !strings.Contains(result, tt.contains) {
+				t.Errorf("Expected result to contain %q, got: %s", tt.contains, result)
+			}
+		})
+	}
+}
+
+func TestFormatValue(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		value    interface{}
+		expected string
+	}{
+		{"empty string", "", `""`},
+		{"non-empty string", "test", `"test"`},
+		{"string slice", []string{"a", "b"}, "[array]"},
+		{"int", 42, "[redacted]"},
+		{"nil", nil, "[redacted]"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := formatValue(tt.value)
+			if result != tt.expected {
+				t.Errorf("formatValue(%v) = %q, want %q", tt.value, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestSummarizeResponseBody(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name          string
+		contentLength int64
+		expected      string
+	}{
+		{"with content", 100, "<body: 100 bytes>"},
+		{"empty body", 0, "<empty body>"},
+		{"chunked", -1, "<chunked body>"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := &http.Response{
+				ContentLength: tt.contentLength,
+			}
+			result := summarizeResponseBody(resp)
+			if result != tt.expected {
+				t.Errorf("summarizeResponseBody() = %q, want %q", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestWithVerbose_Context(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	// Test setting verbose to true
+	ctxWithVerbose := WithVerbose(ctx, true)
+	if !IsVerbose(ctxWithVerbose) {
+		t.Error("Expected IsVerbose to return true")
+	}
+
+	// Test setting verbose to false
+	ctxWithoutVerbose := WithVerbose(ctx, false)
+	if IsVerbose(ctxWithoutVerbose) {
+		t.Error("Expected IsVerbose to return false")
+	}
+
+	// Test default (no value in context)
+	if IsVerbose(ctx) {
+		t.Error("Expected IsVerbose to return false for context without value")
+	}
+}
+
+func TestNewClient_WithVerboseLogging(t *testing.T) {
+	t.Parallel()
+	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "test"})
+	client, err := NewClient(context.Background(), ts, WithVerboseLogging(true))
+	if err != nil {
+		t.Fatalf("NewClient error: %v", err)
+	}
+	if !client.verbose {
+		t.Error("Expected verbose to be true")
+	}
+}
+
+// ============================================================================
+// Test Transport Helper
+// ============================================================================
+
+type testTransport struct {
+	response *http.Response
+	err      error
+	called   bool
+}
+
+func (t *testTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.called = true
+	if t.err != nil {
+		return nil, t.err
+	}
+	if t.response != nil && t.response.Request == nil {
+		t.response.Request = req
+	}
+	return t.response, nil
 }

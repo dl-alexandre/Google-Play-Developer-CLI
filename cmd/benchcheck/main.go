@@ -17,7 +17,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/dl-alexandre/gpd/internal/apitest/benchcheck"
@@ -104,7 +103,7 @@ func main() {
 	// Output results
 	switch *outputFormat {
 	case "github":
-		printGitHubOutput(regressions, *failOnWarn)
+		printGitHubOutput(regressions)
 	case "json":
 		printJSONOutput(regressions)
 	default:
@@ -170,7 +169,7 @@ func printTextOutput(regressions []benchcheck.Regression, baseline, current map[
 	fmt.Printf("%s)\n", strings.Join(parts, ", "))
 }
 
-func printGitHubOutput(regressions []benchcheck.Regression, failOnWarn bool) {
+func printGitHubOutput(regressions []benchcheck.Regression) {
 	// GitHub Actions workflow commands for annotations
 	// https://docs.github.com/en/actions/using-workflows/workflow-commands-for-github-actions
 
@@ -217,13 +216,4 @@ func printJSONOutput(regressions []benchcheck.Regression) {
 
 	fmt.Println("\n  ]")
 	fmt.Println("}")
-}
-
-// getProjectRoot returns the project root directory
-func getProjectRoot() (string, error) {
-	exe, err := os.Executable()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Dir(filepath.Dir(exe)), nil
 }

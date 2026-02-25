@@ -239,30 +239,30 @@ func NewReporter(w io.Writer) *Reporter {
 
 // PrintResults outputs benchmark results in a formatted table
 func (r *Reporter) PrintResults(results map[string]BenchmarkResult) {
-	fmt.Fprintln(r.w, "Benchmark Results:")
-	fmt.Fprintln(r.w, strings.Repeat("-", 80))
-	fmt.Fprintf(r.w, "%-50s %12s %12s %12s\n", "Benchmark", "N", "ns/op", "B/op")
-	fmt.Fprintln(r.w, strings.Repeat("-", 80))
+	_, _ = fmt.Fprintln(r.w, "Benchmark Results:")
+	_, _ = fmt.Fprintln(r.w, strings.Repeat("-", 80))
+	_, _ = fmt.Fprintf(r.w, "%-50s %12s %12s %12s\n", "Benchmark", "N", "ns/op", "B/op")
+	_, _ = fmt.Fprintln(r.w, strings.Repeat("-", 80))
 
 	for name, result := range results {
-		fmt.Fprintf(r.w, "%-50s %12d %12.2f", name, result.N, result.NsPerOp)
+		_, _ = fmt.Fprintf(r.w, "%-50s %12d %12.2f", name, result.N, result.NsPerOp)
 		if result.BytesPerOp > 0 {
-			fmt.Fprintf(r.w, " %12d", result.BytesPerOp)
+			_, _ = fmt.Fprintf(r.w, " %12d", result.BytesPerOp)
 		}
-		fmt.Fprintln(r.w)
+		_, _ = fmt.Fprintln(r.w)
 	}
-	fmt.Fprintln(r.w)
+	_, _ = fmt.Fprintln(r.w)
 }
 
 // PrintRegressions outputs regression report
 func (r *Reporter) PrintRegressions(regressions []Regression) {
 	if len(regressions) == 0 {
-		fmt.Fprintln(r.w, "✓ No performance regressions detected")
+		_, _ = fmt.Fprintln(r.w, "✓ No performance regressions detected")
 		return
 	}
 
-	fmt.Fprintln(r.w, "\n⚠ Performance Regressions Detected:")
-	fmt.Fprintln(r.w, strings.Repeat("=", 100))
+	_, _ = fmt.Fprintln(r.w, "\n⚠ Performance Regressions Detected:")
+	_, _ = fmt.Fprintln(r.w, strings.Repeat("=", 100))
 
 	// Group by severity
 	critical := filterBySeverity(regressions, SeverityCritical)
@@ -270,37 +270,37 @@ func (r *Reporter) PrintRegressions(regressions []Regression) {
 	notices := filterBySeverity(regressions, SeverityNotice)
 
 	if len(critical) > 0 {
-		fmt.Fprintf(r.w, "\n🔴 CRITICAL (%d):\n", len(critical))
+		_, _ = fmt.Fprintf(r.w, "\n🔴 CRITICAL (%d):\n", len(critical))
 		for _, reg := range critical {
 			r.printRegression(reg)
 		}
 	}
 
 	if len(warnings) > 0 {
-		fmt.Fprintf(r.w, "\n🟡 WARNING (%d):\n", len(warnings))
+		_, _ = fmt.Fprintf(r.w, "\n🟡 WARNING (%d):\n", len(warnings))
 		for _, reg := range warnings {
 			r.printRegression(reg)
 		}
 	}
 
 	if len(notices) > 0 {
-		fmt.Fprintf(r.w, "\n📝 NOTICE (%d):\n", len(notices))
+		_, _ = fmt.Fprintf(r.w, "\n📝 NOTICE (%d):\n", len(notices))
 		for _, reg := range notices {
 			r.printRegression(reg)
 		}
 	}
 
-	fmt.Fprintln(r.w)
+	_, _ = fmt.Fprintln(r.w)
 }
 
 func (r *Reporter) printRegression(reg Regression) {
 	if reg.Metric == "removed" {
-		fmt.Fprintf(r.w, "  - %s: benchmark removed\n", reg.Benchmark)
+		_, _ = fmt.Fprintf(r.w, "  - %s: benchmark removed\n", reg.Benchmark)
 		return
 	}
 
-	fmt.Fprintf(r.w, "  - %s\n", reg.Benchmark)
-	fmt.Fprintf(r.w, "    Metric: %s | Change: +%.1f%% | Old: %.2f → New: %.2f\n",
+	_, _ = fmt.Fprintf(r.w, "  - %s\n", reg.Benchmark)
+	_, _ = fmt.Fprintf(r.w, "    Metric: %s | Change: +%.1f%% | Old: %.2f → New: %.2f\n",
 		reg.Metric, reg.ChangePct, reg.OldValue, reg.NewValue)
 }
 

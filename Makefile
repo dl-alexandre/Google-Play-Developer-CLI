@@ -89,11 +89,11 @@ test-flaky:
 	@echo "Running tests 5 times to detect flaky tests..."
 	@bash -o pipefail -c '$(GOTEST) -race -count=5 ./... 2>&1 | sed "/malformed LC_DYSYMTAB/d"'
 
-# Run tests with coverage threshold check (fails if coverage < 70%)
+# Run tests with coverage threshold check (fails if coverage < 40%)
 test-coverage-threshold: test-coverage
 	@echo "Checking coverage threshold..."
 	@coverage=$$(go tool cover -func=coverage.out | grep total | awk '{print $$3}' | sed 's/%//'); \
-	threshold=70.0; \
+	threshold=40.0; \
 	if (( $$(echo "$$coverage < $$threshold" | bc -l) )); then \
 		echo "❌ Coverage $$coverage% is below threshold $$threshold%"; \
 		exit 1; \

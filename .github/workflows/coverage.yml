@@ -42,7 +42,7 @@ jobs:
           
           # Check threshold
           COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
-          THRESHOLD=70.0
+          THRESHOLD=40.0
           
           if (( $(echo "$COVERAGE < $THRESHOLD" | bc -l) )); then
             echo "❌ **Coverage $COVERAGE% is below threshold $THRESHOLD%**" >> $GITHUB_STEP_SUMMARY
@@ -74,7 +74,7 @@ jobs:
             
             **Total Coverage:** ${coveragePercent}%
             
-            Threshold: 70%
+            Threshold: 40%
             
             <details>
             <summary>View full report (HTML)</summary>

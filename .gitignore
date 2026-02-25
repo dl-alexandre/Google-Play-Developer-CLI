@@ -63,3 +63,6 @@ temp/
 
 # Play Developer Credentials
 creds/
+
+# Build binaries
+benchcheck

@@ -62,11 +62,11 @@ func main() {
 	parser := benchcheck.NewParser()
 	baselineResults, err := parser.Parse(baselineFile)
 	if err != nil {
-		baselineFile.Close()
+		_ = baselineFile.Close() //nolint:errcheck
 		fmt.Fprintf(os.Stderr, "Error: Failed to parse baseline: %v\n", err)
 		os.Exit(3)
 	}
-	baselineFile.Close()
+	_ = baselineFile.Close() //nolint:errcheck
 
 	// Read and parse current
 	currentFile, err := os.Open(*currentPath)
@@ -77,11 +77,11 @@ func main() {
 
 	currentResults, err := parser.Parse(currentFile)
 	if err != nil {
-		currentFile.Close()
+		_ = currentFile.Close() //nolint:errcheck
 		fmt.Fprintf(os.Stderr, "Error: Failed to parse current results: %v\n", err)
 		os.Exit(3)
 	}
-	currentFile.Close()
+	_ = currentFile.Close() //nolint:errcheck
 
 	// Configure comparator
 	config := &benchcheck.Config{

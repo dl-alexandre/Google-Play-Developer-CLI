@@ -127,6 +127,7 @@ func addClockSkew(details map[string]interface{}, header http.Header) bool {
 	return false
 }
 
+//nolint:unparam // extra parameter kept for potential future use with different hints
 func appendHint(current, extra string) string {
 	if current == "" {
 		return extra

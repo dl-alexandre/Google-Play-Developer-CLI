@@ -58,18 +58,15 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error: Failed to open baseline file: %v\n", err)
 		os.Exit(3)
 	}
-	defer func() {
-		if err := baselineFile.Close(); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: Failed to close baseline file: %v\n", err)
-		}
-	}()
 
 	parser := benchcheck.NewParser()
 	baselineResults, err := parser.Parse(baselineFile)
 	if err != nil {
+		baselineFile.Close()
 		fmt.Fprintf(os.Stderr, "Error: Failed to parse baseline: %v\n", err)
 		os.Exit(3)
 	}
+	baselineFile.Close()
 
 	// Read and parse current
 	currentFile, err := os.Open(*currentPath)
@@ -77,17 +74,14 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error: Failed to open current file: %v\n", err)
 		os.Exit(3)
 	}
-	defer func() {
-		if err := currentFile.Close(); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: Failed to close current file: %v\n", err)
-		}
-	}()
 
 	currentResults, err := parser.Parse(currentFile)
 	if err != nil {
+		currentFile.Close()
 		fmt.Fprintf(os.Stderr, "Error: Failed to parse current results: %v\n", err)
 		os.Exit(3)
 	}
+	currentFile.Close()
 
 	// Configure comparator
 	config := &benchcheck.Config{

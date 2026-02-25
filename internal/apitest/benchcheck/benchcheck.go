@@ -339,7 +339,7 @@ type StatisticalAnalysis struct {
 
 // WelchTTest performs Welch's t-test for two samples with potentially different variances
 // Returns t-statistic and degrees of freedom
-func WelchTTest(baseline, current []float64) (tStat float64, df float64) {
+func WelchTTest(baseline, current []float64) (tStat, df float64) {
 	if len(baseline) < 2 || len(current) < 2 {
 		return 0, 0
 	}

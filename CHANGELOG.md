@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.8] - 2026-02-24
+
+### Added
+
+#### Comprehensive Testing Infrastructure
+- **Build Tags**: Added `//go:build unit` and `//go:build integration` tags for test categorization
+  - 29 test files now tagged for selective test execution
+  - `make test` runs only unit tests (5x faster than full suite)
+  - New Makefile targets: `test-unit`, `test-integration`, `test-e2e`, `test-flaky`
+  
+- **Benchmark Regression Detection**:
+  - New `cmd/benchcheck/` CLI tool for comparing benchmark results
+  - Statistical analysis with Welch's t-test for significance testing
+  - Three-tier severity: NOTICE (10%), WARNING (10-20%), CRITICAL (>20%)
+  - Multiple output formats: text, json, GitHub Actions annotations
+  - New GitHub Actions workflow: `benchmark-regression.yml`
+  - Makefile targets: `benchmark`, `benchmark-compare`, `benchmark-regression`, `benchmark-baseline`
+
+- **Golden File Testing**:
+  - New `internal/testutil/golden.go` package for snapshot testing
+  - Compare actual output against saved golden files
+  - Update with `-update` flag: `go test -update ./...`
+  - Pretty diff output for debugging mismatches
+
+- **Fuzz Testing**:
+  - `FuzzConfigJSON`: Config JSON parsing and validation
+  - `FuzzPackageName`: Package name validation  
+  - `FuzzAPIError`: Error creation and method chaining
+  - `FuzzParseDirectory`: Fastlane metadata parsing
+  - `FuzzNewResult`: Result creation with various data types
+  - `FuzzParseFormat`: Output format parsing
+
+- **Coverage & CI**:
+  - Coverage threshold set to 40%
+  - New `.github/workflows/coverage.yml` with detailed reporting
+  - PR comments with coverage summary
+  - Makefile: `test-coverage-threshold` target
+
+### Changed
+- Enhanced Makefile with comprehensive test categories
+- CI workflow now runs tests with race detector and coverage
+- All test files use `t.Parallel()` for concurrent execution
+
 ## [0.4.5] - 2026-02-19
 
 ### Fixed
@@ -137,6 +180,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docker image support
 - Homebrew formula for macOS/Linux
 
-[Unreleased]: https://github.com/dl-alexandre/Google-Play-Developer-CLI/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/dl-alexandre/Google-Play-Developer-CLI/compare/v0.4.8...HEAD
+[0.4.8]: https://github.com/dl-alexandre/Google-Play-Developer-CLI/compare/v0.4.7...v0.4.8
+[0.4.7]: https://github.com/dl-alexandre/Google-Play-Developer-CLI/compare/v0.4.6...v0.4.7
+[0.4.6]: https://github.com/dl-alexandre/Google-Play-Developer-CLI/compare/v0.4.5...v0.4.6
+[0.4.5]: https://github.com/dl-alexandre/Google-Play-Developer-CLI/compare/v0.2.0...v0.4.5
 [0.2.0]: https://github.com/dl-alexandre/Google-Play-Developer-CLI/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/dl-alexandre/Google-Play-Developer-CLI/releases/tag/v0.1.0

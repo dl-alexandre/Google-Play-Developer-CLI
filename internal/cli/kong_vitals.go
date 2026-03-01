@@ -13,7 +13,17 @@ import (
 	"github.com/dl-alexandre/gpd/internal/output"
 )
 
-const formatCSV = "csv"
+const (
+	formatCSV = "csv"
+
+	metricSetCrashRate               = "crashRateMetricSet"
+	metricSetAnrRate                 = "anrRateMetricSet"
+	metricSetSlowRendering           = "slowRenderingRateMetricSet"
+	metricSetSlowStart               = "slowStartRateMetricSet"
+	metricSetStuckBackgroundWakelock = "stuckBackgroundWakelockRateMetricSet"
+	metricSetExcessiveWakeup         = "excessiveWakeupRateMetricSet"
+	metricSetErrorCount              = "errorCountMetricSet"
+)
 
 // VitalsCrashesCmd queries crash rate data.
 type VitalsCrashesCmd struct {
@@ -1319,23 +1329,23 @@ func (cmd *VitalsQueryCmd) Run(globals *Globals) error {
 	}
 
 	// Determine metric set from the first metric requested
-	metricSetName := "crashRateMetricSet"
+	metricSetName := metricSetCrashRate
 	if len(cmd.Metrics) > 0 {
 		switch cmd.Metrics[0] {
-		case "crashRate", "userPerceivedCrashRate":
-			metricSetName = "crashRateMetricSet"
-		case "anrRate", "userPerceivedAnrRate":
-			metricSetName = "anrRateMetricSet"
+		case metricCrashRate, "userPerceivedCrashRate":
+			metricSetName = metricSetCrashRate
+		case metricAnrRate, "userPerceivedAnrRate":
+			metricSetName = metricSetAnrRate
 		case "slowRenderingRate":
-			metricSetName = "slowRenderingRateMetricSet"
+			metricSetName = metricSetSlowRendering
 		case "slowStartRate":
-			metricSetName = "slowStartRateMetricSet"
+			metricSetName = metricSetSlowStart
 		case "stuckBackgroundWakelockRate":
-			metricSetName = "stuckBackgroundWakelockRateMetricSet"
+			metricSetName = metricSetStuckBackgroundWakelock
 		case "excessiveWakeupRate":
-			metricSetName = "excessiveWakeupRateMetricSet"
+			metricSetName = metricSetExcessiveWakeup
 		case "errorCount", "errorReportCount":
-			metricSetName = "errorCountMetricSet"
+			metricSetName = metricSetErrorCount
 		}
 	}
 
@@ -1346,256 +1356,11 @@ func (cmd *VitalsQueryCmd) Run(globals *Globals) error {
 		return err
 	}
 
-	var allRows []*playdeveloperreporting.GooglePlayDeveloperReportingV1beta1MetricsRow
 	startTime := time.Now()
 
-	switch metricSetName {
-	case "crashRateMetricSet":
-		req := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryCrashRateMetricSetRequest{
-			TimelineSpec: timelineSpec,
-			Dimensions:   cmd.Dimensions,
-			Metrics:      cmd.Metrics,
-			PageSize:     cmd.PageSize,
-			PageToken:    cmd.PageToken,
-		}
-		err = client.DoWithRetry(ctx, func() error {
-			resp, qErr := svc.Vitals.Crashrate.Query(name, req).Context(ctx).Do()
-			if qErr != nil {
-				return qErr
-			}
-			allRows = append(allRows, resp.Rows...)
-			if cmd.All && resp.NextPageToken != "" {
-				query := func(pageToken string) (crashRatePageResponse, error) {
-					pageReq := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryCrashRateMetricSetRequest{
-						TimelineSpec: req.TimelineSpec,
-						Dimensions:   req.Dimensions,
-						Metrics:      req.Metrics,
-						PageSize:     req.PageSize,
-						PageToken:    pageToken,
-					}
-					pageResp, pErr := svc.Vitals.Crashrate.Query(name, pageReq).Context(ctx).Do()
-					return crashRatePageResponse{resp: pageResp}, pErr
-				}
-				additionalRows, _, fErr := fetchAllPages(ctx, query, resp.NextPageToken, 0)
-				if fErr != nil {
-					return fErr
-				}
-				allRows = append(allRows, additionalRows...)
-			}
-			return nil
-		})
-	case "anrRateMetricSet":
-		req := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryAnrRateMetricSetRequest{
-			TimelineSpec: timelineSpec,
-			Dimensions:   cmd.Dimensions,
-			Metrics:      cmd.Metrics,
-			PageSize:     cmd.PageSize,
-			PageToken:    cmd.PageToken,
-		}
-		err = client.DoWithRetry(ctx, func() error {
-			resp, qErr := svc.Vitals.Anrrate.Query(name, req).Context(ctx).Do()
-			if qErr != nil {
-				return qErr
-			}
-			allRows = append(allRows, resp.Rows...)
-			if cmd.All && resp.NextPageToken != "" {
-				query := func(pageToken string) (anrRatePageResponse, error) {
-					pageReq := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryAnrRateMetricSetRequest{
-						TimelineSpec: req.TimelineSpec,
-						Dimensions:   req.Dimensions,
-						Metrics:      req.Metrics,
-						PageSize:     req.PageSize,
-						PageToken:    pageToken,
-					}
-					pageResp, pErr := svc.Vitals.Anrrate.Query(name, pageReq).Context(ctx).Do()
-					return anrRatePageResponse{resp: pageResp}, pErr
-				}
-				additionalRows, _, fErr := fetchAllPages(ctx, query, resp.NextPageToken, 0)
-				if fErr != nil {
-					return fErr
-				}
-				allRows = append(allRows, additionalRows...)
-			}
-			return nil
-		})
-	case "slowRenderingRateMetricSet":
-		req := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QuerySlowRenderingRateMetricSetRequest{
-			TimelineSpec: timelineSpec,
-			Dimensions:   cmd.Dimensions,
-			Metrics:      cmd.Metrics,
-			PageSize:     cmd.PageSize,
-			PageToken:    cmd.PageToken,
-		}
-		err = client.DoWithRetry(ctx, func() error {
-			resp, qErr := svc.Vitals.Slowrenderingrate.Query(name, req).Context(ctx).Do()
-			if qErr != nil {
-				return qErr
-			}
-			allRows = append(allRows, resp.Rows...)
-			if cmd.All && resp.NextPageToken != "" {
-				query := func(pageToken string) (slowRenderingPageResponse, error) {
-					pageReq := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QuerySlowRenderingRateMetricSetRequest{
-						TimelineSpec: req.TimelineSpec,
-						Dimensions:   req.Dimensions,
-						Metrics:      req.Metrics,
-						PageSize:     req.PageSize,
-						PageToken:    pageToken,
-					}
-					pageResp, pErr := svc.Vitals.Slowrenderingrate.Query(name, pageReq).Context(ctx).Do()
-					return slowRenderingPageResponse{resp: pageResp}, pErr
-				}
-				additionalRows, _, fErr := fetchAllPages(ctx, query, resp.NextPageToken, 0)
-				if fErr != nil {
-					return fErr
-				}
-				allRows = append(allRows, additionalRows...)
-			}
-			return nil
-		})
-	case "slowStartRateMetricSet":
-		req := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QuerySlowStartRateMetricSetRequest{
-			TimelineSpec: timelineSpec,
-			Dimensions:   cmd.Dimensions,
-			Metrics:      cmd.Metrics,
-			PageSize:     cmd.PageSize,
-			PageToken:    cmd.PageToken,
-		}
-		err = client.DoWithRetry(ctx, func() error {
-			resp, qErr := svc.Vitals.Slowstartrate.Query(name, req).Context(ctx).Do()
-			if qErr != nil {
-				return qErr
-			}
-			allRows = append(allRows, resp.Rows...)
-			if cmd.All && resp.NextPageToken != "" {
-				query := func(pageToken string) (slowStartPageResponse, error) {
-					pageReq := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QuerySlowStartRateMetricSetRequest{
-						TimelineSpec: req.TimelineSpec,
-						Dimensions:   req.Dimensions,
-						Metrics:      req.Metrics,
-						PageSize:     req.PageSize,
-						PageToken:    pageToken,
-					}
-					pageResp, pErr := svc.Vitals.Slowstartrate.Query(name, pageReq).Context(ctx).Do()
-					return slowStartPageResponse{resp: pageResp}, pErr
-				}
-				additionalRows, _, fErr := fetchAllPages(ctx, query, resp.NextPageToken, 0)
-				if fErr != nil {
-					return fErr
-				}
-				allRows = append(allRows, additionalRows...)
-			}
-			return nil
-		})
-	case "stuckBackgroundWakelockRateMetricSet":
-		req := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryStuckBackgroundWakelockRateMetricSetRequest{
-			TimelineSpec: timelineSpec,
-			Dimensions:   cmd.Dimensions,
-			Metrics:      cmd.Metrics,
-			PageSize:     cmd.PageSize,
-			PageToken:    cmd.PageToken,
-		}
-		err = client.DoWithRetry(ctx, func() error {
-			resp, qErr := svc.Vitals.Stuckbackgroundwakelockrate.Query(name, req).Context(ctx).Do()
-			if qErr != nil {
-				return qErr
-			}
-			allRows = append(allRows, resp.Rows...)
-			if cmd.All && resp.NextPageToken != "" {
-				query := func(pageToken string) (stuckWakelockPageResponse, error) {
-					pageReq := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryStuckBackgroundWakelockRateMetricSetRequest{
-						TimelineSpec: req.TimelineSpec,
-						Dimensions:   req.Dimensions,
-						Metrics:      req.Metrics,
-						PageSize:     req.PageSize,
-						PageToken:    pageToken,
-					}
-					pageResp, pErr := svc.Vitals.Stuckbackgroundwakelockrate.Query(name, pageReq).Context(ctx).Do()
-					return stuckWakelockPageResponse{resp: pageResp}, pErr
-				}
-				additionalRows, _, fErr := fetchAllPages(ctx, query, resp.NextPageToken, 0)
-				if fErr != nil {
-					return fErr
-				}
-				allRows = append(allRows, additionalRows...)
-			}
-			return nil
-		})
-	case "excessiveWakeupRateMetricSet":
-		req := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryExcessiveWakeupRateMetricSetRequest{
-			TimelineSpec: timelineSpec,
-			Dimensions:   cmd.Dimensions,
-			Metrics:      cmd.Metrics,
-			PageSize:     cmd.PageSize,
-			PageToken:    cmd.PageToken,
-		}
-		err = client.DoWithRetry(ctx, func() error {
-			resp, qErr := svc.Vitals.Excessivewakeuprate.Query(name, req).Context(ctx).Do()
-			if qErr != nil {
-				return qErr
-			}
-			allRows = append(allRows, resp.Rows...)
-			if cmd.All && resp.NextPageToken != "" {
-				query := func(pageToken string) (excessiveWakeupPageResponse, error) {
-					pageReq := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryExcessiveWakeupRateMetricSetRequest{
-						TimelineSpec: req.TimelineSpec,
-						Dimensions:   req.Dimensions,
-						Metrics:      req.Metrics,
-						PageSize:     req.PageSize,
-						PageToken:    pageToken,
-					}
-					pageResp, pErr := svc.Vitals.Excessivewakeuprate.Query(name, pageReq).Context(ctx).Do()
-					return excessiveWakeupPageResponse{resp: pageResp}, pErr
-				}
-				additionalRows, _, fErr := fetchAllPages(ctx, query, resp.NextPageToken, 0)
-				if fErr != nil {
-					return fErr
-				}
-				allRows = append(allRows, additionalRows...)
-			}
-			return nil
-		})
-	case "errorCountMetricSet":
-		req := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryErrorCountMetricSetRequest{
-			TimelineSpec: timelineSpec,
-			Dimensions:   cmd.Dimensions,
-			Metrics:      cmd.Metrics,
-			PageSize:     cmd.PageSize,
-			PageToken:    cmd.PageToken,
-		}
-		err = client.DoWithRetry(ctx, func() error {
-			resp, qErr := svc.Vitals.Errors.Counts.Query(name, req).Context(ctx).Do()
-			if qErr != nil {
-				return qErr
-			}
-			allRows = append(allRows, resp.Rows...)
-			if cmd.All && resp.NextPageToken != "" {
-				query := func(pageToken string) (errorCountPageResponse, error) {
-					pageReq := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryErrorCountMetricSetRequest{
-						TimelineSpec: req.TimelineSpec,
-						Dimensions:   req.Dimensions,
-						Metrics:      req.Metrics,
-						PageSize:     req.PageSize,
-						PageToken:    pageToken,
-					}
-					pageResp, pErr := svc.Vitals.Errors.Counts.Query(name, pageReq).Context(ctx).Do()
-					return errorCountPageResponse{resp: pageResp}, pErr
-				}
-				additionalRows, _, fErr := fetchAllPages(ctx, query, resp.NextPageToken, 0)
-				if fErr != nil {
-					return fErr
-				}
-				allRows = append(allRows, additionalRows...)
-			}
-			return nil
-		})
-	default:
-		return errors.NewAPIError(errors.CodeValidationError,
-			fmt.Sprintf("unsupported metric set: %s", metricSetName)).
-			WithHint("Supported metric sets: crashRate, anrRate, slowRenderingRate, slowStartRate, stuckBackgroundWakelockRate, excessiveWakeupRate, errorCount")
-	}
-
+	allRows, err := cmd.queryMetricSet(ctx, client, svc, name, metricSetName, timelineSpec)
 	if err != nil {
-		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to query vitals: %v", err))
+		return err
 	}
 
 	data := formatMetricsRows(allRows)
@@ -1609,6 +1374,310 @@ func (cmd *VitalsQueryCmd) Run(globals *Globals) error {
 	return outputResult(result, globals.Output, globals.Pretty)
 }
 
+// queryMetricSet dispatches the vitals query to the appropriate metric set API endpoint.
+func (cmd *VitalsQueryCmd) queryMetricSet(
+	ctx context.Context,
+	client *api.Client,
+	svc *playdeveloperreporting.Service,
+	name, metricSetName string,
+	timelineSpec *playdeveloperreporting.GooglePlayDeveloperReportingV1beta1TimelineSpec,
+) ([]*playdeveloperreporting.GooglePlayDeveloperReportingV1beta1MetricsRow, error) {
+	var allRows []*playdeveloperreporting.GooglePlayDeveloperReportingV1beta1MetricsRow
+	var err error
+
+	switch metricSetName {
+	case metricSetCrashRate:
+		allRows, err = cmd.queryCrashRateMetrics(ctx, client, svc, name, timelineSpec)
+	case metricSetAnrRate:
+		allRows, err = cmd.queryAnrRateMetrics(ctx, client, svc, name, timelineSpec)
+	case metricSetSlowRendering:
+		allRows, err = cmd.querySlowRenderingMetrics(ctx, client, svc, name, timelineSpec)
+	case metricSetSlowStart:
+		allRows, err = cmd.querySlowStartMetrics(ctx, client, svc, name, timelineSpec)
+	case metricSetStuckBackgroundWakelock:
+		allRows, err = cmd.queryStuckWakelockMetrics(ctx, client, svc, name, timelineSpec)
+	case metricSetExcessiveWakeup:
+		allRows, err = cmd.queryExcessiveWakeupMetrics(ctx, client, svc, name, timelineSpec)
+	case metricSetErrorCount:
+		allRows, err = cmd.queryErrorCountMetrics(ctx, client, svc, name, timelineSpec)
+	default:
+		return nil, errors.NewAPIError(errors.CodeValidationError,
+			fmt.Sprintf("unsupported metric set: %s", metricSetName)).
+			WithHint("Supported metric sets: crashRate, anrRate, slowRenderingRate, slowStartRate, stuckBackgroundWakelockRate, excessiveWakeupRate, errorCount")
+	}
+
+	if err != nil {
+		return nil, errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to query vitals: %v", err))
+	}
+	return allRows, nil
+}
+
+func (cmd *VitalsQueryCmd) queryCrashRateMetrics(ctx context.Context, client *api.Client, svc *playdeveloperreporting.Service, name string, timelineSpec *playdeveloperreporting.GooglePlayDeveloperReportingV1beta1TimelineSpec) ([]*playdeveloperreporting.GooglePlayDeveloperReportingV1beta1MetricsRow, error) {
+	var allRows []*playdeveloperreporting.GooglePlayDeveloperReportingV1beta1MetricsRow
+	req := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryCrashRateMetricSetRequest{
+		TimelineSpec: timelineSpec,
+		Dimensions:   cmd.Dimensions,
+		Metrics:      cmd.Metrics,
+		PageSize:     cmd.PageSize,
+		PageToken:    cmd.PageToken,
+	}
+	err := client.DoWithRetry(ctx, func() error {
+		resp, qErr := svc.Vitals.Crashrate.Query(name, req).Context(ctx).Do()
+		if qErr != nil {
+			return qErr
+		}
+		allRows = append(allRows, resp.Rows...)
+		if cmd.All && resp.NextPageToken != "" {
+			query := func(pageToken string) (crashRatePageResponse, error) {
+				pageReq := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryCrashRateMetricSetRequest{
+					TimelineSpec: req.TimelineSpec,
+					Dimensions:   req.Dimensions,
+					Metrics:      req.Metrics,
+					PageSize:     req.PageSize,
+					PageToken:    pageToken,
+				}
+				pageResp, pErr := svc.Vitals.Crashrate.Query(name, pageReq).Context(ctx).Do()
+				return crashRatePageResponse{resp: pageResp}, pErr
+			}
+			additionalRows, _, fErr := fetchAllPages(ctx, query, resp.NextPageToken, 0)
+			if fErr != nil {
+				return fErr
+			}
+			allRows = append(allRows, additionalRows...)
+		}
+		return nil
+	})
+	return allRows, err
+}
+
+func (cmd *VitalsQueryCmd) queryAnrRateMetrics(ctx context.Context, client *api.Client, svc *playdeveloperreporting.Service, name string, timelineSpec *playdeveloperreporting.GooglePlayDeveloperReportingV1beta1TimelineSpec) ([]*playdeveloperreporting.GooglePlayDeveloperReportingV1beta1MetricsRow, error) {
+	var allRows []*playdeveloperreporting.GooglePlayDeveloperReportingV1beta1MetricsRow
+	req := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryAnrRateMetricSetRequest{
+		TimelineSpec: timelineSpec,
+		Dimensions:   cmd.Dimensions,
+		Metrics:      cmd.Metrics,
+		PageSize:     cmd.PageSize,
+		PageToken:    cmd.PageToken,
+	}
+	err := client.DoWithRetry(ctx, func() error {
+		resp, qErr := svc.Vitals.Anrrate.Query(name, req).Context(ctx).Do()
+		if qErr != nil {
+			return qErr
+		}
+		allRows = append(allRows, resp.Rows...)
+		if cmd.All && resp.NextPageToken != "" {
+			query := func(pageToken string) (anrRatePageResponse, error) {
+				pageReq := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryAnrRateMetricSetRequest{
+					TimelineSpec: req.TimelineSpec,
+					Dimensions:   req.Dimensions,
+					Metrics:      req.Metrics,
+					PageSize:     req.PageSize,
+					PageToken:    pageToken,
+				}
+				pageResp, pErr := svc.Vitals.Anrrate.Query(name, pageReq).Context(ctx).Do()
+				return anrRatePageResponse{resp: pageResp}, pErr
+			}
+			additionalRows, _, fErr := fetchAllPages(ctx, query, resp.NextPageToken, 0)
+			if fErr != nil {
+				return fErr
+			}
+			allRows = append(allRows, additionalRows...)
+		}
+		return nil
+	})
+	return allRows, err
+}
+
+func (cmd *VitalsQueryCmd) querySlowRenderingMetrics(ctx context.Context, client *api.Client, svc *playdeveloperreporting.Service, name string, timelineSpec *playdeveloperreporting.GooglePlayDeveloperReportingV1beta1TimelineSpec) ([]*playdeveloperreporting.GooglePlayDeveloperReportingV1beta1MetricsRow, error) {
+	var allRows []*playdeveloperreporting.GooglePlayDeveloperReportingV1beta1MetricsRow
+	req := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QuerySlowRenderingRateMetricSetRequest{
+		TimelineSpec: timelineSpec,
+		Dimensions:   cmd.Dimensions,
+		Metrics:      cmd.Metrics,
+		PageSize:     cmd.PageSize,
+		PageToken:    cmd.PageToken,
+	}
+	err := client.DoWithRetry(ctx, func() error {
+		resp, qErr := svc.Vitals.Slowrenderingrate.Query(name, req).Context(ctx).Do()
+		if qErr != nil {
+			return qErr
+		}
+		allRows = append(allRows, resp.Rows...)
+		if cmd.All && resp.NextPageToken != "" {
+			query := func(pageToken string) (slowRenderingPageResponse, error) {
+				pageReq := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QuerySlowRenderingRateMetricSetRequest{
+					TimelineSpec: req.TimelineSpec,
+					Dimensions:   req.Dimensions,
+					Metrics:      req.Metrics,
+					PageSize:     req.PageSize,
+					PageToken:    pageToken,
+				}
+				pageResp, pErr := svc.Vitals.Slowrenderingrate.Query(name, pageReq).Context(ctx).Do()
+				return slowRenderingPageResponse{resp: pageResp}, pErr
+			}
+			additionalRows, _, fErr := fetchAllPages(ctx, query, resp.NextPageToken, 0)
+			if fErr != nil {
+				return fErr
+			}
+			allRows = append(allRows, additionalRows...)
+		}
+		return nil
+	})
+	return allRows, err
+}
+
+func (cmd *VitalsQueryCmd) querySlowStartMetrics(ctx context.Context, client *api.Client, svc *playdeveloperreporting.Service, name string, timelineSpec *playdeveloperreporting.GooglePlayDeveloperReportingV1beta1TimelineSpec) ([]*playdeveloperreporting.GooglePlayDeveloperReportingV1beta1MetricsRow, error) {
+	var allRows []*playdeveloperreporting.GooglePlayDeveloperReportingV1beta1MetricsRow
+	req := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QuerySlowStartRateMetricSetRequest{
+		TimelineSpec: timelineSpec,
+		Dimensions:   cmd.Dimensions,
+		Metrics:      cmd.Metrics,
+		PageSize:     cmd.PageSize,
+		PageToken:    cmd.PageToken,
+	}
+	err := client.DoWithRetry(ctx, func() error {
+		resp, qErr := svc.Vitals.Slowstartrate.Query(name, req).Context(ctx).Do()
+		if qErr != nil {
+			return qErr
+		}
+		allRows = append(allRows, resp.Rows...)
+		if cmd.All && resp.NextPageToken != "" {
+			query := func(pageToken string) (slowStartPageResponse, error) {
+				pageReq := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QuerySlowStartRateMetricSetRequest{
+					TimelineSpec: req.TimelineSpec,
+					Dimensions:   req.Dimensions,
+					Metrics:      req.Metrics,
+					PageSize:     req.PageSize,
+					PageToken:    pageToken,
+				}
+				pageResp, pErr := svc.Vitals.Slowstartrate.Query(name, pageReq).Context(ctx).Do()
+				return slowStartPageResponse{resp: pageResp}, pErr
+			}
+			additionalRows, _, fErr := fetchAllPages(ctx, query, resp.NextPageToken, 0)
+			if fErr != nil {
+				return fErr
+			}
+			allRows = append(allRows, additionalRows...)
+		}
+		return nil
+	})
+	return allRows, err
+}
+
+func (cmd *VitalsQueryCmd) queryStuckWakelockMetrics(ctx context.Context, client *api.Client, svc *playdeveloperreporting.Service, name string, timelineSpec *playdeveloperreporting.GooglePlayDeveloperReportingV1beta1TimelineSpec) ([]*playdeveloperreporting.GooglePlayDeveloperReportingV1beta1MetricsRow, error) {
+	var allRows []*playdeveloperreporting.GooglePlayDeveloperReportingV1beta1MetricsRow
+	req := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryStuckBackgroundWakelockRateMetricSetRequest{
+		TimelineSpec: timelineSpec,
+		Dimensions:   cmd.Dimensions,
+		Metrics:      cmd.Metrics,
+		PageSize:     cmd.PageSize,
+		PageToken:    cmd.PageToken,
+	}
+	err := client.DoWithRetry(ctx, func() error {
+		resp, qErr := svc.Vitals.Stuckbackgroundwakelockrate.Query(name, req).Context(ctx).Do()
+		if qErr != nil {
+			return qErr
+		}
+		allRows = append(allRows, resp.Rows...)
+		if cmd.All && resp.NextPageToken != "" {
+			query := func(pageToken string) (stuckWakelockPageResponse, error) {
+				pageReq := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryStuckBackgroundWakelockRateMetricSetRequest{
+					TimelineSpec: req.TimelineSpec,
+					Dimensions:   req.Dimensions,
+					Metrics:      req.Metrics,
+					PageSize:     req.PageSize,
+					PageToken:    pageToken,
+				}
+				pageResp, pErr := svc.Vitals.Stuckbackgroundwakelockrate.Query(name, pageReq).Context(ctx).Do()
+				return stuckWakelockPageResponse{resp: pageResp}, pErr
+			}
+			additionalRows, _, fErr := fetchAllPages(ctx, query, resp.NextPageToken, 0)
+			if fErr != nil {
+				return fErr
+			}
+			allRows = append(allRows, additionalRows...)
+		}
+		return nil
+	})
+	return allRows, err
+}
+
+func (cmd *VitalsQueryCmd) queryExcessiveWakeupMetrics(ctx context.Context, client *api.Client, svc *playdeveloperreporting.Service, name string, timelineSpec *playdeveloperreporting.GooglePlayDeveloperReportingV1beta1TimelineSpec) ([]*playdeveloperreporting.GooglePlayDeveloperReportingV1beta1MetricsRow, error) {
+	var allRows []*playdeveloperreporting.GooglePlayDeveloperReportingV1beta1MetricsRow
+	req := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryExcessiveWakeupRateMetricSetRequest{
+		TimelineSpec: timelineSpec,
+		Dimensions:   cmd.Dimensions,
+		Metrics:      cmd.Metrics,
+		PageSize:     cmd.PageSize,
+		PageToken:    cmd.PageToken,
+	}
+	err := client.DoWithRetry(ctx, func() error {
+		resp, qErr := svc.Vitals.Excessivewakeuprate.Query(name, req).Context(ctx).Do()
+		if qErr != nil {
+			return qErr
+		}
+		allRows = append(allRows, resp.Rows...)
+		if cmd.All && resp.NextPageToken != "" {
+			query := func(pageToken string) (excessiveWakeupPageResponse, error) {
+				pageReq := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryExcessiveWakeupRateMetricSetRequest{
+					TimelineSpec: req.TimelineSpec,
+					Dimensions:   req.Dimensions,
+					Metrics:      req.Metrics,
+					PageSize:     req.PageSize,
+					PageToken:    pageToken,
+				}
+				pageResp, pErr := svc.Vitals.Excessivewakeuprate.Query(name, pageReq).Context(ctx).Do()
+				return excessiveWakeupPageResponse{resp: pageResp}, pErr
+			}
+			additionalRows, _, fErr := fetchAllPages(ctx, query, resp.NextPageToken, 0)
+			if fErr != nil {
+				return fErr
+			}
+			allRows = append(allRows, additionalRows...)
+		}
+		return nil
+	})
+	return allRows, err
+}
+
+func (cmd *VitalsQueryCmd) queryErrorCountMetrics(ctx context.Context, client *api.Client, svc *playdeveloperreporting.Service, name string, timelineSpec *playdeveloperreporting.GooglePlayDeveloperReportingV1beta1TimelineSpec) ([]*playdeveloperreporting.GooglePlayDeveloperReportingV1beta1MetricsRow, error) {
+	var allRows []*playdeveloperreporting.GooglePlayDeveloperReportingV1beta1MetricsRow
+	req := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryErrorCountMetricSetRequest{
+		TimelineSpec: timelineSpec,
+		Dimensions:   cmd.Dimensions,
+		Metrics:      cmd.Metrics,
+		PageSize:     cmd.PageSize,
+		PageToken:    cmd.PageToken,
+	}
+	err := client.DoWithRetry(ctx, func() error {
+		resp, qErr := svc.Vitals.Errors.Counts.Query(name, req).Context(ctx).Do()
+		if qErr != nil {
+			return qErr
+		}
+		allRows = append(allRows, resp.Rows...)
+		if cmd.All && resp.NextPageToken != "" {
+			query := func(pageToken string) (errorCountPageResponse, error) {
+				pageReq := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryErrorCountMetricSetRequest{
+					TimelineSpec: req.TimelineSpec,
+					Dimensions:   req.Dimensions,
+					Metrics:      req.Metrics,
+					PageSize:     req.PageSize,
+					PageToken:    pageToken,
+				}
+				pageResp, pErr := svc.Vitals.Errors.Counts.Query(name, pageReq).Context(ctx).Do()
+				return errorCountPageResponse{resp: pageResp}, pErr
+			}
+			additionalRows, _, fErr := fetchAllPages(ctx, query, resp.NextPageToken, 0)
+			if fErr != nil {
+				return fErr
+			}
+			allRows = append(allRows, additionalRows...)
+		}
+		return nil
+	})
+	return allRows, err
+}
+
 // VitalsCapabilitiesCmd lists available vitals metrics.
 type VitalsCapabilitiesCmd struct{}
 
@@ -1619,7 +1688,7 @@ func (cmd *VitalsCapabilitiesCmd) Run(globals *Globals) error {
 	capabilities := map[string]interface{}{
 		"metricSets": []map[string]interface{}{
 			{
-				"name":        "crashRateMetricSet",
+				"name":        metricSetCrashRate,
 				"description": "Crash rate metrics including user-perceived crash rates",
 				"command":     "gpd vitals crashes",
 				"freshness":   "Data available within 24 hours",
@@ -1630,7 +1699,7 @@ func (cmd *VitalsCapabilitiesCmd) Run(globals *Globals) error {
 				},
 			},
 			{
-				"name":        "anrRateMetricSet",
+				"name":        metricSetAnrRate,
 				"description": "ANR (Application Not Responding) rate metrics",
 				"command":     "gpd vitals anrs",
 				"freshness":   "Data available within 24 hours",
@@ -1641,7 +1710,7 @@ func (cmd *VitalsCapabilitiesCmd) Run(globals *Globals) error {
 				},
 			},
 			{
-				"name":        "slowRenderingRateMetricSet",
+				"name":        metricSetSlowRendering,
 				"description": "Slow rendering (UI jank) rate metrics",
 				"command":     "gpd vitals metrics slow-rendering",
 				"freshness":   "Data available within 24 hours",
@@ -1651,7 +1720,7 @@ func (cmd *VitalsCapabilitiesCmd) Run(globals *Globals) error {
 				},
 			},
 			{
-				"name":        "slowStartRateMetricSet",
+				"name":        metricSetSlowStart,
 				"description": "Slow app startup rate metrics",
 				"command":     "gpd vitals metrics slow-start",
 				"freshness":   "Data available within 24 hours",
@@ -1661,7 +1730,7 @@ func (cmd *VitalsCapabilitiesCmd) Run(globals *Globals) error {
 				},
 			},
 			{
-				"name":        "stuckBackgroundWakelockRateMetricSet",
+				"name":        metricSetStuckBackgroundWakelock,
 				"description": "Stuck background wakelock rate metrics",
 				"command":     "gpd vitals metrics stuck-wakelocks",
 				"freshness":   "Data available within 24 hours",
@@ -1671,7 +1740,7 @@ func (cmd *VitalsCapabilitiesCmd) Run(globals *Globals) error {
 				},
 			},
 			{
-				"name":        "excessiveWakeupRateMetricSet",
+				"name":        metricSetExcessiveWakeup,
 				"description": "Excessive wakeup rate metrics",
 				"command":     "gpd vitals metrics excessive-wakeups",
 				"freshness":   "Data available within 24 hours",
@@ -1681,7 +1750,7 @@ func (cmd *VitalsCapabilitiesCmd) Run(globals *Globals) error {
 				},
 			},
 			{
-				"name":        "errorCountMetricSet",
+				"name":        metricSetErrorCount,
 				"description": "Error count metrics for crashes and ANRs",
 				"command":     "gpd vitals errors counts",
 				"freshness":   "Data available within 24 hours",

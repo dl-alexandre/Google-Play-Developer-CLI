@@ -20,6 +20,11 @@ import (
 	"github.com/dl-alexandre/gpd/internal/output"
 )
 
+const (
+	extAAB = ".aab"
+	extAPK = ".apk"
+)
+
 // BulkCmd contains batch operations commands.
 type BulkCmd struct {
 	Upload   BulkUploadCmd   `cmd:"" help:"Upload multiple APKs/AABs in parallel"`
@@ -203,7 +208,7 @@ func (cmd *BulkUploadCmd) uploadFile(ctx context.Context, client *api.Client, pk
 	if err != nil {
 		return bulkUploadItemResult{File: file, Status: "failed", Error: err.Error()}
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	svc, err := client.AndroidPublisher()
 	if err != nil {
@@ -220,7 +225,7 @@ func (cmd *BulkUploadCmd) uploadFile(ctx context.Context, client *api.Client, pk
 	}
 
 	switch ext {
-	case ".aab":
+	case extAAB:
 		var bundle *androidpublisher.Bundle
 		err = client.DoWithRetry(ctx, func() error {
 			var uerr error
@@ -230,8 +235,8 @@ func (cmd *BulkUploadCmd) uploadFile(ctx context.Context, client *api.Client, pk
 		if err != nil {
 			return bulkUploadItemResult{File: file, Status: "failed", Error: err.Error()}
 		}
-		return bulkUploadItemResult{File: file, VersionCode: int64(bundle.VersionCode), Status: "success", SHA1: bundle.Sha1}
-	case ".apk":
+		return bulkUploadItemResult{File: file, VersionCode: bundle.VersionCode, Status: "success", SHA1: bundle.Sha1}
+	case extAPK:
 		var apk *androidpublisher.Apk
 		err = client.DoWithRetry(ctx, func() error {
 			var uerr error
@@ -241,7 +246,7 @@ func (cmd *BulkUploadCmd) uploadFile(ctx context.Context, client *api.Client, pk
 		if err != nil {
 			return bulkUploadItemResult{File: file, Status: "failed", Error: err.Error()}
 		}
-		return bulkUploadItemResult{File: file, VersionCode: int64(apk.VersionCode), Status: "success"}
+		return bulkUploadItemResult{File: file, VersionCode: apk.VersionCode, Status: "success"}
 	default:
 		return bulkUploadItemResult{File: file, Status: "failed", Error: "unsupported file type: " + ext}
 	}
@@ -397,42 +402,7 @@ func (cmd *BulkListingsCmd) Run(globals *Globals) error {
 	}
 
 	for locale, listing := range listings {
-		if err := client.Acquire(ctx); err != nil {
-			result.FailureCount++
-			result.Locales = append(result.Locales, bulkListingItemResult{
-				Locale: locale,
-				Status: "failed",
-				Error:  err.Error(),
-			})
-			continue
-		}
-
-		updateErr := client.DoWithRetry(ctx, func() error {
-			_, e := svc.Edits.Listings.Update(globals.Package, editID, locale, &androidpublisher.Listing{
-				Title:            listing.Title,
-				ShortDescription: listing.ShortDescription,
-				FullDescription:  listing.FullDescription,
-				Video:            listing.Video,
-			}).Context(ctx).Do()
-			return e
-		})
-
-		client.Release()
-
-		if updateErr != nil {
-			result.FailureCount++
-			result.Locales = append(result.Locales, bulkListingItemResult{
-				Locale: locale,
-				Status: "failed",
-				Error:  updateErr.Error(),
-			})
-		} else {
-			result.SuccessCount++
-			result.Locales = append(result.Locales, bulkListingItemResult{
-				Locale: locale,
-				Status: "success",
-			})
-		}
+		cmd.updateListing(ctx, client, svc, globals.Package, editID, locale, listing, result)
 	}
 
 	// Commit edit if no failures
@@ -457,6 +427,45 @@ func (cmd *BulkListingsCmd) Run(globals *Globals) error {
 	}
 
 	return writeOutput(globals, outputResult)
+}
+
+func (cmd *BulkListingsCmd) updateListing(ctx context.Context, client *api.Client, svc *androidpublisher.Service, pkg, editID, locale string, listing struct {
+	Title            string `json:"title"`
+	ShortDescription string `json:"shortDescription"`
+	FullDescription  string `json:"fullDescription"`
+	Video            string `json:"video,omitempty"`
+}, result *bulkListingsResult) {
+	if err := client.Acquire(ctx); err != nil {
+		result.FailureCount++
+		result.Locales = append(result.Locales, bulkListingItemResult{
+			Locale: locale, Status: "failed", Error: err.Error(),
+		})
+		return
+	}
+
+	updateErr := client.DoWithRetry(ctx, func() error {
+		_, e := svc.Edits.Listings.Update(pkg, editID, locale, &androidpublisher.Listing{
+			Title:            listing.Title,
+			ShortDescription: listing.ShortDescription,
+			FullDescription:  listing.FullDescription,
+			Video:            listing.Video,
+		}).Context(ctx).Do()
+		return e
+	})
+
+	client.Release()
+
+	if updateErr != nil {
+		result.FailureCount++
+		result.Locales = append(result.Locales, bulkListingItemResult{
+			Locale: locale, Status: "failed", Error: updateErr.Error(),
+		})
+	} else {
+		result.SuccessCount++
+		result.Locales = append(result.Locales, bulkListingItemResult{
+			Locale: locale, Status: "success",
+		})
+	}
 }
 
 // BulkImagesCmd batch uploads images for multiple types.
@@ -485,13 +494,8 @@ type bulkImageItemResult struct {
 	Error    string `json:"error,omitempty"`
 }
 
-// Run executes the bulk images upload command.
-func (cmd *BulkImagesCmd) Run(globals *Globals) error {
-	if err := requirePackage(globals.Package); err != nil {
-		return err
-	}
-
-	// Walk the directory to find images
+// scanImageDirectory walks the image directory and returns discovered images.
+func (cmd *BulkImagesCmd) scanImageDirectory() ([]bulkImageItemResult, error) {
 	var images []bulkImageItemResult
 	err := filepath.Walk(cmd.ImageDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -533,13 +537,62 @@ func (cmd *BulkImagesCmd) Run(globals *Globals) error {
 	})
 
 	if err != nil {
-		return errors.NewAPIError(errors.CodeGeneralError, "failed to scan image directory").
+		return nil, errors.NewAPIError(errors.CodeGeneralError, "failed to scan image directory").
 			WithDetails(map[string]interface{}{"error": err.Error()})
 	}
 
 	if len(images) == 0 {
-		return errors.NewAPIError(errors.CodeValidationError, "no images found in directory").
+		return nil, errors.NewAPIError(errors.CodeValidationError, "no images found in directory").
 			WithHint("Ensure images are organized in subdirectories by type (e.g., phoneScreenshots/, featureGraphic/)")
+	}
+
+	return images, nil
+}
+
+// uploadImagesParallel uploads images in parallel with controlled concurrency and collects results.
+func (cmd *BulkImagesCmd) uploadImagesParallel(ctx context.Context, client *api.Client, svc *androidpublisher.Service, pkg, editID string, images []bulkImageItemResult) *bulkImagesResult {
+	result := &bulkImagesResult{
+		Images: make([]bulkImageItemResult, 0, len(images)),
+		EditID: editID,
+	}
+
+	var wg sync.WaitGroup
+	semaphore := make(chan struct{}, cmd.MaxParallel)
+	var mu sync.Mutex
+
+	for _, img := range images {
+		wg.Add(1)
+		go func(item bulkImageItemResult) {
+			defer wg.Done()
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+
+			imgResult := cmd.uploadImage(ctx, client, svc, pkg, editID, &item)
+
+			mu.Lock()
+			if imgResult.Status == "success" {
+				result.SuccessCount++
+			} else {
+				result.FailureCount++
+			}
+			result.Images = append(result.Images, imgResult)
+			mu.Unlock()
+		}(img)
+	}
+
+	wg.Wait()
+	return result
+}
+
+// Run executes the bulk images upload command.
+func (cmd *BulkImagesCmd) Run(globals *Globals) error {
+	if err := requirePackage(globals.Package); err != nil {
+		return err
+	}
+
+	images, err := cmd.scanImageDirectory()
+	if err != nil {
+		return err
 	}
 
 	if cmd.DryRun {
@@ -603,84 +656,7 @@ func (cmd *BulkImagesCmd) Run(globals *Globals) error {
 		return err
 	}
 
-	result := &bulkImagesResult{
-		Images: make([]bulkImageItemResult, 0, len(images)),
-		EditID: editID,
-	}
-
-	// Upload images in parallel with controlled concurrency
-	var wg sync.WaitGroup
-	semaphore := make(chan struct{}, cmd.MaxParallel)
-	var mu sync.Mutex
-
-	for _, img := range images {
-		wg.Add(1)
-		go func(item bulkImageItemResult) {
-			defer wg.Done()
-			semaphore <- struct{}{}
-			defer func() { <-semaphore }()
-
-			f, openErr := os.Open(item.Filename)
-			if openErr != nil {
-				mu.Lock()
-				result.FailureCount++
-				result.Images = append(result.Images, bulkImageItemResult{
-					Type:     item.Type,
-					Locale:   item.Locale,
-					Filename: item.Filename,
-					Status:   "failed",
-					Error:    openErr.Error(),
-				})
-				mu.Unlock()
-				return
-			}
-			defer f.Close()
-
-			if acquireErr := client.AcquireForUpload(ctx); acquireErr != nil {
-				mu.Lock()
-				result.FailureCount++
-				result.Images = append(result.Images, bulkImageItemResult{
-					Type:     item.Type,
-					Locale:   item.Locale,
-					Filename: item.Filename,
-					Status:   "failed",
-					Error:    acquireErr.Error(),
-				})
-				mu.Unlock()
-				return
-			}
-
-			uploadErr := client.DoWithRetry(ctx, func() error {
-				_, e := svc.Edits.Images.Upload(globals.Package, editID, item.Locale, item.Type).Media(f).Context(ctx).Do()
-				return e
-			})
-
-			client.ReleaseForUpload()
-
-			mu.Lock()
-			if uploadErr != nil {
-				result.FailureCount++
-				result.Images = append(result.Images, bulkImageItemResult{
-					Type:     item.Type,
-					Locale:   item.Locale,
-					Filename: item.Filename,
-					Status:   "failed",
-					Error:    uploadErr.Error(),
-				})
-			} else {
-				result.SuccessCount++
-				result.Images = append(result.Images, bulkImageItemResult{
-					Type:     item.Type,
-					Locale:   item.Locale,
-					Filename: item.Filename,
-					Status:   "success",
-				})
-			}
-			mu.Unlock()
-		}(img)
-	}
-
-	wg.Wait()
+	result := cmd.uploadImagesParallel(ctx, client, svc, globals.Package, editID, images)
 
 	// Commit edit if no failures
 	if result.FailureCount == 0 {
@@ -704,6 +680,42 @@ func (cmd *BulkImagesCmd) Run(globals *Globals) error {
 	}
 
 	return writeOutput(globals, outputResult)
+}
+
+func (cmd *BulkImagesCmd) uploadImage(ctx context.Context, client *api.Client, svc *androidpublisher.Service, pkg, editID string, item *bulkImageItemResult) bulkImageItemResult {
+	f, openErr := os.Open(item.Filename)
+	if openErr != nil {
+		return bulkImageItemResult{
+			Type: item.Type, Locale: item.Locale, Filename: item.Filename,
+			Status: "failed", Error: openErr.Error(),
+		}
+	}
+	defer func() { _ = f.Close() }()
+
+	if acquireErr := client.AcquireForUpload(ctx); acquireErr != nil {
+		return bulkImageItemResult{
+			Type: item.Type, Locale: item.Locale, Filename: item.Filename,
+			Status: "failed", Error: acquireErr.Error(),
+		}
+	}
+
+	uploadErr := client.DoWithRetry(ctx, func() error {
+		_, e := svc.Edits.Images.Upload(pkg, editID, item.Locale, item.Type).Media(f).Context(ctx).Do()
+		return e
+	})
+
+	client.ReleaseForUpload()
+
+	if uploadErr != nil {
+		return bulkImageItemResult{
+			Type: item.Type, Locale: item.Locale, Filename: item.Filename,
+			Status: "failed", Error: uploadErr.Error(),
+		}
+	}
+	return bulkImageItemResult{
+		Type: item.Type, Locale: item.Locale, Filename: item.Filename,
+		Status: "success",
+	}
 }
 
 // BulkTracksCmd updates multiple tracks at once.
@@ -825,51 +837,7 @@ func (cmd *BulkTracksCmd) Run(globals *Globals) error {
 	}
 
 	for _, track := range cmd.Tracks {
-		if acquireErr := client.Acquire(ctx); acquireErr != nil {
-			result.FailureCount++
-			result.Tracks = append(result.Tracks, bulkTrackItemResult{
-				Track:        track,
-				Status:       "failed",
-				VersionCodes: cmd.VersionCodes,
-				Error:        acquireErr.Error(),
-			})
-			continue
-		}
-
-		release := &androidpublisher.TrackRelease{
-			VersionCodes: versionCodes,
-			Status:       cmd.Status,
-		}
-		if cmd.Name != "" {
-			release.Name = cmd.Name
-		}
-
-		updateErr := client.DoWithRetry(ctx, func() error {
-			_, e := svc.Edits.Tracks.Update(globals.Package, editID, track, &androidpublisher.Track{
-				Track:    track,
-				Releases: []*androidpublisher.TrackRelease{release},
-			}).Context(ctx).Do()
-			return e
-		})
-
-		client.Release()
-
-		if updateErr != nil {
-			result.FailureCount++
-			result.Tracks = append(result.Tracks, bulkTrackItemResult{
-				Track:        track,
-				Status:       "failed",
-				VersionCodes: cmd.VersionCodes,
-				Error:        updateErr.Error(),
-			})
-		} else {
-			result.SuccessCount++
-			result.Tracks = append(result.Tracks, bulkTrackItemResult{
-				Track:        track,
-				Status:       "success",
-				VersionCodes: cmd.VersionCodes,
-			})
-		}
+		cmd.updateTrack(ctx, client, svc, globals.Package, editID, track, versionCodes, result)
 	}
 
 	// Commit edit if no failures
@@ -898,4 +866,44 @@ func (cmd *BulkTracksCmd) Run(globals *Globals) error {
 	}
 
 	return writeOutput(globals, outputResult)
+}
+
+func (cmd *BulkTracksCmd) updateTrack(ctx context.Context, client *api.Client, svc *androidpublisher.Service, pkg, editID, track string, versionCodes []int64, result *bulkTracksResult) {
+	if acquireErr := client.Acquire(ctx); acquireErr != nil {
+		result.FailureCount++
+		result.Tracks = append(result.Tracks, bulkTrackItemResult{
+			Track: track, Status: "failed", VersionCodes: cmd.VersionCodes, Error: acquireErr.Error(),
+		})
+		return
+	}
+
+	release := &androidpublisher.TrackRelease{
+		VersionCodes: versionCodes,
+		Status:       cmd.Status,
+	}
+	if cmd.Name != "" {
+		release.Name = cmd.Name
+	}
+
+	updateErr := client.DoWithRetry(ctx, func() error {
+		_, e := svc.Edits.Tracks.Update(pkg, editID, track, &androidpublisher.Track{
+			Track:    track,
+			Releases: []*androidpublisher.TrackRelease{release},
+		}).Context(ctx).Do()
+		return e
+	})
+
+	client.Release()
+
+	if updateErr != nil {
+		result.FailureCount++
+		result.Tracks = append(result.Tracks, bulkTrackItemResult{
+			Track: track, Status: "failed", VersionCodes: cmd.VersionCodes, Error: updateErr.Error(),
+		})
+	} else {
+		result.SuccessCount++
+		result.Tracks = append(result.Tracks, bulkTrackItemResult{
+			Track: track, Status: "success", VersionCodes: cmd.VersionCodes,
+		})
+	}
 }

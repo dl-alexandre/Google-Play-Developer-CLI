@@ -68,24 +68,24 @@ func (cmd *AnalyticsQueryCmd) Run(globals *Globals) error {
 	// Determine which metric set to query based on requested metrics
 	// The Play Developer Reporting API uses specific metric set endpoints.
 	// We route to the crash rate metric set as a default/general analytics entry point.
-	metricSetName := "crashRateMetricSet"
+	metricSetName := metricSetCrashRate
 	if len(cmd.Metrics) > 0 {
 		// Map common metric names to metric sets
 		switch cmd.Metrics[0] {
-		case "crashRate", "userPerceivedCrashRate":
-			metricSetName = "crashRateMetricSet"
-		case "anrRate", "userPerceivedAnrRate":
-			metricSetName = "anrRateMetricSet"
-		case "slowRenderingRate":
-			metricSetName = "slowRenderingRateMetricSet"
-		case "slowStartRate":
-			metricSetName = "slowStartRateMetricSet"
-		case "stuckBackgroundWakelockRate":
-			metricSetName = "stuckBackgroundWakelockRateMetricSet"
-		case "excessiveWakeupRate":
-			metricSetName = "excessiveWakeupRateMetricSet"
-		case "errorCount":
-			metricSetName = "errorCountMetricSet"
+		case metricCrashRate, "userPerceivedCrashRate":
+			metricSetName = metricSetCrashRate
+		case metricAnrRate, "userPerceivedAnrRate":
+			metricSetName = metricSetAnrRate
+		case metricSlowRenderingRate:
+			metricSetName = metricSetSlowRendering
+		case metricSlowStartRate:
+			metricSetName = metricSetSlowStart
+		case metricStuckBackgroundWakelockRate:
+			metricSetName = metricSetStuckBackgroundWakelock
+		case metricExcessiveWakeupRate:
+			metricSetName = metricSetExcessiveWakeup
+		case metricErrorCount:
+			metricSetName = metricSetErrorCount
 		}
 	}
 

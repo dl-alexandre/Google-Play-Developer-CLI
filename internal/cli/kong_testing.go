@@ -197,12 +197,9 @@ func (cmd *TestingDeviceLabCmd) Run(globals *Globals) error {
 	cmdParts = append(cmdParts, "gcloud", "firebase", "test", "android", "run")
 
 	if cmd.TestType == "instrumentation" && cmd.TestFile != "" {
-		cmdParts = append(cmdParts, "--type", "instrumentation")
-		cmdParts = append(cmdParts, "--app", cmd.AppFile)
-		cmdParts = append(cmdParts, "--test", cmd.TestFile)
+		cmdParts = append(cmdParts, "--type", "instrumentation", "--app", cmd.AppFile, "--test", cmd.TestFile)
 	} else {
-		cmdParts = append(cmdParts, "--type", "robo")
-		cmdParts = append(cmdParts, "--app", cmd.AppFile)
+		cmdParts = append(cmdParts, "--type", "robo", "--app", cmd.AppFile)
 	}
 
 	if cmd.TestTimeout != "" {
@@ -299,11 +296,12 @@ func (cmd *TestingScreenshotsCmd) Run(globals *Globals) error {
 	result.GcloudFound = lookErr == nil
 
 	// Build gcloud screenshot command suggestion
-	var cmdParts []string
-	cmdParts = append(cmdParts, "gcloud", "firebase", "test", "android", "run")
-	cmdParts = append(cmdParts, "--type", "robo")
-	cmdParts = append(cmdParts, "--app", cmd.AppFile)
-	cmdParts = append(cmdParts, "--robo-directives", "screenshot=true")
+	cmdParts := []string{
+		"gcloud", "firebase", "test", "android", "run",
+		"--type", "robo",
+		"--app", cmd.AppFile,
+		"--robo-directives", "screenshot=true",
+	}
 
 	for _, device := range cmd.Devices {
 		for _, orientation := range cmd.Orientations {
@@ -478,6 +476,87 @@ type testingCompatibilityGroup struct {
 	Percent float64 `json:"percent"`
 }
 
+// estimateMinSDKSupport returns the approximate fraction of devices supporting the given minSDK.
+func estimateMinSDKSupport(minSDK int) float64 {
+	switch {
+	case minSDK >= 34:
+		return 0.25 // Android 14+
+	case minSDK >= 33:
+		return 0.40 // Android 13+
+	case minSDK >= 31:
+		return 0.55 // Android 12+
+	case minSDK >= 30:
+		return 0.65 // Android 11+
+	case minSDK >= 29:
+		return 0.75 // Android 10+
+	case minSDK >= 28:
+		return 0.85 // Android 9+
+	case minSDK >= 26:
+		return 0.90 // Android 8+
+	case minSDK >= 24:
+		return 0.95 // Android 7+
+	case minSDK >= 21:
+		return 0.99 // Android 5+
+	default:
+		return 1.0
+	}
+}
+
+// populateDeviceSupport fills in device support estimates in the result.
+func (cmd *TestingCompatibilityCmd) populateDeviceSupport(result *testingCompatibilityResult) {
+	totalDevices := 20000 // Approximate total Android devices in Google Play catalog
+
+	supportedPct := 1.0
+	if cmd.MinSDK > 0 {
+		supportedPct = estimateMinSDKSupport(cmd.MinSDK)
+
+		if supportedPct < 0.5 {
+			result.Issues = append(result.Issues, testingCompatibilityIssue{
+				Severity: "warning",
+				Type:     "min_sdk_high",
+				Message:  fmt.Sprintf("minSdkVersion %d limits device support to approximately %.0f%% of active devices", cmd.MinSDK, supportedPct*100),
+				Devices:  int(float64(totalDevices) * (1 - supportedPct)),
+			})
+		}
+	}
+
+	if cmd.TargetSDK > 0 && cmd.TargetSDK < 33 {
+		result.Issues = append(result.Issues, testingCompatibilityIssue{
+			Severity: "warning",
+			Type:     "target_sdk_low",
+			Message:  fmt.Sprintf("targetSdkVersion %d is below Google Play's current requirement (33+)", cmd.TargetSDK),
+		})
+	}
+
+	supported := int(float64(totalDevices) * supportedPct)
+	blocked := totalDevices - supported
+
+	result.DeviceCount = totalDevices
+	result.SupportedCount = supported
+	result.BlockedCount = blocked
+	result.Compatible = blocked == 0 || supportedPct > 0.5
+
+	// Build device groups with approximate distribution
+	type deviceCategory struct {
+		name string
+		pct  float64
+	}
+	categories := []deviceCategory{
+		{"Phones", 0.80},
+		{"Tablets", 0.12},
+		{"Android TV", 0.03},
+		{"Wear OS", 0.03},
+		{"Android Auto", 0.02},
+	}
+	for _, cat := range categories {
+		result.DeviceGroups = append(result.DeviceGroups, testingCompatibilityGroup{
+			Name:    cat.name,
+			Count:   int(float64(supported) * cat.pct),
+			Percent: cat.pct * 100 * supportedPct,
+		})
+	}
+}
+
 // Run executes the compatibility command.
 func (cmd *TestingCompatibilityCmd) Run(globals *Globals) error {
 	if err := requirePackage(globals.Package); err != nil {
@@ -585,94 +664,7 @@ func (cmd *TestingCompatibilityCmd) Run(globals *Globals) error {
 
 	// Populate results based on what we found
 	if hasNativePlatform {
-		// Estimate device support based on SDK requirements
-		totalDevices := 20000 // Approximate total Android devices in Google Play catalog
-
-		// Estimate supported devices based on minSDK
-		supportedPct := 1.0
-		if cmd.MinSDK > 0 {
-			switch {
-			case cmd.MinSDK >= 34:
-				supportedPct = 0.25 // Android 14+
-			case cmd.MinSDK >= 33:
-				supportedPct = 0.40 // Android 13+
-			case cmd.MinSDK >= 31:
-				supportedPct = 0.55 // Android 12+
-			case cmd.MinSDK >= 30:
-				supportedPct = 0.65 // Android 11+
-			case cmd.MinSDK >= 29:
-				supportedPct = 0.75 // Android 10+
-			case cmd.MinSDK >= 28:
-				supportedPct = 0.85 // Android 9+
-			case cmd.MinSDK >= 26:
-				supportedPct = 0.90 // Android 8+
-			case cmd.MinSDK >= 24:
-				supportedPct = 0.95 // Android 7+
-			case cmd.MinSDK >= 21:
-				supportedPct = 0.99 // Android 5+
-			}
-
-			if supportedPct < 0.5 {
-				result.Issues = append(result.Issues, testingCompatibilityIssue{
-					Severity: "warning",
-					Type:     "min_sdk_high",
-					Message:  fmt.Sprintf("minSdkVersion %d limits device support to approximately %.0f%% of active devices", cmd.MinSDK, supportedPct*100),
-					Devices:  int(float64(totalDevices) * (1 - supportedPct)),
-				})
-			}
-		}
-
-		if cmd.TargetSDK > 0 && cmd.TargetSDK < 33 {
-			result.Issues = append(result.Issues, testingCompatibilityIssue{
-				Severity: "warning",
-				Type:     "target_sdk_low",
-				Message:  fmt.Sprintf("targetSdkVersion %d is below Google Play's current requirement (33+)", cmd.TargetSDK),
-			})
-		}
-
-		supported := int(float64(totalDevices) * supportedPct)
-		blocked := totalDevices - supported
-
-		result.DeviceCount = totalDevices
-		result.SupportedCount = supported
-		result.BlockedCount = blocked
-		result.Compatible = blocked == 0 || supportedPct > 0.5
-
-		// Build device groups
-		// Approximate distribution
-		phonesPct := 0.80
-		tabletsPct := 0.12
-		tvPct := 0.03
-		wearPct := 0.03
-		autoPct := 0.02
-
-		result.DeviceGroups = append(result.DeviceGroups,
-			testingCompatibilityGroup{
-				Name:    "Phones",
-				Count:   int(float64(supported) * phonesPct),
-				Percent: phonesPct * 100 * supportedPct,
-			},
-			testingCompatibilityGroup{
-				Name:    "Tablets",
-				Count:   int(float64(supported) * tabletsPct),
-				Percent: tabletsPct * 100 * supportedPct,
-			},
-			testingCompatibilityGroup{
-				Name:    "Android TV",
-				Count:   int(float64(supported) * tvPct),
-				Percent: tvPct * 100 * supportedPct,
-			},
-			testingCompatibilityGroup{
-				Name:    "Wear OS",
-				Count:   int(float64(supported) * wearPct),
-				Percent: wearPct * 100 * supportedPct,
-			},
-			testingCompatibilityGroup{
-				Name:    "Android Auto",
-				Count:   int(float64(supported) * autoPct),
-				Percent: autoPct * 100 * supportedPct,
-			},
-		)
+		cmd.populateDeviceSupport(result)
 	} else {
 		result.Compatible = false
 		result.Issues = append(result.Issues, testingCompatibilityIssue{

@@ -18,19 +18,23 @@ import (
 )
 
 const (
-	metricCrash         = "crash"
-	metricAnr           = "anr"
-	metricError         = "error"
-	metricCrashes       = "crashes"
-	metricAnrs          = "anrs"
-	metricErrors        = "errors"
-	metricCrashRate     = "crashRate"
-	metricAnrRate       = "anrRate"
-	metricErrorCount    = "errorCount"
-	severityHigh        = "high"
-	severityLow         = "low"
-	metricDistinctUsers = "distinctUsers"
-	trendStable         = "stable"
+	metricCrash                       = "crash"
+	metricAnr                         = "anr"
+	metricError                       = "error"
+	metricCrashes                     = "crashes"
+	metricAnrs                        = "anrs"
+	metricErrors                      = "errors"
+	metricCrashRate                   = "crashRate"
+	metricAnrRate                     = "anrRate"
+	metricErrorCount                  = "errorCount"
+	metricSlowRenderingRate           = "slowRenderingRate"
+	metricSlowStartRate               = "slowStartRate"
+	metricExcessiveWakeupRate         = "excessiveWakeupRate"
+	metricStuckBackgroundWakelockRate = "stuckBackgroundWakelockRate"
+	severityHigh                      = "high"
+	severityLow                       = "low"
+	metricDistinctUsers               = "distinctUsers"
+	trendStable                       = "stable"
 )
 
 // MonitorCmd contains monitoring and alerting commands.
@@ -699,7 +703,7 @@ func (cmd *MonitorAnomaliesCmd) getErrorCount(ctx context.Context, client *api.C
 	name := fmt.Sprintf("apps/%s/errorCountMetricSet", pkg)
 	req := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryErrorCountMetricSetRequest{
 		TimelineSpec: cmd.buildTimelineSpec(start, end),
-		Metrics:      []string{"errorCount"},
+		Metrics:      []string{metricErrorCount},
 		PageSize:     100,
 	}
 
@@ -712,7 +716,7 @@ func (cmd *MonitorAnomaliesCmd) getErrorCount(ctx context.Context, client *api.C
 		}
 		for _, row := range resp.Rows {
 			for _, m := range row.Metrics {
-				if m.Metric == "errorCount" {
+				if m.Metric == metricErrorCount {
 					totalCount += parseDecimalValue(m)
 				}
 			}
@@ -1027,7 +1031,7 @@ func (cmd *MonitorDashboardCmd) aggregateSlowRendering(ctx context.Context, clie
 	name := fmt.Sprintf("apps/%s/slowRenderingRateMetricSet", pkg)
 	req := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QuerySlowRenderingRateMetricSetRequest{
 		TimelineSpec: cmd.buildTimelineSpec(start, end),
-		Metrics:      []string{"slowRenderingRate"},
+		Metrics:      []string{metricSlowRenderingRate},
 		PageSize:     100,
 	}
 
@@ -1041,7 +1045,7 @@ func (cmd *MonitorDashboardCmd) aggregateSlowRendering(ctx context.Context, clie
 		}
 		for _, row := range resp.Rows {
 			for _, m := range row.Metrics {
-				if m.Metric == "slowRenderingRate" {
+				if m.Metric == metricSlowRenderingRate {
 					totalRate += parseDecimalValue(m)
 					count++
 				}
@@ -1064,7 +1068,7 @@ func (cmd *MonitorDashboardCmd) aggregateSlowStart(ctx context.Context, client *
 	name := fmt.Sprintf("apps/%s/slowStartRateMetricSet", pkg)
 	req := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QuerySlowStartRateMetricSetRequest{
 		TimelineSpec: cmd.buildTimelineSpec(start, end),
-		Metrics:      []string{"slowStartRate"},
+		Metrics:      []string{metricSlowStartRate},
 		PageSize:     100,
 	}
 
@@ -1078,7 +1082,7 @@ func (cmd *MonitorDashboardCmd) aggregateSlowStart(ctx context.Context, client *
 		}
 		for _, row := range resp.Rows {
 			for _, m := range row.Metrics {
-				if m.Metric == "slowStartRate" {
+				if m.Metric == metricSlowStartRate {
 					totalRate += parseDecimalValue(m)
 					count++
 				}
@@ -1101,7 +1105,7 @@ func (cmd *MonitorDashboardCmd) aggregateWakeups(ctx context.Context, client *ap
 	name := fmt.Sprintf("apps/%s/excessiveWakeupRateMetricSet", pkg)
 	req := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryExcessiveWakeupRateMetricSetRequest{
 		TimelineSpec: cmd.buildTimelineSpec(start, end),
-		Metrics:      []string{"excessiveWakeupRate"},
+		Metrics:      []string{metricExcessiveWakeupRate},
 		PageSize:     100,
 	}
 
@@ -1115,7 +1119,7 @@ func (cmd *MonitorDashboardCmd) aggregateWakeups(ctx context.Context, client *ap
 		}
 		for _, row := range resp.Rows {
 			for _, m := range row.Metrics {
-				if m.Metric == "excessiveWakeupRate" {
+				if m.Metric == metricExcessiveWakeupRate {
 					totalRate += parseDecimalValue(m)
 					count++
 				}
@@ -1138,7 +1142,7 @@ func (cmd *MonitorDashboardCmd) aggregateWakelocks(ctx context.Context, client *
 	name := fmt.Sprintf("apps/%s/stuckBackgroundWakelockRateMetricSet", pkg)
 	req := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryStuckBackgroundWakelockRateMetricSetRequest{
 		TimelineSpec: cmd.buildTimelineSpec(start, end),
-		Metrics:      []string{"stuckBackgroundWakelockRate"},
+		Metrics:      []string{metricStuckBackgroundWakelockRate},
 		PageSize:     100,
 	}
 
@@ -1152,7 +1156,7 @@ func (cmd *MonitorDashboardCmd) aggregateWakelocks(ctx context.Context, client *
 		}
 		for _, row := range resp.Rows {
 			for _, m := range row.Metrics {
-				if m.Metric == "stuckBackgroundWakelockRate" {
+				if m.Metric == metricStuckBackgroundWakelockRate {
 					totalRate += parseDecimalValue(m)
 					count++
 				}

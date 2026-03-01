@@ -14,6 +14,8 @@ import (
 	"github.com/dl-alexandre/gpd/internal/output"
 )
 
+const purchaseTypeSubscription = "subscription"
+
 // ============================================================================
 // Purchases Commands
 // ============================================================================
@@ -304,9 +306,9 @@ func (cmd *PurchasesSubscriptionsDeferCmd) Run(globals *Globals) error {
 	}
 
 	data := map[string]interface{}{
-		"subscriptionId":         cmd.SubscriptionID,
-		"deferred":               true,
-		"newExpiryTimeMillis":    resp.NewExpiryTimeMillis,
+		"subscriptionId":      cmd.SubscriptionID,
+		"deferred":            true,
+		"newExpiryTimeMillis": resp.NewExpiryTimeMillis,
 	}
 
 	return outputResult(
@@ -497,7 +499,7 @@ func (cmd *PurchasesVerifyCmd) Run(globals *Globals) error {
 		}
 		return cmd.verifyProduct(ctx, client, svc, globals, start)
 
-	case "subscription":
+	case purchaseTypeSubscription:
 		return cmd.verifySubscription(ctx, client, svc, globals, start)
 
 	case "auto", "":
@@ -517,7 +519,9 @@ func (cmd *PurchasesVerifyCmd) Run(globals *Globals) error {
 	}
 }
 
-func (cmd *PurchasesVerifyCmd) verifyProduct(ctx context.Context, client interface{ DoWithRetry(context.Context, func() error) error }, svc *androidpublisher.Service, globals *Globals, start time.Time) error {
+func (cmd *PurchasesVerifyCmd) verifyProduct(ctx context.Context, client interface {
+	DoWithRetry(context.Context, func() error) error
+}, svc *androidpublisher.Service, globals *Globals, start time.Time) error {
 	var purchase *androidpublisher.ProductPurchase
 	err := client.DoWithRetry(ctx, func() error {
 		var callErr error
@@ -529,15 +533,15 @@ func (cmd *PurchasesVerifyCmd) verifyProduct(ctx context.Context, client interfa
 	}
 
 	data := map[string]interface{}{
-		"type":               "product",
-		"productId":          cmd.ProductID,
-		"purchaseState":      purchase.PurchaseState,
-		"consumptionState":   purchase.ConsumptionState,
+		"type":                 "product",
+		"productId":            cmd.ProductID,
+		"purchaseState":        purchase.PurchaseState,
+		"consumptionState":     purchase.ConsumptionState,
 		"acknowledgementState": purchase.AcknowledgementState,
-		"orderId":            purchase.OrderId,
-		"purchaseTimeMillis": purchase.PurchaseTimeMillis,
-		"kind":               purchase.Kind,
-		"developerPayload":   purchase.DeveloperPayload,
+		"orderId":              purchase.OrderId,
+		"purchaseTimeMillis":   purchase.PurchaseTimeMillis,
+		"kind":                 purchase.Kind,
+		"developerPayload":     purchase.DeveloperPayload,
 	}
 
 	return outputResult(
@@ -546,7 +550,9 @@ func (cmd *PurchasesVerifyCmd) verifyProduct(ctx context.Context, client interfa
 	)
 }
 
-func (cmd *PurchasesVerifyCmd) verifySubscription(ctx context.Context, client interface{ DoWithRetry(context.Context, func() error) error }, svc *androidpublisher.Service, globals *Globals, start time.Time) error {
+func (cmd *PurchasesVerifyCmd) verifySubscription(ctx context.Context, client interface {
+	DoWithRetry(context.Context, func() error) error
+}, svc *androidpublisher.Service, globals *Globals, start time.Time) error {
 	var purchase *androidpublisher.SubscriptionPurchaseV2
 	err := client.DoWithRetry(ctx, func() error {
 		var callErr error
@@ -558,12 +564,12 @@ func (cmd *PurchasesVerifyCmd) verifySubscription(ctx context.Context, client in
 	}
 
 	data := map[string]interface{}{
-		"type":                     "subscription",
-		"acknowledgementState":     purchase.AcknowledgementState,
-		"subscriptionState":        purchase.SubscriptionState,
-		"latestOrderId":            purchase.LatestOrderId,
-		"linkedPurchaseToken":      purchase.LinkedPurchaseToken,
-		"kind":                     purchase.Kind,
+		"type":                 purchaseTypeSubscription,
+		"acknowledgementState": purchase.AcknowledgementState,
+		"subscriptionState":    purchase.SubscriptionState,
+		"latestOrderId":        purchase.LatestOrderId,
+		"linkedPurchaseToken":  purchase.LinkedPurchaseToken,
+		"kind":                 purchase.Kind,
 	}
 	if purchase.StartTime != "" {
 		data["startTime"] = purchase.StartTime
@@ -669,7 +675,7 @@ func (cmd *PurchasesVoidedListCmd) Run(globals *Globals) error {
 			switch cmd.Type {
 			case "product":
 				typeVal = 0
-			case "subscription":
+			case purchaseTypeSubscription:
 				typeVal = 1
 			default:
 				return errors.NewAPIError(errors.CodeValidationError, fmt.Sprintf("invalid type: %s", cmd.Type)).
@@ -1028,8 +1034,8 @@ func (cmd *MonetizationProductsCreateCmd) Run(globals *Globals) error {
 	switch cmd.Type {
 	case "managed", "consumable":
 		product.PurchaseType = "managedUser"
-	case "subscription":
-		product.PurchaseType = "subscription"
+	case purchaseTypeSubscription:
+		product.PurchaseType = purchaseTypeSubscription
 	default:
 		product.PurchaseType = "managedUser"
 	}
@@ -2605,7 +2611,6 @@ type MonetizationCapabilitiesCmd struct{}
 // Run executes the capabilities command.
 func (cmd *MonetizationCapabilitiesCmd) Run(globals *Globals) error {
 	start := time.Now()
-
 	data := map[string]interface{}{
 		"capabilities": []map[string]interface{}{
 			{
@@ -2750,11 +2755,8 @@ func (cmd *MonetizationCapabilitiesCmd) Run(globals *Globals) error {
 			},
 		},
 	}
-
-	return outputResult(
-		output.NewResult(data).WithDuration(time.Since(start)).WithServices("androidpublisher"),
-		globals.Output, globals.Pretty,
-	)
+	result := output.NewResult(data).WithDuration(time.Since(start)).WithServices("androidpublisher")
+	return outputResult(result, globals.Output, globals.Pretty)
 }
 
 // ============================================================================

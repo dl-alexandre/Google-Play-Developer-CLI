@@ -677,7 +677,7 @@ func (cmd *RecoveryListCmd) Run(globals *Globals) error {
 		"RECOVERY_STATUS_DRAFT":                  "pending",
 		"RECOVERY_STATUS_GENERATION_IN_PROGRESS": "pending",
 		"RECOVERY_STATUS_GENERATION_FAILED":      "failed",
-		"RECOVERY_STATUS_UNSPECIFIED":             "pending",
+		"RECOVERY_STATUS_UNSPECIFIED":            "pending",
 	}
 
 	var actions []recoveryActionData

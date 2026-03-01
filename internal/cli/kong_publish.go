@@ -54,7 +54,12 @@ type PublishUploadCmd struct {
 	DryRun                    bool   `help:"Show intended actions without executing"`
 }
 
-const fileTypeAAB = "aab"
+const (
+	fileTypeAAB        = "aab"
+	fileTypeAPK        = "apk"
+	releaseCompleted   = "completed"
+	releaseStatusDraft = "draft"
+)
 
 type uploadResult struct {
 	VersionCode int64  `json:"versionCode"`
@@ -130,12 +135,12 @@ func (cmd *PublishUploadCmd) validateUploadFile() (os.FileInfo, string, error) {
 	}
 
 	ext := strings.ToLower(filepath.Ext(cmd.File))
-	if ext != ".apk" && ext != ".aab" {
+	if ext != extAPK && ext != extAAB {
 		return nil, "", errors.NewAPIError(errors.CodeValidationError, fmt.Sprintf("invalid file type: %s. Only .apk and .aab files are supported", ext))
 	}
 
-	fileType := "apk"
-	if ext == ".aab" {
+	fileType := fileTypeAPK
+	if ext == extAAB {
 		fileType = fileTypeAAB
 	}
 
@@ -746,7 +751,7 @@ func (cmd *PublishRolloutCmd) Run(globals *Globals) error {
 	// Find inProgress release and update userFraction
 	found := false
 	for _, release := range track.Releases {
-		if release.Status == "inProgress" {
+		if release.Status == statusInProgress {
 			release.UserFraction = userFraction
 			found = true
 			break
@@ -890,7 +895,7 @@ func (cmd *PublishPromoteCmd) Run(globals *Globals) error {
 	// Get the latest release from the source track
 	latestRelease := sourceTrack.Releases[0]
 	for _, r := range sourceTrack.Releases {
-		if r.Status == "completed" || r.Status == "inProgress" {
+		if r.Status == releaseCompleted || r.Status == statusInProgress {
 			latestRelease = r
 			break
 		}
@@ -904,10 +909,10 @@ func (cmd *PublishPromoteCmd) Run(globals *Globals) error {
 	}
 
 	if cmd.Percentage > 0 && cmd.Percentage < 100 {
-		targetRelease.Status = "inProgress"
+		targetRelease.Status = statusInProgress
 		targetRelease.UserFraction = cmd.Percentage / 100.0
 	} else {
-		targetRelease.Status = "completed"
+		targetRelease.Status = releaseCompleted
 	}
 
 	targetTrack := &androidpublisher.Track{
@@ -1044,8 +1049,8 @@ func (cmd *PublishHaltCmd) Run(globals *Globals) error {
 	found := false
 	var haltedVersionCodes []int64
 	for _, release := range track.Releases {
-		if release.Status == "inProgress" {
-			release.Status = "halted"
+		if release.Status == statusInProgress {
+			release.Status = statusHalted
 			haltedVersionCodes = release.VersionCodes
 			found = true
 			break
@@ -1089,7 +1094,7 @@ func (cmd *PublishHaltCmd) Run(globals *Globals) error {
 
 	result := output.NewResult(map[string]interface{}{
 		"track":        cmd.Track,
-		"action":       "halted",
+		"action":       statusHalted,
 		"versionCodes": haltedVersionCodes,
 		"editId":       editID,
 		"committed":    committed,
@@ -1190,8 +1195,8 @@ func (cmd *PublishRollbackCmd) Run(globals *Globals) error {
 	found := false
 	var rolledBackVersionCodes []int64
 	for _, release := range track.Releases {
-		if release.Status == "inProgress" {
-			release.Status = "halted"
+		if release.Status == statusInProgress {
+			release.Status = statusHalted
 			rolledBackVersionCodes = release.VersionCodes
 			found = true
 			break
@@ -1493,7 +1498,7 @@ func (cmd *PublishCapabilitiesCmd) Run(globals *Globals) error {
 	capabilities := map[string]interface{}{
 		"tracks": []string{"internal", "alpha", "beta", "production"},
 		"releaseStatuses": []string{
-			"draft", "completed", "halted", "inProgress",
+			releaseStatusDraft, releaseCompleted, statusHalted, statusInProgress,
 		},
 		"imageTypes": []string{
 			"icon", "featureGraphic", "promoGraphic",
@@ -1505,23 +1510,23 @@ func (cmd *PublishCapabilitiesCmd) Run(globals *Globals) error {
 		"deobfuscationTypes": []string{
 			"proguard", "nativeCode",
 		},
-		"expansionFileTypes": []string{"main", "patch"},
+		"expansionFileTypes":    []string{"main", "patch"},
 		"maxScreenshotsPerType": 8,
 		"maxImageSizes": map[string]string{
-			"icon":                   "512x512 PNG (32-bit with alpha)",
-			"featureGraphic":         "1024x500 JPEG or 24-bit PNG (no alpha)",
-			"promoGraphic":           "180x120 JPEG or 24-bit PNG (no alpha)",
-			"phoneScreenshots":       "min 320px, max 3840px, aspect ratio 16:9 or 9:16",
-			"sevenInchScreenshots":   "min 320px, max 3840px",
-			"tenInchScreenshots":     "min 320px, max 3840px",
-			"tvScreenshots":          "1280x720 or 1920x1080",
-			"tvBanner":              "1280x720",
-			"wearScreenshots":        "min 384px, max 3840px",
+			"icon":                 "512x512 PNG (32-bit with alpha)",
+			"featureGraphic":       "1024x500 JPEG or 24-bit PNG (no alpha)",
+			"promoGraphic":         "180x120 JPEG or 24-bit PNG (no alpha)",
+			"phoneScreenshots":     "min 320px, max 3840px, aspect ratio 16:9 or 9:16",
+			"sevenInchScreenshots": "min 320px, max 3840px",
+			"tenInchScreenshots":   "min 320px, max 3840px",
+			"tvScreenshots":        "1280x720 or 1920x1080",
+			"tvBanner":             "1280x720",
+			"wearScreenshots":      "min 384px, max 3840px",
 		},
-		"maxExpansionFileSize":  "2GB",
-		"maxApkSize":            "150MB",
-		"maxBundleSize":         "150MB",
-		"inAppUpdatePriority":   "0-5",
+		"maxExpansionFileSize": "2GB",
+		"maxApkSize":           "150MB",
+		"maxBundleSize":        "150MB",
+		"inAppUpdatePriority":  "0-5",
 	}
 
 	result := output.NewResult(capabilities).WithDuration(time.Since(start)).WithServices("androidpublisher")
@@ -1560,11 +1565,11 @@ func (cmd *PublishListingUpdateCmd) Run(globals *Globals) error {
 
 	if cmd.DryRun {
 		result := output.NewResult(map[string]interface{}{
-			"locale":   cmd.Locale,
-			"title":    cmd.Title,
+			"locale":    cmd.Locale,
+			"title":     cmd.Title,
 			"shortDesc": cmd.ShortDesc,
 			"fullDesc":  cmd.FullDesc,
-			"dryRun":   true,
+			"dryRun":    true,
 		}).WithDuration(time.Since(start)).
 			WithNoOp("dry run - listing not updated")
 		return outputResult(result, globals.Output, globals.Pretty)
@@ -2756,66 +2761,9 @@ func (cmd *PublishAssetsUploadCmd) Run(globals *Globals) error {
 	}
 
 	// Scan for image files in directory and upload them
-	// Expected structure: {dir}/{imageType}/{locale}/*.png or {dir}/{locale}/{imageType}/*.png
-	uploadedCount := 0
-	var uploadErrors []string
-
-	// Walk the directory looking for image files
-	entries, err := os.ReadDir(cmd.Dir)
+	uploadedCount, uploadErrors, err := cmd.scanAndUploadImages(ctx, client, svc, pkg, editID)
 	if err != nil {
-		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to read directory: %v", err))
-	}
-
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		imageType := entry.Name()
-
-		// Check if it's a valid image type subfolder
-		subEntries, subErr := os.ReadDir(filepath.Join(cmd.Dir, imageType))
-		if subErr != nil {
-			continue
-		}
-
-		for _, subEntry := range subEntries {
-			filePath := filepath.Join(cmd.Dir, imageType, subEntry.Name())
-			if subEntry.IsDir() {
-				continue
-			}
-
-			ext := strings.ToLower(filepath.Ext(subEntry.Name()))
-			if ext != ".png" && ext != ".jpg" && ext != ".jpeg" {
-				continue
-			}
-
-			// Upload file
-			imgFile, oerr := os.Open(filePath)
-			if oerr != nil {
-				uploadErrors = append(uploadErrors, fmt.Sprintf("failed to open %s: %v", filePath, oerr))
-				continue
-			}
-
-			if uerr := client.AcquireForUpload(ctx); uerr != nil {
-				_ = imgFile.Close()
-				uploadErrors = append(uploadErrors, fmt.Sprintf("failed to acquire upload lock: %v", uerr))
-				continue
-			}
-
-			locale := "en-US" // default locale
-			uerr := client.DoWithRetry(ctx, func() error {
-				_, ierr := svc.Edits.Images.Upload(pkg, editID, locale, imageType).Media(imgFile).Context(ctx).Do()
-				return ierr
-			})
-			client.ReleaseForUpload()
-			_ = imgFile.Close()
-
-			if uerr != nil {
-				uploadErrors = append(uploadErrors, fmt.Sprintf("failed to upload %s: %v", filePath, uerr))
-			} else {
-				uploadedCount++
-			}
-		}
+		return err
 	}
 
 	// Commit
@@ -2849,6 +2797,72 @@ func (cmd *PublishAssetsUploadCmd) Run(globals *Globals) error {
 	}
 
 	return outputResult(result, globals.Output, globals.Pretty)
+}
+
+// scanAndUploadImages walks the asset directory and uploads image files.
+//
+//nolint:gocritic // Named results would shadow local variables
+func (cmd *PublishAssetsUploadCmd) scanAndUploadImages(ctx context.Context, client *api.Client, svc *androidpublisher.Service, pkg, editID string) (int, []string, error) {
+	// Expected structure: {dir}/{imageType}/{locale}/*.png or {dir}/{locale}/{imageType}/*.png
+	uploadedCount := 0
+	var uploadErrors []string
+
+	entries, err := os.ReadDir(cmd.Dir)
+	if err != nil {
+		return 0, nil, errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to read directory: %v", err))
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		imageType := entry.Name()
+
+		subEntries, subErr := os.ReadDir(filepath.Join(cmd.Dir, imageType))
+		if subErr != nil {
+			continue
+		}
+
+		for _, subEntry := range subEntries {
+			filePath := filepath.Join(cmd.Dir, imageType, subEntry.Name())
+			if subEntry.IsDir() {
+				continue
+			}
+
+			ext := strings.ToLower(filepath.Ext(subEntry.Name()))
+			if ext != ".png" && ext != ".jpg" && ext != ".jpeg" {
+				continue
+			}
+
+			imgFile, oerr := os.Open(filePath)
+			if oerr != nil {
+				uploadErrors = append(uploadErrors, fmt.Sprintf("failed to open %s: %v", filePath, oerr))
+				continue
+			}
+
+			if uerr := client.AcquireForUpload(ctx); uerr != nil {
+				_ = imgFile.Close()
+				uploadErrors = append(uploadErrors, fmt.Sprintf("failed to acquire upload lock: %v", uerr))
+				continue
+			}
+
+			locale := "en-US" // default locale
+			uerr := client.DoWithRetry(ctx, func() error {
+				_, ierr := svc.Edits.Images.Upload(pkg, editID, locale, imageType).Media(imgFile).Context(ctx).Do()
+				return ierr
+			})
+			client.ReleaseForUpload()
+			_ = imgFile.Close()
+
+			if uerr != nil {
+				uploadErrors = append(uploadErrors, fmt.Sprintf("failed to upload %s: %v", filePath, uerr))
+			} else {
+				uploadedCount++
+			}
+		}
+	}
+
+	return uploadedCount, uploadErrors, nil
 }
 
 // PublishAssetsSpecCmd outputs asset validation matrix.
@@ -3607,7 +3621,7 @@ func (cmd *PublishBuildsListCmd) Run(globals *Globals) error {
 	var builds []buildInfo
 
 	// List APKs
-	if cmd.Type == "all" || cmd.Type == "apk" {
+	if cmd.Type == checkAll || cmd.Type == "apk" {
 		var apkList *androidpublisher.ApksListResponse
 		err = client.DoWithRetry(ctx, func() error {
 			apkList, err = svc.Edits.Apks.List(pkg, editID).Context(ctx).Do()
@@ -3617,7 +3631,7 @@ func (cmd *PublishBuildsListCmd) Run(globals *Globals) error {
 			for _, apk := range apkList.Apks {
 				b := buildInfo{
 					VersionCode: apk.VersionCode,
-					Type:        "apk",
+					Type:        fileTypeAPK,
 				}
 				if apk.Binary != nil {
 					b.SHA1 = apk.Binary.Sha1
@@ -3629,7 +3643,7 @@ func (cmd *PublishBuildsListCmd) Run(globals *Globals) error {
 	}
 
 	// List bundles
-	if cmd.Type == "all" || cmd.Type == "bundle" {
+	if cmd.Type == checkAll || cmd.Type == "bundle" {
 		var bundleList *androidpublisher.BundlesListResponse
 		err = client.DoWithRetry(ctx, func() error {
 			bundleList, err = svc.Edits.Bundles.List(pkg, editID).Context(ctx).Do()
@@ -3639,7 +3653,7 @@ func (cmd *PublishBuildsListCmd) Run(globals *Globals) error {
 			for _, bundle := range bundleList.Bundles {
 				builds = append(builds, buildInfo{
 					VersionCode: bundle.VersionCode,
-					Type:        "aab",
+					Type:        fileTypeAAB,
 					SHA1:        bundle.Sha1,
 					SHA256:      bundle.Sha256,
 				})
@@ -3725,7 +3739,7 @@ func (cmd *PublishBuildsGetCmd) Run(globals *Globals) error {
 	var buildData map[string]interface{}
 
 	// Search APKs
-	if cmd.Type == "all" || cmd.Type == "apk" {
+	if cmd.Type == checkAll || cmd.Type == "apk" {
 		var apkList *androidpublisher.ApksListResponse
 		err = client.DoWithRetry(ctx, func() error {
 			apkList, err = svc.Edits.Apks.List(pkg, editID).Context(ctx).Do()
@@ -3736,7 +3750,7 @@ func (cmd *PublishBuildsGetCmd) Run(globals *Globals) error {
 				if apk.VersionCode == cmd.VersionCode {
 					buildData = map[string]interface{}{
 						"versionCode": apk.VersionCode,
-						"type":        "apk",
+						"type":        fileTypeAPK,
 					}
 					if apk.Binary != nil {
 						buildData["sha1"] = apk.Binary.Sha1
@@ -3750,7 +3764,7 @@ func (cmd *PublishBuildsGetCmd) Run(globals *Globals) error {
 	}
 
 	// Search bundles if not found yet
-	if !found && (cmd.Type == "all" || cmd.Type == "bundle") {
+	if !found && (cmd.Type == checkAll || cmd.Type == "bundle") {
 		var bundleList *androidpublisher.BundlesListResponse
 		err = client.DoWithRetry(ctx, func() error {
 			bundleList, err = svc.Edits.Bundles.List(pkg, editID).Context(ctx).Do()
@@ -3761,7 +3775,7 @@ func (cmd *PublishBuildsGetCmd) Run(globals *Globals) error {
 				if bundle.VersionCode == cmd.VersionCode {
 					buildData = map[string]interface{}{
 						"versionCode": bundle.VersionCode,
-						"type":        "aab",
+						"type":        fileTypeAAB,
 						"sha1":        bundle.Sha1,
 						"sha256":      bundle.Sha256,
 					}
@@ -4017,7 +4031,7 @@ func (cmd *PublishBuildsExpireAllCmd) Run(globals *Globals) error {
 	for _, track := range tracksList.Tracks {
 		modified := false
 		for _, release := range track.Releases {
-			if release.Status == "draft" && len(release.VersionCodes) > 0 {
+			if release.Status == releaseStatusDraft && len(release.VersionCodes) > 0 {
 				expiredCount += len(release.VersionCodes)
 				release.VersionCodes = nil
 				modified = true
@@ -4839,14 +4853,14 @@ func (cmd *PublishInternalShareUploadCmd) Run(globals *Globals) error {
 	}
 
 	ext := strings.ToLower(filepath.Ext(cmd.File))
-	if ext != ".apk" && ext != ".aab" {
+	if ext != extAPK && ext != extAAB {
 		return errors.NewAPIError(errors.CodeValidationError, fmt.Sprintf("invalid file type: %s. Only .apk and .aab files are supported", ext))
 	}
 
 	if cmd.DryRun {
-		fileType := "apk"
-		if ext == ".aab" {
-			fileType = "aab"
+		fileType := fileTypeAPK
+		if ext == extAAB {
+			fileType = fileTypeAAB
 		}
 		result := output.NewResult(map[string]interface{}{
 			"file":   cmd.File,
@@ -4887,7 +4901,7 @@ func (cmd *PublishInternalShareUploadCmd) Run(globals *Globals) error {
 	}
 
 	var data map[string]interface{}
-	if ext == ".aab" {
+	if ext == extAAB {
 		var resp *androidpublisher.InternalAppSharingArtifact
 		err = client.DoWithRetry(ctx, func() error {
 			resp, err = svc.Internalappsharingartifacts.Uploadbundle(pkg).Media(file).Context(ctx).Do()
@@ -4898,7 +4912,7 @@ func (cmd *PublishInternalShareUploadCmd) Run(globals *Globals) error {
 			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to upload bundle for internal sharing: %v", err))
 		}
 		data = map[string]interface{}{
-			"type":        "aab",
+			"type":        fileTypeAAB,
 			"file":        cmd.File,
 			"downloadUrl": resp.DownloadUrl,
 			"sha256":      resp.Sha256,
@@ -4917,7 +4931,7 @@ func (cmd *PublishInternalShareUploadCmd) Run(globals *Globals) error {
 			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to upload APK for internal sharing: %v", err))
 		}
 		data = map[string]interface{}{
-			"type":        "apk",
+			"type":        fileTypeAPK,
 			"file":        cmd.File,
 			"downloadUrl": resp.DownloadUrl,
 			"sha256":      resp.Sha256,

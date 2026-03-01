@@ -17,6 +17,11 @@ import (
 	"github.com/dl-alexandre/gpd/internal/output"
 )
 
+const (
+	statusInProgress = "inProgress"
+	statusHalted     = "halted"
+)
+
 // CompareCmd contains app comparison commands.
 type CompareCmd struct {
 	Vitals        CompareVitalsCmd        `cmd:"" help:"Compare vitals metrics across multiple apps"`
@@ -122,67 +127,23 @@ func (cmd *CompareVitalsCmd) Run(globals *Globals) error {
 		}
 
 		// Query crash rate if requested
-		if cmd.Metric == "crash-rate" || cmd.Metric == "all" {
-			crashName := fmt.Sprintf("apps/%s/crashRateMetricSet", pkg)
-			crashReq := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryCrashRateMetricSetRequest{
-				TimelineSpec: timelineSpec,
-				Metrics:      []string{"crashRate", "crashRate7dUserWeighted"},
-				PageSize:     1,
-			}
-
-			err = client.DoWithRetry(ctx, func() error {
-				resp, qerr := svc.Vitals.Crashrate.Query(crashName, crashReq).Context(ctx).Do()
-				if qerr != nil {
-					return qerr
-				}
-				if len(resp.Rows) > 0 {
-					for _, metric := range resp.Rows[0].Metrics {
-						if metric.Metric == "crashRate" && metric.DecimalValue != nil {
-							if val, perr := strconv.ParseFloat(metric.DecimalValue.Value, 64); perr == nil {
-								appData.CrashRate = val
-							}
-						}
-					}
-				}
-				return nil
-			})
-			if err != nil {
+		if cmd.Metric == "crash-rate" || cmd.Metric == checkAll {
+			crashRate, qerr := cmd.queryCrashRate(ctx, client, svc, pkg, timelineSpec)
+			if qerr != nil {
 				client.Release()
-				return errors.NewAPIError(errors.CodeGeneralError,
-					fmt.Sprintf("failed to query crash rate for %s: %v", pkg, err))
+				return qerr
 			}
+			appData.CrashRate = crashRate
 		}
 
 		// Query ANR rate if requested
-		if cmd.Metric == "anr-rate" || cmd.Metric == "all" {
-			anrName := fmt.Sprintf("apps/%s/anrRateMetricSet", pkg)
-			anrReq := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryAnrRateMetricSetRequest{
-				TimelineSpec: timelineSpec,
-				Metrics:      []string{"anrRate", "anrRate7dUserWeighted"},
-				PageSize:     1,
-			}
-
-			err = client.DoWithRetry(ctx, func() error {
-				resp, qerr := svc.Vitals.Anrrate.Query(anrName, anrReq).Context(ctx).Do()
-				if qerr != nil {
-					return qerr
-				}
-				if len(resp.Rows) > 0 {
-					for _, metric := range resp.Rows[0].Metrics {
-						if metric.Metric == "anrRate" && metric.DecimalValue != nil {
-							if val, perr := strconv.ParseFloat(metric.DecimalValue.Value, 64); perr == nil {
-								appData.AnrRate = val
-							}
-						}
-					}
-				}
-				return nil
-			})
-			if err != nil {
+		if cmd.Metric == "anr-rate" || cmd.Metric == checkAll {
+			anrRate, qerr := cmd.queryAnrRate(ctx, client, svc, pkg, timelineSpec)
+			if qerr != nil {
 				client.Release()
-				return errors.NewAPIError(errors.CodeGeneralError,
-					fmt.Sprintf("failed to query ANR rate for %s: %v", pkg, err))
+				return qerr
 			}
+			appData.AnrRate = anrRate
 		}
 
 		client.Release()
@@ -217,6 +178,70 @@ func (cmd *CompareVitalsCmd) Run(globals *Globals) error {
 	return writeOutput(globals, output.NewResult(result).
 		WithDuration(time.Since(startTime)).
 		WithServices("playdeveloperreporting"))
+}
+
+func (cmd *CompareVitalsCmd) queryCrashRate(ctx context.Context, client *api.Client, svc *playdeveloperreporting.Service, pkg string, timelineSpec *playdeveloperreporting.GooglePlayDeveloperReportingV1beta1TimelineSpec) (float64, error) {
+	crashName := fmt.Sprintf("apps/%s/crashRateMetricSet", pkg)
+	crashReq := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryCrashRateMetricSetRequest{
+		TimelineSpec: timelineSpec,
+		Metrics:      []string{metricCrashRate, "crashRate7dUserWeighted"},
+		PageSize:     1,
+	}
+
+	var crashRate float64
+	err := client.DoWithRetry(ctx, func() error {
+		resp, qerr := svc.Vitals.Crashrate.Query(crashName, crashReq).Context(ctx).Do()
+		if qerr != nil {
+			return qerr
+		}
+		if len(resp.Rows) > 0 {
+			for _, metric := range resp.Rows[0].Metrics {
+				if metric.Metric == metricCrashRate && metric.DecimalValue != nil {
+					if val, perr := strconv.ParseFloat(metric.DecimalValue.Value, 64); perr == nil {
+						crashRate = val
+					}
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, errors.NewAPIError(errors.CodeGeneralError,
+			fmt.Sprintf("failed to query crash rate for %s: %v", pkg, err))
+	}
+	return crashRate, nil
+}
+
+func (cmd *CompareVitalsCmd) queryAnrRate(ctx context.Context, client *api.Client, svc *playdeveloperreporting.Service, pkg string, timelineSpec *playdeveloperreporting.GooglePlayDeveloperReportingV1beta1TimelineSpec) (float64, error) {
+	anrName := fmt.Sprintf("apps/%s/anrRateMetricSet", pkg)
+	anrReq := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryAnrRateMetricSetRequest{
+		TimelineSpec: timelineSpec,
+		Metrics:      []string{metricAnrRate, "anrRate7dUserWeighted"},
+		PageSize:     1,
+	}
+
+	var anrRate float64
+	err := client.DoWithRetry(ctx, func() error {
+		resp, qerr := svc.Vitals.Anrrate.Query(anrName, anrReq).Context(ctx).Do()
+		if qerr != nil {
+			return qerr
+		}
+		if len(resp.Rows) > 0 {
+			for _, metric := range resp.Rows[0].Metrics {
+				if metric.Metric == metricAnrRate && metric.DecimalValue != nil {
+					if val, perr := strconv.ParseFloat(metric.DecimalValue.Value, 64); perr == nil {
+						anrRate = val
+					}
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, errors.NewAPIError(errors.CodeGeneralError,
+			fmt.Sprintf("failed to query ANR rate for %s: %v", pkg, err))
+	}
+	return anrRate, nil
 }
 
 // CompareReviewsCmd compares review metrics across apps.
@@ -324,17 +349,18 @@ func (cmd *CompareReviewsCmd) Run(globals *Globals) error {
 				continue
 			}
 			for _, comment := range review.Comments {
-				if comment.UserComment != nil {
-					rating := int(comment.UserComment.StarRating)
-					appData.RatingsDist[rating]++
-					totalRating += comment.UserComment.StarRating
-					reviewCount++
+				if comment.UserComment == nil {
+					continue
+				}
+				rating := int(comment.UserComment.StarRating)
+				appData.RatingsDist[rating]++
+				totalRating += comment.UserComment.StarRating
+				reviewCount++
 
-					// Use star rating as a proxy for sentiment if requested
-					if cmd.IncludeSentiment {
-						// Normalize star rating to [-1, 1] range
-						sentimentSum += (float64(comment.UserComment.StarRating) - 3.0) / 2.0
-					}
+				// Use star rating as a proxy for sentiment if requested
+				if cmd.IncludeSentiment {
+					// Normalize star rating to [-1, 1] range
+					sentimentSum += (float64(comment.UserComment.StarRating) - 3.0) / 2.0
 				}
 			}
 		}
@@ -496,10 +522,11 @@ func (cmd *CompareReleasesCmd) Run(globals *Globals) error {
 
 				// Build timeline events
 				eventType := "release"
-				if release.Status == "inProgress" {
+				switch release.Status {
+				case statusInProgress:
 					eventType = "rollout"
-				} else if release.Status == "halted" {
-					eventType = "halted"
+				case statusHalted:
+					eventType = statusHalted
 				}
 
 				releaseName := release.Name
@@ -611,10 +638,8 @@ func (cmd *CompareSubscriptionsCmd) Run(globals *Globals) error {
 		// List subscriptions using Monetization API
 		var subscriptionCount int64
 		err = client.DoWithRetry(ctx, func() error {
+			// No direct filter on the API; we filter after retrieval if specific subscriptions are requested
 			call := svc.Monetization.Subscriptions.List(pkg)
-			if len(cmd.Subscriptions) > 0 {
-				// No direct filter, we'll filter after retrieval
-			}
 			resp, lerr := call.Context(ctx).Do()
 			if lerr != nil {
 				return lerr

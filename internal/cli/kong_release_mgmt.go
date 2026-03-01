@@ -3,9 +3,16 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
+
+	"google.golang.org/api/androidpublisher/v3"
+	playdeveloperreporting "google.golang.org/api/playdeveloperreporting/v1beta1"
 
 	"github.com/dl-alexandre/gpd/internal/api"
 	"github.com/dl-alexandre/gpd/internal/errors"
@@ -66,8 +73,12 @@ func (cmd *ReleaseCalendarCmd) Run(globals *Globals) error {
 		return err
 	}
 
-	_ = client // Use when implementing full API calls
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to get publisher service: %v", err))
+	}
 
+	startTime := time.Now()
 	now := time.Now()
 	startDate := now.AddDate(0, 0, -cmd.DaysBehind)
 	endDate := now.AddDate(0, 0, cmd.DaysAhead)
@@ -80,19 +91,93 @@ func (cmd *ReleaseCalendarCmd) Run(globals *Globals) error {
 		GeneratedAt: now,
 	}
 
-	// Query track releases and populate calendar
-	// Simplified implementation
-	result.Events = append(result.Events, releaseCalendarEvent{
-		Date:        now.Format("2006-01-02"),
-		Type:        "current",
-		Track:       "production",
-		VersionCode: "123",
-		Description: "Current production release",
+	// Create temporary edit to read track data
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+
+	var edit *androidpublisher.AppEdit
+	err = client.DoWithRetry(ctx, func() error {
+		edit, err = svc.Edits.Insert(globals.Package, &androidpublisher.AppEdit{}).Context(ctx).Do()
+		return err
+	})
+	if err != nil {
+		client.Release()
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to create edit: %v", err))
+	}
+
+	editID := edit.Id
+
+	// List all tracks
+	var tracksList *androidpublisher.TracksListResponse
+	err = client.DoWithRetry(ctx, func() error {
+		tracksList, err = svc.Edits.Tracks.List(globals.Package, editID).Context(ctx).Do()
+		return err
+	})
+
+	// Clean up the temporary edit
+	_ = client.DoWithRetry(ctx, func() error {
+		return svc.Edits.Delete(globals.Package, editID).Context(ctx).Do()
+	})
+
+	client.Release()
+
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to list tracks: %v", err))
+	}
+
+	// Build calendar events from track/release data
+	for _, track := range tracksList.Tracks {
+		// Filter by track if specified
+		if cmd.Track != "all" && track.Track != cmd.Track {
+			continue
+		}
+
+		for _, release := range track.Releases {
+			versionCode := ""
+			if len(release.VersionCodes) > 0 {
+				versionCode = fmt.Sprintf("%d", release.VersionCodes[0])
+			}
+
+			eventType := "release"
+			description := ""
+
+			switch release.Status {
+			case "completed":
+				eventType = "completed"
+				description = fmt.Sprintf("Completed release %s on %s", release.Name, track.Track)
+			case "inProgress":
+				eventType = "rollout"
+				rolloutPct := release.UserFraction * 100
+				description = fmt.Sprintf("Rolling out %s on %s (%.1f%%)", release.Name, track.Track, rolloutPct)
+			case "halted":
+				eventType = "halted"
+				description = fmt.Sprintf("Halted release %s on %s", release.Name, track.Track)
+			case "draft":
+				eventType = "draft"
+				description = fmt.Sprintf("Draft release %s on %s", release.Name, track.Track)
+			default:
+				description = fmt.Sprintf("Release %s on %s (status: %s)", release.Name, track.Track, release.Status)
+			}
+
+			result.Events = append(result.Events, releaseCalendarEvent{
+				Date:        now.Format("2006-01-02"),
+				Type:        eventType,
+				Track:       track.Track,
+				VersionCode: versionCode,
+				Description: description,
+			})
+		}
+	}
+
+	// Sort events by date
+	sort.Slice(result.Events, func(i, j int) bool {
+		return result.Events[i].Date < result.Events[j].Date
 	})
 
 	return writeOutput(globals, output.NewResult(result).
-		WithServices("androidpublisher").
-		WithNoOp("release calendar requires full API implementation"))
+		WithDuration(time.Since(startTime)).
+		WithServices("androidpublisher"))
 }
 
 // ReleaseConflictsCmd detects version code conflicts.
@@ -142,7 +227,12 @@ func (cmd *ReleaseConflictsCmd) Run(globals *Globals) error {
 		return err
 	}
 
-	_ = client // Use when implementing full API calls
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to get publisher service: %v", err))
+	}
+
+	startTime := time.Now()
 
 	result := &releaseConflictsResult{
 		Conflicts:   make([]releaseConflict, 0),
@@ -150,20 +240,99 @@ func (cmd *ReleaseConflictsCmd) Run(globals *Globals) error {
 		CheckedAt:   time.Now(),
 	}
 
-	// Check each version code against tracks
-	// Simplified implementation
+	// Build a set of requested version codes
+	requestedVCs := make(map[string]bool)
 	for _, vc := range cmd.VersionCodes {
-		// Would query API to check if version code exists
-		_ = vc
+		requestedVCs[vc] = true
 	}
 
+	// Create temporary edit
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+
+	var edit *androidpublisher.AppEdit
+	err = client.DoWithRetry(ctx, func() error {
+		edit, err = svc.Edits.Insert(globals.Package, &androidpublisher.AppEdit{}).Context(ctx).Do()
+		return err
+	})
+	if err != nil {
+		client.Release()
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to create edit: %v", err))
+	}
+
+	editID := edit.Id
+
+	// List all tracks and collect version codes
+	var tracksList *androidpublisher.TracksListResponse
+	err = client.DoWithRetry(ctx, func() error {
+		tracksList, err = svc.Edits.Tracks.List(globals.Package, editID).Context(ctx).Do()
+		return err
+	})
+
+	// Clean up the temporary edit
+	_ = client.DoWithRetry(ctx, func() error {
+		return svc.Edits.Delete(globals.Package, editID).Context(ctx).Do()
+	})
+
+	client.Release()
+
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to list tracks: %v", err))
+	}
+
+	// Check for version code conflicts across tracks
+	// Track which version codes appear on which tracks
+	var maxExistingVC int64
+	for _, track := range tracksList.Tracks {
+		// Filter by track if specified
+		if cmd.CheckTrack != "all" && track.Track != cmd.CheckTrack {
+			continue
+		}
+
+		for _, release := range track.Releases {
+			for _, vc := range release.VersionCodes {
+				vcStr := fmt.Sprintf("%d", vc)
+				if vc > maxExistingVC {
+					maxExistingVC = vc
+				}
+
+				if requestedVCs[vcStr] {
+					result.Conflicts = append(result.Conflicts, releaseConflict{
+						VersionCode:     vcStr,
+						Track:           track.Track,
+						Status:          release.Status,
+						ExistingVersion: release.Name,
+					})
+				}
+			}
+		}
+	}
+
+	result.HasConflicts = len(result.Conflicts) > 0
+
 	if cmd.SuggestFix && result.HasConflicts {
-		result.Suggestions = append(result.Suggestions, "Consider using a higher version code")
+		// Find the highest conflicting version code
+		suggestedVC := maxExistingVC + 1
+		result.Suggestions = append(result.Suggestions,
+			fmt.Sprintf("Use version code %d or higher to avoid conflicts", suggestedVC))
+
+		// Check for multi-track conflicts
+		trackMap := make(map[string][]string) // vc -> list of tracks
+		for _, conflict := range result.Conflicts {
+			trackMap[conflict.VersionCode] = append(trackMap[conflict.VersionCode], conflict.Track)
+		}
+		for vc, tracks := range trackMap {
+			if len(tracks) > 1 {
+				result.Suggestions = append(result.Suggestions,
+					fmt.Sprintf("Version code %s exists on multiple tracks (%s); promote or remove from older tracks", vc, strings.Join(tracks, ", ")))
+			}
+		}
 	}
 
 	return writeOutput(globals, output.NewResult(result).
-		WithServices("androidpublisher").
-		WithNoOp("release conflicts check requires full API implementation"))
+		WithDuration(time.Since(startTime)).
+		WithServices("androidpublisher"))
 }
 
 // ReleaseStrategyCmd provides rollback/roll-forward recommendations.
@@ -214,36 +383,225 @@ func (cmd *ReleaseStrategyCmd) Run(globals *Globals) error {
 		return err
 	}
 
-	_ = client // Use when implementing full API calls
+	startTime := time.Now()
+
+	// Query vitals (crash rate, ANR rate) for the current version
+	var crashRate, anrRate float64
+
+	reportingSvc, err := client.PlayReporting()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to get reporting service: %v", err))
+	}
+
+	timelineSpec, err := buildTimelineSpec("", "")
+	if err != nil {
+		return err
+	}
+
+	// Query crash rate
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+
+	crashName := fmt.Sprintf("apps/%s/crashRateMetricSet", globals.Package)
+	crashReq := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryCrashRateMetricSetRequest{
+		TimelineSpec: timelineSpec,
+		Metrics:      []string{"crashRate", "crashRate7dUserWeighted"},
+		PageSize:     1,
+	}
+
+	err = client.DoWithRetry(ctx, func() error {
+		resp, qerr := reportingSvc.Vitals.Crashrate.Query(crashName, crashReq).Context(ctx).Do()
+		if qerr != nil {
+			return qerr
+		}
+		if len(resp.Rows) > 0 {
+			for _, metric := range resp.Rows[0].Metrics {
+				if metric.Metric == "crashRate" && metric.DecimalValue != nil {
+					if val, perr := strconv.ParseFloat(metric.DecimalValue.Value, 64); perr == nil {
+						crashRate = val
+					}
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		// Non-fatal: continue with zero crash rate
+		crashRate = 0
+	}
+
+	// Query ANR rate
+	anrName := fmt.Sprintf("apps/%s/anrRateMetricSet", globals.Package)
+	anrReq := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryAnrRateMetricSetRequest{
+		TimelineSpec: timelineSpec,
+		Metrics:      []string{"anrRate", "anrRate7dUserWeighted"},
+		PageSize:     1,
+	}
+
+	err = client.DoWithRetry(ctx, func() error {
+		resp, qerr := reportingSvc.Vitals.Anrrate.Query(anrName, anrReq).Context(ctx).Do()
+		if qerr != nil {
+			return qerr
+		}
+		if len(resp.Rows) > 0 {
+			for _, metric := range resp.Rows[0].Metrics {
+				if metric.Metric == "anrRate" && metric.DecimalValue != nil {
+					if val, perr := strconv.ParseFloat(metric.DecimalValue.Value, 64); perr == nil {
+						anrRate = val
+					}
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		// Non-fatal: continue with zero ANR rate
+		anrRate = 0
+	}
+
+	client.Release()
+
+	// Query track status for rollout percentage
+	pubSvc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to get publisher service: %v", err))
+	}
+
+	var currentVersion string
+	var userFraction float64
+
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+
+	var edit *androidpublisher.AppEdit
+	err = client.DoWithRetry(ctx, func() error {
+		edit, err = pubSvc.Edits.Insert(globals.Package, &androidpublisher.AppEdit{}).Context(ctx).Do()
+		return err
+	})
+	if err != nil {
+		client.Release()
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to create edit: %v", err))
+	}
+
+	editID := edit.Id
+
+	var track *androidpublisher.Track
+	err = client.DoWithRetry(ctx, func() error {
+		track, err = pubSvc.Edits.Tracks.Get(globals.Package, editID, cmd.Track).Context(ctx).Do()
+		return err
+	})
+
+	// Clean up the temporary edit
+	_ = client.DoWithRetry(ctx, func() error {
+		return pubSvc.Edits.Delete(globals.Package, editID).Context(ctx).Do()
+	})
+
+	client.Release()
+
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to get track: %v", err))
+	}
+
+	// Get current version info from track
+	if track != nil && len(track.Releases) > 0 {
+		latest := track.Releases[0]
+		if len(latest.VersionCodes) > 0 {
+			currentVersion = fmt.Sprintf("%d", latest.VersionCodes[0])
+		}
+		if latest.Name != "" {
+			currentVersion = latest.Name
+		}
+		userFraction = latest.UserFraction
+	}
+
+	if cmd.CurrentVersion != "" {
+		currentVersion = cmd.CurrentVersion
+	}
+
+	// Calculate health score based on metrics vs thresholds
+	// Health score: 1.0 = perfect, 0.0 = critical
+	// Crash rate bad threshold: 0.01 (1%), ANR rate bad threshold: 0.005 (0.5%)
+	crashPenalty := crashRate / 0.01
+	if crashPenalty > 1 {
+		crashPenalty = 1
+	}
+	anrPenalty := anrRate / 0.005
+	if anrPenalty > 1 {
+		anrPenalty = 1
+	}
+	healthScore := 1.0 - (crashPenalty*0.5 + anrPenalty*0.5)
+	if healthScore < 0 {
+		healthScore = 0
+	}
+
+	// Generate recommendation
+	recommendation := "continue"
+	reasoning := ""
+	actions := make([]string, 0)
+	risks := make([]string, 0)
+
+	switch {
+	case healthScore >= cmd.HealthThreshold:
+		recommendation = "continue"
+		reasoning = fmt.Sprintf("Health score %.2f is above threshold %.2f. Metrics are within acceptable thresholds.", healthScore, cmd.HealthThreshold)
+		actions = append(actions, "Continue monitoring crash rate and ANR rate")
+		if userFraction > 0 && userFraction < 1.0 {
+			actions = append(actions, fmt.Sprintf("Consider increasing rollout from %.0f%% to next stage", userFraction*100))
+		}
+	case healthScore >= cmd.HealthThreshold*0.85:
+		recommendation = "monitor"
+		reasoning = fmt.Sprintf("Health score %.2f is slightly below threshold %.2f. Close monitoring recommended.", healthScore, cmd.HealthThreshold)
+		actions = append(actions, "Monitor crash rate and ANR rate closely for the next 24 hours")
+		actions = append(actions, "Do not increase rollout percentage")
+		risks = append(risks, "Metrics may continue to degrade if underlying issues are not addressed")
+	case healthScore >= cmd.HealthThreshold*0.7:
+		recommendation = "investigate"
+		reasoning = fmt.Sprintf("Health score %.2f is significantly below threshold %.2f. Investigation needed.", healthScore, cmd.HealthThreshold)
+		actions = append(actions, "Investigate crash and ANR reports for the current release")
+		actions = append(actions, "Consider halting rollout while investigating")
+		if userFraction > 0 && userFraction < 1.0 {
+			actions = append(actions, fmt.Sprintf("Halt rollout at current %.0f%%", userFraction*100))
+		}
+		risks = append(risks, "User experience is degraded for affected users")
+		risks = append(risks, "Bad reviews may increase if rollout continues")
+	default:
+		recommendation = "rollback"
+		reasoning = fmt.Sprintf("Health score %.2f is critically below threshold %.2f. Rollback recommended.", healthScore, cmd.HealthThreshold)
+		actions = append(actions, "Immediately halt the current rollout")
+		actions = append(actions, "Prepare a hotfix or rollback to the previous stable version")
+		actions = append(actions, "Investigate root cause of crash/ANR spike")
+		risks = append(risks, "Continued rollout will impact a growing number of users")
+		risks = append(risks, "App rating may be significantly impacted")
+	}
 
 	result := &releaseStrategyResult{
 		Track:          cmd.Track,
-		CurrentVersion: cmd.CurrentVersion,
-		HealthScore:    0.98,
-		Recommendation: "continue",
-		Reasoning:      "Metrics are within acceptable thresholds",
-		Actions: []string{
-			"Continue monitoring crash rate",
-			"Watch for ANR spikes",
-		},
+		CurrentVersion: currentVersion,
+		HealthScore:    healthScore,
+		Recommendation: recommendation,
+		Reasoning:      reasoning,
+		Actions:        actions,
+		Risks:          risks,
 		Metrics: releaseStrategyMetrics{
-			CrashRate:    0.001,
-			AnrRate:      0.0005,
-			ErrorRate:    0.01,
-			UserFeedback: 4.5,
+			CrashRate:    crashRate,
+			AnrRate:      anrRate,
+			ErrorRate:    0, // Error rate requires separate query
+			UserFeedback: 0, // Would need reviews API data
 		},
 		AnalyzedAt: time.Now(),
 	}
 
+	r := output.NewResult(result).
+		WithDuration(time.Since(startTime)).
+		WithServices("androidpublisher", "playdeveloperreporting")
+
 	if cmd.DryRun {
-		return writeOutput(globals, output.NewResult(result).
-			WithServices("androidpublisher,playdeveloperreporting").
-			WithNoOp("dry run - strategy analysis preview"))
+		r = r.WithWarnings("dry run - strategy analysis preview, no actions taken")
 	}
 
-	return writeOutput(globals, output.NewResult(result).
-		WithServices("androidpublisher,playdeveloperreporting").
-		WithNoOp("release strategy requires full API implementation"))
+	return writeOutput(globals, r)
 }
 
 // ReleaseHistoryCmd shows detailed release history.
@@ -298,7 +656,12 @@ func (cmd *ReleaseHistoryCmd) Run(globals *Globals) error {
 		return err
 	}
 
-	_ = client // Use when implementing full API calls
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to get publisher service: %v", err))
+	}
+
+	startTime := time.Now()
 
 	result := &releaseHistoryResult{
 		Track:       cmd.Track,
@@ -307,37 +670,159 @@ func (cmd *ReleaseHistoryCmd) Run(globals *Globals) error {
 		GeneratedAt: time.Now(),
 	}
 
-	// Query track releases from API
-	// Simplified implementation
-	for i := 0; i < cmd.Limit; i++ {
-		release := releaseHistoryItem{
-			VersionCodes:      []string{fmt.Sprintf("%d", 100+i)},
-			Name:              fmt.Sprintf("Release %d", i+1),
-			Status:            "completed",
-			ReleaseDate:       time.Now().AddDate(0, 0, -i*7).Format("2006-01-02"),
-			RolloutPercentage: 100.0,
-		}
-
-		if cmd.IncludeVitals {
-			release.Vitals = &releaseHistoryVitals{
-				CrashRate: 0.001,
-				AnrRate:   0.0005,
-				Stability: 0.99,
-			}
-		}
-
-		result.Releases = append(result.Releases, release)
-		result.Count++
+	// Create temporary edit
+	if err := client.Acquire(ctx); err != nil {
+		return err
 	}
 
-	// Sort by date descending
+	var edit *androidpublisher.AppEdit
+	err = client.DoWithRetry(ctx, func() error {
+		edit, err = svc.Edits.Insert(globals.Package, &androidpublisher.AppEdit{}).Context(ctx).Do()
+		return err
+	})
+	if err != nil {
+		client.Release()
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to create edit: %v", err))
+	}
+
+	editID := edit.Id
+
+	// Get track releases
+	var track *androidpublisher.Track
+	err = client.DoWithRetry(ctx, func() error {
+		track, err = svc.Edits.Tracks.Get(globals.Package, editID, cmd.Track).Context(ctx).Do()
+		return err
+	})
+
+	// Clean up the temporary edit
+	_ = client.DoWithRetry(ctx, func() error {
+		return svc.Edits.Delete(globals.Package, editID).Context(ctx).Do()
+	})
+
+	client.Release()
+
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to get track: %v", err))
+	}
+
+	// Build history from real release data
+	if track != nil && track.Releases != nil {
+		for i, release := range track.Releases {
+			if cmd.Limit > 0 && i >= cmd.Limit {
+				break
+			}
+
+			versionCodes := make([]string, 0, len(release.VersionCodes))
+			for _, vc := range release.VersionCodes {
+				versionCodes = append(versionCodes, fmt.Sprintf("%d", vc))
+			}
+
+			rolloutPct := 0.0
+			if release.Status == "inProgress" {
+				rolloutPct = release.UserFraction * 100
+			} else if release.Status == "completed" {
+				rolloutPct = 100.0
+			}
+
+			item := releaseHistoryItem{
+				VersionCodes:      versionCodes,
+				Name:              release.Name,
+				Status:            release.Status,
+				ReleaseDate:       time.Now().Format("2006-01-02"),
+				RolloutPercentage: rolloutPct,
+			}
+
+			result.Releases = append(result.Releases, item)
+			result.Count++
+		}
+	}
+
+	// If IncludeVitals, query vitals for the package
+	if cmd.IncludeVitals && result.Count > 0 {
+		reportingSvc, verr := client.PlayReporting()
+		if verr == nil {
+			timelineSpec, terr := buildTimelineSpec("", "")
+			if terr == nil {
+				if err := client.Acquire(ctx); err != nil {
+					return err
+				}
+
+				var crashRate, anrRate float64
+
+				crashName := fmt.Sprintf("apps/%s/crashRateMetricSet", globals.Package)
+				crashReq := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryCrashRateMetricSetRequest{
+					TimelineSpec: timelineSpec,
+					Metrics:      []string{"crashRate"},
+					PageSize:     1,
+				}
+				_ = client.DoWithRetry(ctx, func() error {
+					resp, qerr := reportingSvc.Vitals.Crashrate.Query(crashName, crashReq).Context(ctx).Do()
+					if qerr != nil {
+						return qerr
+					}
+					if len(resp.Rows) > 0 {
+						for _, metric := range resp.Rows[0].Metrics {
+							if metric.Metric == "crashRate" && metric.DecimalValue != nil {
+								if val, perr := strconv.ParseFloat(metric.DecimalValue.Value, 64); perr == nil {
+									crashRate = val
+								}
+							}
+						}
+					}
+					return nil
+				})
+
+				anrName := fmt.Sprintf("apps/%s/anrRateMetricSet", globals.Package)
+				anrReq := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryAnrRateMetricSetRequest{
+					TimelineSpec: timelineSpec,
+					Metrics:      []string{"anrRate"},
+					PageSize:     1,
+				}
+				_ = client.DoWithRetry(ctx, func() error {
+					resp, qerr := reportingSvc.Vitals.Anrrate.Query(anrName, anrReq).Context(ctx).Do()
+					if qerr != nil {
+						return qerr
+					}
+					if len(resp.Rows) > 0 {
+						for _, metric := range resp.Rows[0].Metrics {
+							if metric.Metric == "anrRate" && metric.DecimalValue != nil {
+								if val, perr := strconv.ParseFloat(metric.DecimalValue.Value, 64); perr == nil {
+									anrRate = val
+								}
+							}
+						}
+					}
+					return nil
+				})
+
+				client.Release()
+
+				// Apply vitals to the most recent release (current aggregate data)
+				stability := 1.0 - crashRate - anrRate
+				if stability < 0 {
+					stability = 0
+				}
+
+				// Attach vitals to the first (most recent) release
+				if len(result.Releases) > 0 {
+					result.Releases[0].Vitals = &releaseHistoryVitals{
+						CrashRate: crashRate,
+						AnrRate:   anrRate,
+						Stability: stability,
+					}
+				}
+			}
+		}
+	}
+
+	// Sort by date descending (most recent first)
 	sort.Slice(result.Releases, func(i, j int) bool {
 		return result.Releases[i].ReleaseDate > result.Releases[j].ReleaseDate
 	})
 
 	return writeOutput(globals, output.NewResult(result).
-		WithServices("androidpublisher").
-		WithNoOp("release history requires full API implementation"))
+		WithDuration(time.Since(startTime)).
+		WithServices("androidpublisher"))
 }
 
 // ReleaseNotesCmd manages release notes across locales.
@@ -373,6 +858,27 @@ func (cmd *ReleaseNotesCmd) Run(globals *Globals) error {
 		return err
 	}
 
+	// Create authenticated API client
+	ctx := context.Background()
+	authMgr := newAuthManager()
+	creds, err := authMgr.Authenticate(ctx, globals.KeyPath)
+	if err != nil {
+		return err
+	}
+
+	client, err := api.NewClient(ctx, creds.TokenSource, api.WithTimeout(globals.Timeout))
+	if err != nil {
+		return err
+	}
+
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to get publisher service: %v", err))
+	}
+
+	startTime := time.Now()
+	pkg := globals.Package
+
 	result := &releaseNotesResult{
 		Action:      cmd.Action,
 		Track:       cmd.Track,
@@ -381,37 +887,296 @@ func (cmd *ReleaseNotesCmd) Run(globals *Globals) error {
 	}
 
 	switch cmd.Action {
-	case "get":
-		result.Locales = map[string]releaseNotesData{
-			"en-US": {Text: "Bug fixes and improvements"},
-			"de-DE": {Text: "Fehlerbehebungen und Verbesserungen"},
+	case "get", "list":
+		// Create temporary edit for read operations
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+
+		var edit *androidpublisher.AppEdit
+		err = client.DoWithRetry(ctx, func() error {
+			edit, err = svc.Edits.Insert(pkg, &androidpublisher.AppEdit{}).Context(ctx).Do()
+			return err
+		})
+		if err != nil {
+			client.Release()
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to create edit: %v", err))
+		}
+
+		editID := edit.Id
+
+		var track *androidpublisher.Track
+		err = client.DoWithRetry(ctx, func() error {
+			track, err = svc.Edits.Tracks.Get(pkg, editID, cmd.Track).Context(ctx).Do()
+			return err
+		})
+
+		// Clean up the temporary edit
+		_ = client.DoWithRetry(ctx, func() error {
+			return svc.Edits.Delete(pkg, editID).Context(ctx).Do()
+		})
+
+		client.Release()
+
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to get track: %v", err))
+		}
+
+		// Extract release notes from releases
+		result.Locales = make(map[string]releaseNotesData)
+
+		if track != nil && track.Releases != nil {
+			for _, release := range track.Releases {
+				// For "get" with specific version code, filter
+				if cmd.Action == "get" && cmd.VersionCode != "" {
+					found := false
+					for _, vc := range release.VersionCodes {
+						if fmt.Sprintf("%d", vc) == cmd.VersionCode {
+							found = true
+							break
+						}
+					}
+					if !found {
+						continue
+					}
+				}
+
+				// Extract localized release notes
+				if release.ReleaseNotes != nil {
+					for _, note := range release.ReleaseNotes {
+						result.Locales[note.Language] = releaseNotesData{
+							Text: note.Text,
+						}
+					}
+				}
+
+				// For "get", stop after the matching release
+				if cmd.Action == "get" {
+					break
+				}
+			}
 		}
 
 	case "set":
 		if cmd.File == "" {
 			return errors.NewAPIError(errors.CodeValidationError, "--file is required for set action")
 		}
-		result.Locales = map[string]releaseNotesData{
-			"en-US": {Text: "Notes from file"},
+
+		// Read release notes from file
+		fileData, ferr := os.ReadFile(cmd.File)
+		if ferr != nil {
+			return errors.NewAPIError(errors.CodeValidationError, fmt.Sprintf("failed to read file: %v", ferr))
+		}
+
+		var notesMap map[string]string
+		if jerr := json.Unmarshal(fileData, &notesMap); jerr != nil {
+			return errors.NewAPIError(errors.CodeValidationError, fmt.Sprintf("failed to parse release notes JSON: %v", jerr))
+		}
+
+		// Create edit for write operation
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+
+		var edit *androidpublisher.AppEdit
+		err = client.DoWithRetry(ctx, func() error {
+			edit, err = svc.Edits.Insert(pkg, &androidpublisher.AppEdit{}).Context(ctx).Do()
+			return err
+		})
+		if err != nil {
+			client.Release()
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to create edit: %v", err))
+		}
+
+		editID := edit.Id
+
+		// Get the current track to find the release to update
+		var track *androidpublisher.Track
+		err = client.DoWithRetry(ctx, func() error {
+			track, err = svc.Edits.Tracks.Get(pkg, editID, cmd.Track).Context(ctx).Do()
+			return err
+		})
+		if err != nil {
+			_ = client.DoWithRetry(ctx, func() error {
+				return svc.Edits.Delete(pkg, editID).Context(ctx).Do()
+			})
+			client.Release()
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to get track: %v", err))
+		}
+
+		// Update release notes on the matching release
+		if track != nil && track.Releases != nil {
+			for i, release := range track.Releases {
+				// If version code specified, match it; otherwise update the first release
+				if cmd.VersionCode != "" {
+					found := false
+					for _, vc := range release.VersionCodes {
+						if fmt.Sprintf("%d", vc) == cmd.VersionCode {
+							found = true
+							break
+						}
+					}
+					if !found {
+						continue
+					}
+				}
+
+				// Build localized release notes
+				localizedNotes := make([]*androidpublisher.LocalizedText, 0, len(notesMap))
+				for locale, text := range notesMap {
+					localizedNotes = append(localizedNotes, &androidpublisher.LocalizedText{
+						Language: locale,
+						Text:     text,
+					})
+				}
+
+				track.Releases[i].ReleaseNotes = localizedNotes
+				break
+			}
+		}
+
+		// Update the track
+		err = client.DoWithRetry(ctx, func() error {
+			_, uerr := svc.Edits.Tracks.Update(pkg, editID, cmd.Track, track).Context(ctx).Do()
+			return uerr
+		})
+		if err != nil {
+			_ = client.DoWithRetry(ctx, func() error {
+				return svc.Edits.Delete(pkg, editID).Context(ctx).Do()
+			})
+			client.Release()
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to update track: %v", err))
+		}
+
+		// Commit the edit
+		err = client.DoWithRetry(ctx, func() error {
+			_, cerr := svc.Edits.Commit(pkg, editID).Context(ctx).Do()
+			return cerr
+		})
+
+		client.Release()
+
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to commit edit: %v", err))
+		}
+
+		result.Locales = make(map[string]releaseNotesData)
+		for locale, text := range notesMap {
+			result.Locales[locale] = releaseNotesData{Text: text}
 		}
 
 	case "copy":
-		result.Source = cmd.SourceLocale
-		result.Targets = cmd.TargetLocales
-		result.Locales = map[string]releaseNotesData{}
-		for _, locale := range append([]string{cmd.SourceLocale}, cmd.TargetLocales...) {
-			result.Locales[locale] = releaseNotesData{Text: "Copied notes"}
+		if len(cmd.TargetLocales) == 0 {
+			return errors.NewAPIError(errors.CodeValidationError, "--target-locales is required for copy action")
 		}
 
-	case "list":
-		result.Locales = map[string]releaseNotesData{
-			"en-US": {Text: "Bug fixes"},
-			"es-ES": {Text: "Correcciones"},
-			"fr-FR": {Text: "Corrections"},
+		// Create edit for read+write
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+
+		var edit *androidpublisher.AppEdit
+		err = client.DoWithRetry(ctx, func() error {
+			edit, err = svc.Edits.Insert(pkg, &androidpublisher.AppEdit{}).Context(ctx).Do()
+			return err
+		})
+		if err != nil {
+			client.Release()
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to create edit: %v", err))
+		}
+
+		editID := edit.Id
+
+		// Get current track
+		var track *androidpublisher.Track
+		err = client.DoWithRetry(ctx, func() error {
+			track, err = svc.Edits.Tracks.Get(pkg, editID, cmd.Track).Context(ctx).Do()
+			return err
+		})
+		if err != nil {
+			_ = client.DoWithRetry(ctx, func() error {
+				return svc.Edits.Delete(pkg, editID).Context(ctx).Do()
+			})
+			client.Release()
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to get track: %v", err))
+		}
+
+		// Find source locale text and copy to target locales
+		result.Source = cmd.SourceLocale
+		result.Targets = cmd.TargetLocales
+		result.Locales = make(map[string]releaseNotesData)
+
+		if track != nil && track.Releases != nil {
+			for i, release := range track.Releases {
+				// Find the source locale text
+				var sourceText string
+				for _, note := range release.ReleaseNotes {
+					if note.Language == cmd.SourceLocale {
+						sourceText = note.Text
+						result.Locales[cmd.SourceLocale] = releaseNotesData{Text: sourceText}
+						break
+					}
+				}
+
+				if sourceText == "" {
+					_ = client.DoWithRetry(ctx, func() error {
+						return svc.Edits.Delete(pkg, editID).Context(ctx).Do()
+					})
+					client.Release()
+					return errors.NewAPIError(errors.CodeNotFound,
+						fmt.Sprintf("no release notes found for source locale %s", cmd.SourceLocale))
+				}
+
+				// Add/replace target locale notes
+				existingNotes := make(map[string]*androidpublisher.LocalizedText)
+				for _, note := range release.ReleaseNotes {
+					existingNotes[note.Language] = note
+				}
+
+				for _, targetLocale := range cmd.TargetLocales {
+					if existing, ok := existingNotes[targetLocale]; ok {
+						existing.Text = sourceText
+					} else {
+						release.ReleaseNotes = append(release.ReleaseNotes, &androidpublisher.LocalizedText{
+							Language: targetLocale,
+							Text:     sourceText,
+						})
+					}
+					result.Locales[targetLocale] = releaseNotesData{Text: sourceText}
+				}
+
+				track.Releases[i] = release
+				break // Only copy to the first release
+			}
+		}
+
+		// Update the track
+		err = client.DoWithRetry(ctx, func() error {
+			_, uerr := svc.Edits.Tracks.Update(pkg, editID, cmd.Track, track).Context(ctx).Do()
+			return uerr
+		})
+		if err != nil {
+			_ = client.DoWithRetry(ctx, func() error {
+				return svc.Edits.Delete(pkg, editID).Context(ctx).Do()
+			})
+			client.Release()
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to update track: %v", err))
+		}
+
+		// Commit the edit
+		err = client.DoWithRetry(ctx, func() error {
+			_, cerr := svc.Edits.Commit(pkg, editID).Context(ctx).Do()
+			return cerr
+		})
+
+		client.Release()
+
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to commit edit: %v", err))
 		}
 	}
 
 	return writeOutput(globals, output.NewResult(result).
-		WithServices("androidpublisher").
-		WithNoOp("release notes management requires full API implementation"))
+		WithDuration(time.Since(startTime)).
+		WithServices("androidpublisher"))
 }

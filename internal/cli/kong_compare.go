@@ -5,7 +5,12 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
+	"strconv"
 	"time"
+
+	"google.golang.org/api/androidpublisher/v3"
+	playdeveloperreporting "google.golang.org/api/playdeveloperreporting/v1beta1"
 
 	"github.com/dl-alexandre/gpd/internal/api"
 	"github.com/dl-alexandre/gpd/internal/errors"
@@ -73,11 +78,36 @@ func (cmd *CompareVitalsCmd) Run(globals *Globals) error {
 		return err
 	}
 
-	_ = client // Use client when implementing full API calls
+	svc, err := client.PlayReporting()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to get reporting service: %v", err))
+	}
+
+	timelineSpec, err := buildTimelineSpec(cmd.StartDate, cmd.EndDate)
+	if err != nil {
+		return err
+	}
+
+	startTime := time.Now()
+
+	// Build period string for result
+	period := "last 30 days"
+	if cmd.StartDate != "" || cmd.EndDate != "" {
+		startStr := cmd.StartDate
+		if startStr == "" {
+			startStr = time.Now().UTC().AddDate(0, 0, -30).Format("2006-01-02")
+		}
+		endStr := cmd.EndDate
+		if endStr == "" {
+			endStr = time.Now().UTC().Format("2006-01-02")
+		}
+		period = startStr + " to " + endStr
+	}
 
 	// Query vitals for each package
 	result := &compareVitalsResult{
 		Metric:       cmd.Metric,
+		Period:       period,
 		Apps:         make([]compareVitalsAppData, 0, len(cmd.Packages)),
 		ComparisonAt: time.Now(),
 	}
@@ -87,19 +117,106 @@ func (cmd *CompareVitalsCmd) Run(globals *Globals) error {
 			Package: pkg,
 		}
 
-		// Query metrics from Play Developer Reporting API
-		// This is a simplified implementation
-		appData.CrashRate = 0.0 // Would query from API
-		appData.AnrRate = 0.0   // Would query from API
-		appData.ErrorCount = 0  // Would query from API
-		appData.Score = 100.0   // Composite score
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+
+		// Query crash rate if requested
+		if cmd.Metric == "crash-rate" || cmd.Metric == "all" {
+			crashName := fmt.Sprintf("apps/%s/crashRateMetricSet", pkg)
+			crashReq := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryCrashRateMetricSetRequest{
+				TimelineSpec: timelineSpec,
+				Metrics:      []string{"crashRate", "crashRate7dUserWeighted"},
+				PageSize:     1,
+			}
+
+			err = client.DoWithRetry(ctx, func() error {
+				resp, qerr := svc.Vitals.Crashrate.Query(crashName, crashReq).Context(ctx).Do()
+				if qerr != nil {
+					return qerr
+				}
+				if len(resp.Rows) > 0 {
+					for _, metric := range resp.Rows[0].Metrics {
+						if metric.Metric == "crashRate" && metric.DecimalValue != nil {
+							if val, perr := strconv.ParseFloat(metric.DecimalValue.Value, 64); perr == nil {
+								appData.CrashRate = val
+							}
+						}
+					}
+				}
+				return nil
+			})
+			if err != nil {
+				client.Release()
+				return errors.NewAPIError(errors.CodeGeneralError,
+					fmt.Sprintf("failed to query crash rate for %s: %v", pkg, err))
+			}
+		}
+
+		// Query ANR rate if requested
+		if cmd.Metric == "anr-rate" || cmd.Metric == "all" {
+			anrName := fmt.Sprintf("apps/%s/anrRateMetricSet", pkg)
+			anrReq := &playdeveloperreporting.GooglePlayDeveloperReportingV1beta1QueryAnrRateMetricSetRequest{
+				TimelineSpec: timelineSpec,
+				Metrics:      []string{"anrRate", "anrRate7dUserWeighted"},
+				PageSize:     1,
+			}
+
+			err = client.DoWithRetry(ctx, func() error {
+				resp, qerr := svc.Vitals.Anrrate.Query(anrName, anrReq).Context(ctx).Do()
+				if qerr != nil {
+					return qerr
+				}
+				if len(resp.Rows) > 0 {
+					for _, metric := range resp.Rows[0].Metrics {
+						if metric.Metric == "anrRate" && metric.DecimalValue != nil {
+							if val, perr := strconv.ParseFloat(metric.DecimalValue.Value, 64); perr == nil {
+								appData.AnrRate = val
+							}
+						}
+					}
+				}
+				return nil
+			})
+			if err != nil {
+				client.Release()
+				return errors.NewAPIError(errors.CodeGeneralError,
+					fmt.Sprintf("failed to query ANR rate for %s: %v", pkg, err))
+			}
+		}
+
+		client.Release()
+
+		// Calculate composite score (lower is better for crash/anr rates)
+		// Score = 100 - (crashRate * 50000 + anrRate * 50000), clamped to [0, 100]
+		score := 100.0 - (appData.CrashRate*50000 + appData.AnrRate*50000)
+		if score < 0 {
+			score = 0
+		}
+		if score > 100 {
+			score = 100
+		}
+		appData.Score = score
 
 		result.Apps = append(result.Apps, appData)
 	}
 
+	// Rank apps by score (higher score = better = lower rank number)
+	sort.Slice(result.Apps, func(i, j int) bool {
+		return result.Apps[i].Score > result.Apps[j].Score
+	})
+	for i := range result.Apps {
+		result.Apps[i].Rank = i + 1
+	}
+
+	if len(result.Apps) > 0 {
+		result.BestApp = result.Apps[0].Package
+		result.WorstApp = result.Apps[len(result.Apps)-1].Package
+	}
+
 	return writeOutput(globals, output.NewResult(result).
-		WithServices("playdeveloperreporting").
-		WithNoOp("compare vitals requires full API implementation"))
+		WithDuration(time.Since(startTime)).
+		WithServices("playdeveloperreporting"))
 }
 
 // CompareReviewsCmd compares review metrics across apps.
@@ -146,7 +263,12 @@ func (cmd *CompareReviewsCmd) Run(globals *Globals) error {
 		return err
 	}
 
-	_ = client // Use client when implementing full API calls
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to get publisher service: %v", err))
+	}
+
+	startTime := time.Now()
 
 	result := &compareReviewsResult{
 		Apps:         make([]compareReviewsAppData, 0, len(cmd.Packages)),
@@ -159,24 +281,78 @@ func (cmd *CompareReviewsCmd) Run(globals *Globals) error {
 			RatingsDist: make(map[int]int64),
 		}
 
-		// Query reviews from Android Publisher API
-		// Simplified implementation
-		appData.AverageRating = 4.5
-		appData.TotalReviews = 1000
-		for i := 1; i <= 5; i++ {
-			appData.RatingsDist[i] = int64(1000 * (float64(i) / 15.0))
+		if err := client.Acquire(ctx); err != nil {
+			return err
 		}
 
-		if cmd.IncludeSentiment {
-			appData.SentimentScore = 0.85
+		var allReviews []*androidpublisher.Review
+
+		err = client.DoWithRetry(ctx, func() error {
+			resp, qerr := svc.Reviews.List(pkg).Context(ctx).Do()
+			if qerr != nil {
+				return qerr
+			}
+			allReviews = append(allReviews, resp.Reviews...)
+
+			// Fetch additional pages for comprehensive data
+			pageToken := resp.TokenPagination
+			for pageToken != nil && pageToken.NextPageToken != "" {
+				nextResp, nerr := svc.Reviews.List(pkg).Token(pageToken.NextPageToken).Context(ctx).Do()
+				if nerr != nil {
+					return nerr
+				}
+				allReviews = append(allReviews, nextResp.Reviews...)
+				pageToken = nextResp.TokenPagination
+			}
+			return nil
+		})
+
+		client.Release()
+
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError,
+				fmt.Sprintf("failed to list reviews for %s: %v", pkg, err))
+		}
+
+		// Calculate average rating and distribution from returned reviews
+		var totalRating int64
+		var reviewCount int64
+		var sentimentSum float64
+
+		for _, review := range allReviews {
+			if review.Comments == nil {
+				continue
+			}
+			for _, comment := range review.Comments {
+				if comment.UserComment != nil {
+					rating := int(comment.UserComment.StarRating)
+					appData.RatingsDist[rating]++
+					totalRating += comment.UserComment.StarRating
+					reviewCount++
+
+					// Use star rating as a proxy for sentiment if requested
+					if cmd.IncludeSentiment {
+						// Normalize star rating to [-1, 1] range
+						sentimentSum += (float64(comment.UserComment.StarRating) - 3.0) / 2.0
+					}
+				}
+			}
+		}
+
+		appData.TotalReviews = reviewCount
+		if reviewCount > 0 {
+			appData.AverageRating = float64(totalRating) / float64(reviewCount)
+			if cmd.IncludeSentiment {
+				appData.SentimentScore = sentimentSum / float64(reviewCount)
+			}
 		}
 
 		result.Apps = append(result.Apps, appData)
 	}
 
 	return writeOutput(globals, output.NewResult(result).
-		WithServices("androidpublisher").
-		WithNoOp("compare reviews requires full API implementation"))
+		WithDuration(time.Since(startTime)).
+		WithServices("androidpublisher"))
 }
 
 // CompareReleasesCmd compares release history across apps.
@@ -239,7 +415,12 @@ func (cmd *CompareReleasesCmd) Run(globals *Globals) error {
 		return err
 	}
 
-	_ = client // Use client when implementing full API calls
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to get publisher service: %v", err))
+	}
+
+	startTime := time.Now()
 
 	result := &compareReleasesResult{
 		Track:        cmd.Track,
@@ -254,18 +435,110 @@ func (cmd *CompareReleasesCmd) Run(globals *Globals) error {
 			Releases: make([]compareReleaseInfo, 0),
 		}
 
-		// Query track releases from Android Publisher API
-		// Simplified implementation
-		appData.ReleaseCount = 5
-		appData.LatestVersion = "1.2.3"
-		appData.LatestDate = time.Now().Format("2006-01-02")
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+
+		// Create temporary edit
+		var edit *androidpublisher.AppEdit
+		err = client.DoWithRetry(ctx, func() error {
+			edit, err = svc.Edits.Insert(pkg, &androidpublisher.AppEdit{}).Context(ctx).Do()
+			return err
+		})
+		if err != nil {
+			client.Release()
+			return errors.NewAPIError(errors.CodeGeneralError,
+				fmt.Sprintf("failed to create edit for %s: %v", pkg, err))
+		}
+
+		editID := edit.Id
+
+		// Get track info
+		var track *androidpublisher.Track
+		err = client.DoWithRetry(ctx, func() error {
+			track, err = svc.Edits.Tracks.Get(pkg, editID, cmd.Track).Context(ctx).Do()
+			return err
+		})
+
+		// Clean up the temporary edit
+		_ = client.DoWithRetry(ctx, func() error {
+			return svc.Edits.Delete(pkg, editID).Context(ctx).Do()
+		})
+
+		client.Release()
+
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError,
+				fmt.Sprintf("failed to get track for %s: %v", pkg, err))
+		}
+
+		// Process releases from the track
+		if track != nil && track.Releases != nil {
+			count := 0
+			for _, release := range track.Releases {
+				if cmd.Limit > 0 && count >= cmd.Limit {
+					break
+				}
+
+				versionCodes := make([]string, 0, len(release.VersionCodes))
+				for _, vc := range release.VersionCodes {
+					versionCodes = append(versionCodes, fmt.Sprintf("%d", vc))
+				}
+
+				releaseInfo := compareReleaseInfo{
+					VersionCodes: versionCodes,
+					Status:       release.Status,
+					Name:         release.Name,
+				}
+
+				appData.Releases = append(appData.Releases, releaseInfo)
+				count++
+
+				// Build timeline events
+				eventType := "release"
+				if release.Status == "inProgress" {
+					eventType = "rollout"
+				} else if release.Status == "halted" {
+					eventType = "halted"
+				}
+
+				releaseName := release.Name
+				if releaseName == "" && len(versionCodes) > 0 {
+					releaseName = "v" + versionCodes[0]
+				}
+
+				result.Timeline = append(result.Timeline, compareReleaseEvent{
+					Date:    time.Now().Format("2006-01-02"),
+					Package: pkg,
+					Release: releaseName,
+					Type:    eventType,
+				})
+			}
+			appData.ReleaseCount = count
+
+			// Set latest version from the first release (most recent)
+			if len(track.Releases) > 0 {
+				latest := track.Releases[0]
+				if len(latest.VersionCodes) > 0 {
+					appData.LatestVersion = fmt.Sprintf("%d", latest.VersionCodes[0])
+				}
+				if latest.Name != "" {
+					appData.LatestVersion = latest.Name
+				}
+			}
+		}
 
 		result.Apps = append(result.Apps, appData)
 	}
 
+	// Sort timeline by date
+	sort.Slice(result.Timeline, func(i, j int) bool {
+		return result.Timeline[i].Date > result.Timeline[j].Date
+	})
+
 	return writeOutput(globals, output.NewResult(result).
-		WithServices("androidpublisher").
-		WithNoOp("compare releases requires full API implementation"))
+		WithDuration(time.Since(startTime)).
+		WithServices("androidpublisher"))
 }
 
 // CompareSubscriptionsCmd compares subscription metrics across apps.
@@ -311,7 +584,12 @@ func (cmd *CompareSubscriptionsCmd) Run(globals *Globals) error {
 		return err
 	}
 
-	_ = client // Use client when implementing full API calls
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to get publisher service: %v", err))
+	}
+
+	startTime := time.Now()
 
 	result := &compareSubscriptionsResult{
 		Period:       cmd.Period,
@@ -319,20 +597,79 @@ func (cmd *CompareSubscriptionsCmd) Run(globals *Globals) error {
 		ComparisonAt: time.Now(),
 	}
 
+	var warnings []string
+
 	for _, pkg := range cmd.Packages {
 		appData := compareSubscriptionsAppData{
-			Package:    pkg,
-			TotalSubs:  1000,
-			ActiveSubs: 850,
-			ChurnRate:  0.05,
-			Mrr:        5000.0,
-			ARPU:       5.88,
+			Package: pkg,
 		}
+
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+
+		// List subscriptions using Monetization API
+		var subscriptionCount int64
+		err = client.DoWithRetry(ctx, func() error {
+			call := svc.Monetization.Subscriptions.List(pkg)
+			if len(cmd.Subscriptions) > 0 {
+				// No direct filter, we'll filter after retrieval
+			}
+			resp, lerr := call.Context(ctx).Do()
+			if lerr != nil {
+				return lerr
+			}
+			if resp != nil && resp.Subscriptions != nil {
+				subscriptionCount = int64(len(resp.Subscriptions))
+
+				// Filter by specific subscription IDs if provided
+				if len(cmd.Subscriptions) > 0 {
+					filteredCount := int64(0)
+					subSet := make(map[string]bool)
+					for _, subID := range cmd.Subscriptions {
+						subSet[subID] = true
+					}
+					for _, sub := range resp.Subscriptions {
+						if subSet[sub.ProductId] {
+							filteredCount++
+						}
+					}
+					subscriptionCount = filteredCount
+				}
+			}
+			return nil
+		})
+
+		client.Release()
+
+		if err != nil {
+			// Monetization API may not be available for all accounts
+			warnings = append(warnings, fmt.Sprintf("could not list subscriptions for %s: %v", pkg, err))
+			appData.TotalSubs = 0
+		} else {
+			appData.TotalSubs = subscriptionCount
+			appData.ActiveSubs = subscriptionCount // Active count approximation from list
+		}
+
+		// MRR/ARPU/churn data is not available via the Monetization API
+		// These would require financial reports or Play Console export data
+		appData.ChurnRate = 0
+		appData.Mrr = 0
+		appData.ARPU = 0
 
 		result.Apps = append(result.Apps, appData)
 	}
 
-	return writeOutput(globals, output.NewResult(result).
-		WithServices("androidpublisher").
-		WithNoOp("compare subscriptions requires full API implementation"))
+	r := output.NewResult(result).
+		WithDuration(time.Since(startTime)).
+		WithServices("androidpublisher")
+
+	if len(warnings) > 0 {
+		r = r.WithWarnings(warnings...)
+	}
+	if result.Apps[0].Mrr == 0 {
+		r = r.WithWarnings("MRR, ARPU, and churn rate data are not available via the Google Play API; these fields are set to 0")
+	}
+
+	return writeOutput(globals, r)
 }

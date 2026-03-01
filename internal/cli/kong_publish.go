@@ -670,7 +670,134 @@ type PublishRolloutCmd struct {
 
 // Run executes the rollout command.
 func (cmd *PublishRolloutCmd) Run(globals *Globals) error {
-	return errors.NewAPIError(errors.CodeGeneralError, "publish rollout not yet implemented")
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	start := time.Now()
+
+	if globals.Package == "" {
+		return errors.ErrPackageRequired
+	}
+
+	if cmd.Percentage < 0.01 || cmd.Percentage > 100.0 {
+		return errors.NewAPIError(errors.CodeValidationError, fmt.Sprintf("invalid rollout percentage: %.2f", cmd.Percentage)).
+			WithHint("Percentage must be between 0.01 and 100.00")
+	}
+
+	userFraction := cmd.Percentage / 100.0
+
+	if cmd.DryRun {
+		result := output.NewResult(map[string]interface{}{
+			"track":        cmd.Track,
+			"percentage":   cmd.Percentage,
+			"userFraction": userFraction,
+			"dryRun":       true,
+		}).WithDuration(time.Since(start)).
+			WithNoOp("dry run - rollout not updated")
+		return outputResult(result, globals.Output, globals.Pretty)
+	}
+
+	client, err := createAPIClient(ctx, globals)
+	if err != nil {
+		return err
+	}
+
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, "failed to initialize publisher service").
+			WithHint("Ensure authentication is configured correctly")
+	}
+
+	pkg := globals.Package
+
+	// Create or reuse edit
+	editID := cmd.EditID
+	if editID == "" {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		var edit *androidpublisher.AppEdit
+		err = client.DoWithRetry(ctx, func() error {
+			edit, err = svc.Edits.Insert(pkg, &androidpublisher.AppEdit{}).Context(ctx).Do()
+			return err
+		})
+		client.Release()
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to create edit: %v", err))
+		}
+		editID = edit.Id
+	}
+
+	// Get current track
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+	var track *androidpublisher.Track
+	err = client.DoWithRetry(ctx, func() error {
+		track, err = svc.Edits.Tracks.Get(pkg, editID, cmd.Track).Context(ctx).Do()
+		return err
+	})
+	client.Release()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to get track %s: %v", cmd.Track, err))
+	}
+
+	// Find inProgress release and update userFraction
+	found := false
+	for _, release := range track.Releases {
+		if release.Status == "inProgress" {
+			release.UserFraction = userFraction
+			found = true
+			break
+		}
+	}
+	if !found {
+		return errors.NewAPIError(errors.CodeNotFound, "no in-progress release found on track").
+			WithHint("Only releases with status 'inProgress' can have their rollout percentage updated")
+	}
+
+	// Update track
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+	err = client.DoWithRetry(ctx, func() error {
+		_, uerr := svc.Edits.Tracks.Update(pkg, editID, cmd.Track, track).Context(ctx).Do()
+		return uerr
+	})
+	client.Release()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to update rollout: %v", err))
+	}
+
+	// Commit
+	committed := false
+	if !cmd.NoAutoCommit {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		err = client.DoWithRetry(ctx, func() error {
+			_, cerr := svc.Edits.Commit(pkg, editID).Context(ctx).Do()
+			return cerr
+		})
+		client.Release()
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to commit edit: %v", err)).
+				WithHint("The rollout was updated but the edit could not be committed")
+		}
+		committed = true
+	}
+
+	result := output.NewResult(map[string]interface{}{
+		"track":        cmd.Track,
+		"percentage":   cmd.Percentage,
+		"userFraction": userFraction,
+		"editId":       editID,
+		"committed":    committed,
+	}).WithDuration(time.Since(start)).
+		WithServices("androidpublisher")
+
+	return outputResult(result, globals.Output, globals.Pretty)
 }
 
 // PublishPromoteCmd promotes a release between tracks.
@@ -685,7 +812,151 @@ type PublishPromoteCmd struct {
 
 // Run executes the promote command.
 func (cmd *PublishPromoteCmd) Run(globals *Globals) error {
-	return errors.NewAPIError(errors.CodeGeneralError, "publish promote not yet implemented")
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	start := time.Now()
+
+	if globals.Package == "" {
+		return errors.ErrPackageRequired
+	}
+
+	if cmd.FromTrack == "" || cmd.ToTrack == "" {
+		return errors.NewAPIError(errors.CodeValidationError, "both --from-track and --to-track are required").
+			WithHint("Specify source and destination tracks, e.g., --from-track=beta --to-track=production")
+	}
+
+	if cmd.DryRun {
+		result := output.NewResult(map[string]interface{}{
+			"fromTrack":  cmd.FromTrack,
+			"toTrack":    cmd.ToTrack,
+			"percentage": cmd.Percentage,
+			"dryRun":     true,
+		}).WithDuration(time.Since(start)).
+			WithNoOp("dry run - release not promoted")
+		return outputResult(result, globals.Output, globals.Pretty)
+	}
+
+	client, err := createAPIClient(ctx, globals)
+	if err != nil {
+		return err
+	}
+
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, "failed to initialize publisher service").
+			WithHint("Ensure authentication is configured correctly")
+	}
+
+	pkg := globals.Package
+
+	// Create or reuse edit
+	editID := cmd.EditID
+	if editID == "" {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		var edit *androidpublisher.AppEdit
+		err = client.DoWithRetry(ctx, func() error {
+			edit, err = svc.Edits.Insert(pkg, &androidpublisher.AppEdit{}).Context(ctx).Do()
+			return err
+		})
+		client.Release()
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to create edit: %v", err))
+		}
+		editID = edit.Id
+	}
+
+	// Get source track
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+	var sourceTrack *androidpublisher.Track
+	err = client.DoWithRetry(ctx, func() error {
+		sourceTrack, err = svc.Edits.Tracks.Get(pkg, editID, cmd.FromTrack).Context(ctx).Do()
+		return err
+	})
+	client.Release()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to get source track %s: %v", cmd.FromTrack, err))
+	}
+
+	if len(sourceTrack.Releases) == 0 {
+		return errors.NewAPIError(errors.CodeNotFound, fmt.Sprintf("no releases found on source track %s", cmd.FromTrack))
+	}
+
+	// Get the latest release from the source track
+	latestRelease := sourceTrack.Releases[0]
+	for _, r := range sourceTrack.Releases {
+		if r.Status == "completed" || r.Status == "inProgress" {
+			latestRelease = r
+			break
+		}
+	}
+
+	// Build the target release
+	targetRelease := &androidpublisher.TrackRelease{
+		Name:         latestRelease.Name,
+		VersionCodes: latestRelease.VersionCodes,
+		ReleaseNotes: latestRelease.ReleaseNotes,
+	}
+
+	if cmd.Percentage > 0 && cmd.Percentage < 100 {
+		targetRelease.Status = "inProgress"
+		targetRelease.UserFraction = cmd.Percentage / 100.0
+	} else {
+		targetRelease.Status = "completed"
+	}
+
+	targetTrack := &androidpublisher.Track{
+		Track:    cmd.ToTrack,
+		Releases: []*androidpublisher.TrackRelease{targetRelease},
+	}
+
+	// Update target track
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+	err = client.DoWithRetry(ctx, func() error {
+		_, uerr := svc.Edits.Tracks.Update(pkg, editID, cmd.ToTrack, targetTrack).Context(ctx).Do()
+		return uerr
+	})
+	client.Release()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to update target track %s: %v", cmd.ToTrack, err))
+	}
+
+	// Commit
+	committed := false
+	if !cmd.NoAutoCommit {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		err = client.DoWithRetry(ctx, func() error {
+			_, cerr := svc.Edits.Commit(pkg, editID).Context(ctx).Do()
+			return cerr
+		})
+		client.Release()
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to commit edit: %v", err)).
+				WithHint("The promotion was configured but the edit could not be committed")
+		}
+		committed = true
+	}
+
+	result := output.NewResult(map[string]interface{}{
+		"fromTrack":    cmd.FromTrack,
+		"toTrack":      cmd.ToTrack,
+		"versionCodes": latestRelease.VersionCodes,
+		"status":       targetRelease.Status,
+		"editId":       editID,
+		"committed":    committed,
+	}).WithDuration(time.Since(start)).
+		WithServices("androidpublisher")
+
+	return outputResult(result, globals.Output, globals.Pretty)
 }
 
 // PublishHaltCmd halts a production rollout.
@@ -699,7 +970,133 @@ type PublishHaltCmd struct {
 
 // Run executes the halt command.
 func (cmd *PublishHaltCmd) Run(globals *Globals) error {
-	return errors.NewAPIError(errors.CodeGeneralError, "publish halt not yet implemented")
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	start := time.Now()
+
+	if globals.Package == "" {
+		return errors.ErrPackageRequired
+	}
+
+	if !cmd.Confirm {
+		return errors.NewAPIError(errors.CodeValidationError, "halt requires confirmation").
+			WithHint("Use --confirm to confirm this destructive operation")
+	}
+
+	if cmd.DryRun {
+		result := output.NewResult(map[string]interface{}{
+			"track":  cmd.Track,
+			"action": "halt",
+			"dryRun": true,
+		}).WithDuration(time.Since(start)).
+			WithNoOp("dry run - rollout not halted")
+		return outputResult(result, globals.Output, globals.Pretty)
+	}
+
+	client, err := createAPIClient(ctx, globals)
+	if err != nil {
+		return err
+	}
+
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, "failed to initialize publisher service").
+			WithHint("Ensure authentication is configured correctly")
+	}
+
+	pkg := globals.Package
+
+	// Create or reuse edit
+	editID := cmd.EditID
+	if editID == "" {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		var edit *androidpublisher.AppEdit
+		err = client.DoWithRetry(ctx, func() error {
+			edit, err = svc.Edits.Insert(pkg, &androidpublisher.AppEdit{}).Context(ctx).Do()
+			return err
+		})
+		client.Release()
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to create edit: %v", err))
+		}
+		editID = edit.Id
+	}
+
+	// Get current track
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+	var track *androidpublisher.Track
+	err = client.DoWithRetry(ctx, func() error {
+		track, err = svc.Edits.Tracks.Get(pkg, editID, cmd.Track).Context(ctx).Do()
+		return err
+	})
+	client.Release()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to get track %s: %v", cmd.Track, err))
+	}
+
+	// Find inProgress release and set to halted
+	found := false
+	var haltedVersionCodes []int64
+	for _, release := range track.Releases {
+		if release.Status == "inProgress" {
+			release.Status = "halted"
+			haltedVersionCodes = release.VersionCodes
+			found = true
+			break
+		}
+	}
+	if !found {
+		return errors.NewAPIError(errors.CodeNotFound, "no in-progress release found on track").
+			WithHint("Only releases with status 'inProgress' can be halted")
+	}
+
+	// Update track
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+	err = client.DoWithRetry(ctx, func() error {
+		_, uerr := svc.Edits.Tracks.Update(pkg, editID, cmd.Track, track).Context(ctx).Do()
+		return uerr
+	})
+	client.Release()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to halt rollout: %v", err))
+	}
+
+	// Commit
+	committed := false
+	if !cmd.NoAutoCommit {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		err = client.DoWithRetry(ctx, func() error {
+			_, cerr := svc.Edits.Commit(pkg, editID).Context(ctx).Do()
+			return cerr
+		})
+		client.Release()
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to commit edit: %v", err)).
+				WithHint("The halt was applied but the edit could not be committed")
+		}
+		committed = true
+	}
+
+	result := output.NewResult(map[string]interface{}{
+		"track":        cmd.Track,
+		"action":       "halted",
+		"versionCodes": haltedVersionCodes,
+		"editId":       editID,
+		"committed":    committed,
+	}).WithDuration(time.Since(start)).
+		WithServices("androidpublisher")
+
+	return outputResult(result, globals.Output, globals.Pretty)
 }
 
 // PublishRollbackCmd rolls back to a previous version.
@@ -714,7 +1111,138 @@ type PublishRollbackCmd struct {
 
 // Run executes the rollback command.
 func (cmd *PublishRollbackCmd) Run(globals *Globals) error {
-	return errors.NewAPIError(errors.CodeGeneralError, "publish rollback not yet implemented")
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	start := time.Now()
+
+	if globals.Package == "" {
+		return errors.ErrPackageRequired
+	}
+
+	if cmd.Track == "" {
+		return errors.NewAPIError(errors.CodeValidationError, "track is required for rollback").
+			WithHint("Specify the track with --track, e.g., --track=production")
+	}
+
+	if !cmd.Confirm {
+		return errors.NewAPIError(errors.CodeValidationError, "rollback requires confirmation").
+			WithHint("Use --confirm to confirm this destructive operation")
+	}
+
+	if cmd.DryRun {
+		result := output.NewResult(map[string]interface{}{
+			"track":  cmd.Track,
+			"action": "rollback",
+			"dryRun": true,
+		}).WithDuration(time.Since(start)).
+			WithNoOp("dry run - rollback not executed")
+		return outputResult(result, globals.Output, globals.Pretty)
+	}
+
+	client, err := createAPIClient(ctx, globals)
+	if err != nil {
+		return err
+	}
+
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, "failed to initialize publisher service").
+			WithHint("Ensure authentication is configured correctly")
+	}
+
+	pkg := globals.Package
+
+	// Create or reuse edit
+	editID := cmd.EditID
+	if editID == "" {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		var edit *androidpublisher.AppEdit
+		err = client.DoWithRetry(ctx, func() error {
+			edit, err = svc.Edits.Insert(pkg, &androidpublisher.AppEdit{}).Context(ctx).Do()
+			return err
+		})
+		client.Release()
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to create edit: %v", err))
+		}
+		editID = edit.Id
+	}
+
+	// Get current track
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+	var track *androidpublisher.Track
+	err = client.DoWithRetry(ctx, func() error {
+		track, err = svc.Edits.Tracks.Get(pkg, editID, cmd.Track).Context(ctx).Do()
+		return err
+	})
+	client.Release()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to get track %s: %v", cmd.Track, err))
+	}
+
+	// Find the inProgress release and halt it to trigger rollback
+	found := false
+	var rolledBackVersionCodes []int64
+	for _, release := range track.Releases {
+		if release.Status == "inProgress" {
+			release.Status = "halted"
+			rolledBackVersionCodes = release.VersionCodes
+			found = true
+			break
+		}
+	}
+	if !found {
+		return errors.NewAPIError(errors.CodeNotFound, "no in-progress release found on track to rollback").
+			WithHint("Rollback halts the current in-progress release so the previous version resumes serving")
+	}
+
+	// Update track
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+	err = client.DoWithRetry(ctx, func() error {
+		_, uerr := svc.Edits.Tracks.Update(pkg, editID, cmd.Track, track).Context(ctx).Do()
+		return uerr
+	})
+	client.Release()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to rollback: %v", err))
+	}
+
+	// Commit
+	committed := false
+	if !cmd.NoAutoCommit {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		err = client.DoWithRetry(ctx, func() error {
+			_, cerr := svc.Edits.Commit(pkg, editID).Context(ctx).Do()
+			return cerr
+		})
+		client.Release()
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to commit edit: %v", err)).
+				WithHint("The rollback was applied but the edit could not be committed")
+		}
+		committed = true
+	}
+
+	result := output.NewResult(map[string]interface{}{
+		"track":                  cmd.Track,
+		"action":                 "rollback",
+		"rolledBackVersionCodes": rolledBackVersionCodes,
+		"editId":                 editID,
+		"committed":              committed,
+	}).WithDuration(time.Since(start)).
+		WithServices("androidpublisher")
+
+	return outputResult(result, globals.Output, globals.Pretty)
 }
 
 // PublishStatusCmd gets track status.
@@ -724,7 +1252,133 @@ type PublishStatusCmd struct {
 
 // Run executes the status command.
 func (cmd *PublishStatusCmd) Run(globals *Globals) error {
-	return errors.NewAPIError(errors.CodeGeneralError, "publish status not yet implemented")
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	start := time.Now()
+
+	if globals.Package == "" {
+		return errors.ErrPackageRequired
+	}
+
+	client, err := createAPIClient(ctx, globals)
+	if err != nil {
+		return err
+	}
+
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, "failed to initialize publisher service").
+			WithHint("Ensure authentication is configured correctly")
+	}
+
+	pkg := globals.Package
+
+	// Create a temporary edit
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+
+	var edit *androidpublisher.AppEdit
+	err = client.DoWithRetry(ctx, func() error {
+		edit, err = svc.Edits.Insert(pkg, &androidpublisher.AppEdit{}).Context(ctx).Do()
+		return err
+	})
+
+	if err != nil {
+		client.Release()
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to create edit: %v", err))
+	}
+
+	editID := edit.Id
+
+	type releaseInfo struct {
+		Name         string  `json:"name,omitempty"`
+		Status       string  `json:"status"`
+		VersionCodes []int64 `json:"versionCodes,omitempty"`
+		UserFraction float64 `json:"userFraction,omitempty"`
+	}
+
+	type trackStatus struct {
+		Track    string        `json:"track"`
+		Releases []releaseInfo `json:"releases,omitempty"`
+	}
+
+	var data interface{}
+
+	if cmd.Track != "" {
+		// Get specific track
+		var track *androidpublisher.Track
+		err = client.DoWithRetry(ctx, func() error {
+			track, err = svc.Edits.Tracks.Get(pkg, editID, cmd.Track).Context(ctx).Do()
+			return err
+		})
+
+		// Clean up edit
+		_ = client.DoWithRetry(ctx, func() error {
+			return svc.Edits.Delete(pkg, editID).Context(ctx).Do()
+		})
+		client.Release()
+
+		if err != nil {
+			if apiErr, ok := err.(*googleapi.Error); ok && apiErr.Code == 404 {
+				return errors.NewAPIError(errors.CodeNotFound, fmt.Sprintf("track not found: %s", cmd.Track))
+			}
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to get track: %v", err))
+		}
+
+		ts := trackStatus{Track: track.Track}
+		for _, r := range track.Releases {
+			ri := releaseInfo{
+				Name:         r.Name,
+				Status:       r.Status,
+				VersionCodes: r.VersionCodes,
+				UserFraction: r.UserFraction,
+			}
+			ts.Releases = append(ts.Releases, ri)
+		}
+		data = ts
+	} else {
+		// List all tracks
+		var tracksList *androidpublisher.TracksListResponse
+		err = client.DoWithRetry(ctx, func() error {
+			tracksList, err = svc.Edits.Tracks.List(pkg, editID).Context(ctx).Do()
+			return err
+		})
+
+		// Clean up edit
+		_ = client.DoWithRetry(ctx, func() error {
+			return svc.Edits.Delete(pkg, editID).Context(ctx).Do()
+		})
+		client.Release()
+
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to list tracks: %v", err))
+		}
+
+		var statuses []trackStatus
+		for _, t := range tracksList.Tracks {
+			ts := trackStatus{Track: t.Track}
+			for _, r := range t.Releases {
+				ri := releaseInfo{
+					Name:         r.Name,
+					Status:       r.Status,
+					VersionCodes: r.VersionCodes,
+					UserFraction: r.UserFraction,
+				}
+				ts.Releases = append(ts.Releases, ri)
+			}
+			statuses = append(statuses, ts)
+		}
+		data = map[string]interface{}{
+			"tracks": statuses,
+			"count":  len(statuses),
+		}
+	}
+
+	result := output.NewResult(data).WithDuration(time.Since(start)).WithServices("androidpublisher")
+	return outputResult(result, globals.Output, globals.Pretty)
 }
 
 // PublishTracksCmd lists all tracks.
@@ -834,7 +1488,44 @@ type PublishCapabilitiesCmd struct{}
 
 // Run executes the capabilities command.
 func (cmd *PublishCapabilitiesCmd) Run(globals *Globals) error {
-	return errors.NewAPIError(errors.CodeGeneralError, "publish capabilities not yet implemented")
+	start := time.Now()
+
+	capabilities := map[string]interface{}{
+		"tracks": []string{"internal", "alpha", "beta", "production"},
+		"releaseStatuses": []string{
+			"draft", "completed", "halted", "inProgress",
+		},
+		"imageTypes": []string{
+			"icon", "featureGraphic", "promoGraphic",
+			"phoneScreenshots", "sevenInchScreenshots",
+			"tenInchScreenshots", "tvScreenshots",
+			"tvBanner", "wearScreenshots",
+		},
+		"uploadFormats": []string{"apk", "aab"},
+		"deobfuscationTypes": []string{
+			"proguard", "nativeCode",
+		},
+		"expansionFileTypes": []string{"main", "patch"},
+		"maxScreenshotsPerType": 8,
+		"maxImageSizes": map[string]string{
+			"icon":                   "512x512 PNG (32-bit with alpha)",
+			"featureGraphic":         "1024x500 JPEG or 24-bit PNG (no alpha)",
+			"promoGraphic":           "180x120 JPEG or 24-bit PNG (no alpha)",
+			"phoneScreenshots":       "min 320px, max 3840px, aspect ratio 16:9 or 9:16",
+			"sevenInchScreenshots":   "min 320px, max 3840px",
+			"tenInchScreenshots":     "min 320px, max 3840px",
+			"tvScreenshots":          "1280x720 or 1920x1080",
+			"tvBanner":              "1280x720",
+			"wearScreenshots":        "min 384px, max 3840px",
+		},
+		"maxExpansionFileSize":  "2GB",
+		"maxApkSize":            "150MB",
+		"maxBundleSize":         "150MB",
+		"inAppUpdatePriority":   "0-5",
+	}
+
+	result := output.NewResult(capabilities).WithDuration(time.Since(start)).WithServices("androidpublisher")
+	return outputResult(result, globals.Output, globals.Pretty)
 }
 
 // PublishListingCmd manages store listing.
@@ -857,7 +1548,109 @@ type PublishListingUpdateCmd struct {
 
 // Run executes the listing update command.
 func (cmd *PublishListingUpdateCmd) Run(globals *Globals) error {
-	return errors.NewAPIError(errors.CodeGeneralError, "publish listing update not yet implemented")
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	start := time.Now()
+
+	if globals.Package == "" {
+		return errors.ErrPackageRequired
+	}
+
+	if cmd.DryRun {
+		result := output.NewResult(map[string]interface{}{
+			"locale":   cmd.Locale,
+			"title":    cmd.Title,
+			"shortDesc": cmd.ShortDesc,
+			"fullDesc":  cmd.FullDesc,
+			"dryRun":   true,
+		}).WithDuration(time.Since(start)).
+			WithNoOp("dry run - listing not updated")
+		return outputResult(result, globals.Output, globals.Pretty)
+	}
+
+	client, err := createAPIClient(ctx, globals)
+	if err != nil {
+		return err
+	}
+
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, "failed to initialize publisher service").
+			WithHint("Ensure authentication is configured correctly")
+	}
+
+	pkg := globals.Package
+
+	// Create or reuse edit
+	editID := cmd.EditID
+	if editID == "" {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		var edit *androidpublisher.AppEdit
+		err = client.DoWithRetry(ctx, func() error {
+			edit, err = svc.Edits.Insert(pkg, &androidpublisher.AppEdit{}).Context(ctx).Do()
+			return err
+		})
+		client.Release()
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to create edit: %v", err))
+		}
+		editID = edit.Id
+	}
+
+	listing := &androidpublisher.Listing{
+		Title:            cmd.Title,
+		ShortDescription: cmd.ShortDesc,
+		FullDescription:  cmd.FullDesc,
+	}
+
+	// Update listing
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+	var updatedListing *androidpublisher.Listing
+	err = client.DoWithRetry(ctx, func() error {
+		updatedListing, err = svc.Edits.Listings.Update(pkg, editID, cmd.Locale, listing).Context(ctx).Do()
+		return err
+	})
+	client.Release()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to update listing: %v", err))
+	}
+
+	// Commit
+	committed := false
+	if !cmd.NoAutoCommit {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		err = client.DoWithRetry(ctx, func() error {
+			_, cerr := svc.Edits.Commit(pkg, editID).Context(ctx).Do()
+			return cerr
+		})
+		client.Release()
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to commit edit: %v", err)).
+				WithHint("The listing was updated but the edit could not be committed")
+		}
+		committed = true
+	}
+
+	result := output.NewResult(map[string]interface{}{
+		"locale":           cmd.Locale,
+		"title":            updatedListing.Title,
+		"shortDescription": updatedListing.ShortDescription,
+		"fullDescription":  updatedListing.FullDescription,
+		"language":         updatedListing.Language,
+		"editId":           editID,
+		"committed":        committed,
+	}).WithDuration(time.Since(start)).
+		WithServices("androidpublisher")
+
+	return outputResult(result, globals.Output, globals.Pretty)
 }
 
 // PublishListingGetCmd gets store listing.
@@ -867,7 +1660,110 @@ type PublishListingGetCmd struct {
 
 // Run executes the listing get command.
 func (cmd *PublishListingGetCmd) Run(globals *Globals) error {
-	return errors.NewAPIError(errors.CodeGeneralError, "publish listing get not yet implemented")
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	start := time.Now()
+
+	if globals.Package == "" {
+		return errors.ErrPackageRequired
+	}
+
+	client, err := createAPIClient(ctx, globals)
+	if err != nil {
+		return err
+	}
+
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, "failed to initialize publisher service").
+			WithHint("Ensure authentication is configured correctly")
+	}
+
+	pkg := globals.Package
+
+	// Create a temporary edit
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+
+	var edit *androidpublisher.AppEdit
+	err = client.DoWithRetry(ctx, func() error {
+		edit, err = svc.Edits.Insert(pkg, &androidpublisher.AppEdit{}).Context(ctx).Do()
+		return err
+	})
+
+	if err != nil {
+		client.Release()
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to create edit: %v", err))
+	}
+
+	editID := edit.Id
+	var data interface{}
+
+	if cmd.Locale != "" {
+		// Get specific locale listing
+		var listing *androidpublisher.Listing
+		err = client.DoWithRetry(ctx, func() error {
+			listing, err = svc.Edits.Listings.Get(pkg, editID, cmd.Locale).Context(ctx).Do()
+			return err
+		})
+
+		// Clean up edit
+		_ = client.DoWithRetry(ctx, func() error {
+			return svc.Edits.Delete(pkg, editID).Context(ctx).Do()
+		})
+		client.Release()
+
+		if err != nil {
+			if apiErr, ok := err.(*googleapi.Error); ok && apiErr.Code == 404 {
+				return errors.NewAPIError(errors.CodeNotFound, fmt.Sprintf("listing not found for locale: %s", cmd.Locale))
+			}
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to get listing: %v", err))
+		}
+
+		data = map[string]interface{}{
+			"language":         listing.Language,
+			"title":            listing.Title,
+			"shortDescription": listing.ShortDescription,
+			"fullDescription":  listing.FullDescription,
+		}
+	} else {
+		// List all listings
+		var listingsResp *androidpublisher.ListingsListResponse
+		err = client.DoWithRetry(ctx, func() error {
+			listingsResp, err = svc.Edits.Listings.List(pkg, editID).Context(ctx).Do()
+			return err
+		})
+
+		// Clean up edit
+		_ = client.DoWithRetry(ctx, func() error {
+			return svc.Edits.Delete(pkg, editID).Context(ctx).Do()
+		})
+		client.Release()
+
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to list listings: %v", err))
+		}
+
+		var listings []map[string]interface{}
+		for _, l := range listingsResp.Listings {
+			listings = append(listings, map[string]interface{}{
+				"language":         l.Language,
+				"title":            l.Title,
+				"shortDescription": l.ShortDescription,
+				"fullDescription":  l.FullDescription,
+			})
+		}
+		data = map[string]interface{}{
+			"listings": listings,
+			"count":    len(listings),
+		}
+	}
+
+	result := output.NewResult(data).WithDuration(time.Since(start)).WithServices("androidpublisher")
+	return outputResult(result, globals.Output, globals.Pretty)
 }
 
 // PublishListingDeleteCmd deletes store listing.
@@ -882,7 +1778,113 @@ type PublishListingDeleteCmd struct {
 
 // Run executes the listing delete command.
 func (cmd *PublishListingDeleteCmd) Run(globals *Globals) error {
-	return errors.NewAPIError(errors.CodeGeneralError, "publish listing delete not yet implemented")
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	start := time.Now()
+
+	if globals.Package == "" {
+		return errors.ErrPackageRequired
+	}
+
+	if !cmd.All && cmd.Locale == "" {
+		return errors.NewAPIError(errors.CodeValidationError, "locale is required").
+			WithHint("Specify --locale for the listing to delete, or use --all to delete all listings")
+	}
+
+	if !cmd.Confirm {
+		return errors.NewAPIError(errors.CodeValidationError, "delete requires confirmation").
+			WithHint("Use --confirm to confirm this destructive operation")
+	}
+
+	if cmd.DryRun {
+		result := output.NewResult(map[string]interface{}{
+			"locale": cmd.Locale,
+			"all":    cmd.All,
+			"dryRun": true,
+		}).WithDuration(time.Since(start)).
+			WithNoOp("dry run - listing not deleted")
+		return outputResult(result, globals.Output, globals.Pretty)
+	}
+
+	client, err := createAPIClient(ctx, globals)
+	if err != nil {
+		return err
+	}
+
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, "failed to initialize publisher service").
+			WithHint("Ensure authentication is configured correctly")
+	}
+
+	pkg := globals.Package
+
+	// Create or reuse edit
+	editID := cmd.EditID
+	if editID == "" {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		var edit *androidpublisher.AppEdit
+		err = client.DoWithRetry(ctx, func() error {
+			edit, err = svc.Edits.Insert(pkg, &androidpublisher.AppEdit{}).Context(ctx).Do()
+			return err
+		})
+		client.Release()
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to create edit: %v", err))
+		}
+		editID = edit.Id
+	}
+
+	// Delete listing(s)
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+	if cmd.All {
+		err = client.DoWithRetry(ctx, func() error {
+			return svc.Edits.Listings.Deleteall(pkg, editID).Context(ctx).Do()
+		})
+	} else {
+		err = client.DoWithRetry(ctx, func() error {
+			return svc.Edits.Listings.Delete(pkg, editID, cmd.Locale).Context(ctx).Do()
+		})
+	}
+	client.Release()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to delete listing: %v", err))
+	}
+
+	// Commit
+	committed := false
+	if !cmd.NoAutoCommit {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		err = client.DoWithRetry(ctx, func() error {
+			_, cerr := svc.Edits.Commit(pkg, editID).Context(ctx).Do()
+			return cerr
+		})
+		client.Release()
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to commit edit: %v", err)).
+				WithHint("The listing was deleted but the edit could not be committed")
+		}
+		committed = true
+	}
+
+	result := output.NewResult(map[string]interface{}{
+		"locale":    cmd.Locale,
+		"all":       cmd.All,
+		"deleted":   true,
+		"editId":    editID,
+		"committed": committed,
+	}).WithDuration(time.Since(start)).
+		WithServices("androidpublisher")
+
+	return outputResult(result, globals.Output, globals.Pretty)
 }
 
 // PublishDetailsCmd manages app details.
@@ -897,7 +1899,73 @@ type PublishDetailsGetCmd struct{}
 
 // Run executes the details get command.
 func (cmd *PublishDetailsGetCmd) Run(globals *Globals) error {
-	return errors.NewAPIError(errors.CodeGeneralError, "publish details get not yet implemented")
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	start := time.Now()
+
+	if globals.Package == "" {
+		return errors.ErrPackageRequired
+	}
+
+	client, err := createAPIClient(ctx, globals)
+	if err != nil {
+		return err
+	}
+
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, "failed to initialize publisher service").
+			WithHint("Ensure authentication is configured correctly")
+	}
+
+	pkg := globals.Package
+
+	// Create a temporary edit
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+
+	var edit *androidpublisher.AppEdit
+	err = client.DoWithRetry(ctx, func() error {
+		edit, err = svc.Edits.Insert(pkg, &androidpublisher.AppEdit{}).Context(ctx).Do()
+		return err
+	})
+
+	if err != nil {
+		client.Release()
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to create edit: %v", err))
+	}
+
+	editID := edit.Id
+
+	// Get details
+	var details *androidpublisher.AppDetails
+	err = client.DoWithRetry(ctx, func() error {
+		details, err = svc.Edits.Details.Get(pkg, editID).Context(ctx).Do()
+		return err
+	})
+
+	// Clean up edit
+	_ = client.DoWithRetry(ctx, func() error {
+		return svc.Edits.Delete(pkg, editID).Context(ctx).Do()
+	})
+	client.Release()
+
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to get app details: %v", err))
+	}
+
+	data := map[string]interface{}{
+		"contactEmail":    details.ContactEmail,
+		"contactPhone":    details.ContactPhone,
+		"contactWebsite":  details.ContactWebsite,
+		"defaultLanguage": details.DefaultLanguage,
+	}
+
+	result := output.NewResult(data).WithDuration(time.Since(start)).WithServices("androidpublisher")
+	return outputResult(result, globals.Output, globals.Pretty)
 }
 
 // PublishDetailsUpdateCmd updates app details.
@@ -913,7 +1981,109 @@ type PublishDetailsUpdateCmd struct {
 
 // Run executes the details update command.
 func (cmd *PublishDetailsUpdateCmd) Run(globals *Globals) error {
-	return errors.NewAPIError(errors.CodeGeneralError, "publish details update not yet implemented")
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	start := time.Now()
+
+	if globals.Package == "" {
+		return errors.ErrPackageRequired
+	}
+
+	if cmd.DryRun {
+		result := output.NewResult(map[string]interface{}{
+			"contactEmail":    cmd.ContactEmail,
+			"contactPhone":    cmd.ContactPhone,
+			"contactWebsite":  cmd.ContactWebsite,
+			"defaultLanguage": cmd.DefaultLanguage,
+			"dryRun":          true,
+		}).WithDuration(time.Since(start)).
+			WithNoOp("dry run - details not updated")
+		return outputResult(result, globals.Output, globals.Pretty)
+	}
+
+	client, err := createAPIClient(ctx, globals)
+	if err != nil {
+		return err
+	}
+
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, "failed to initialize publisher service").
+			WithHint("Ensure authentication is configured correctly")
+	}
+
+	pkg := globals.Package
+
+	// Create or reuse edit
+	editID := cmd.EditID
+	if editID == "" {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		var edit *androidpublisher.AppEdit
+		err = client.DoWithRetry(ctx, func() error {
+			edit, err = svc.Edits.Insert(pkg, &androidpublisher.AppEdit{}).Context(ctx).Do()
+			return err
+		})
+		client.Release()
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to create edit: %v", err))
+		}
+		editID = edit.Id
+	}
+
+	details := &androidpublisher.AppDetails{
+		ContactEmail:    cmd.ContactEmail,
+		ContactPhone:    cmd.ContactPhone,
+		ContactWebsite:  cmd.ContactWebsite,
+		DefaultLanguage: cmd.DefaultLanguage,
+	}
+
+	// Update details
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+	var updatedDetails *androidpublisher.AppDetails
+	err = client.DoWithRetry(ctx, func() error {
+		updatedDetails, err = svc.Edits.Details.Update(pkg, editID, details).Context(ctx).Do()
+		return err
+	})
+	client.Release()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to update details: %v", err))
+	}
+
+	// Commit
+	committed := false
+	if !cmd.NoAutoCommit {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		err = client.DoWithRetry(ctx, func() error {
+			_, cerr := svc.Edits.Commit(pkg, editID).Context(ctx).Do()
+			return cerr
+		})
+		client.Release()
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to commit edit: %v", err)).
+				WithHint("The details were updated but the edit could not be committed")
+		}
+		committed = true
+	}
+
+	result := output.NewResult(map[string]interface{}{
+		"contactEmail":    updatedDetails.ContactEmail,
+		"contactPhone":    updatedDetails.ContactPhone,
+		"contactWebsite":  updatedDetails.ContactWebsite,
+		"defaultLanguage": updatedDetails.DefaultLanguage,
+		"editId":          editID,
+		"committed":       committed,
+	}).WithDuration(time.Since(start)).
+		WithServices("androidpublisher")
+
+	return outputResult(result, globals.Output, globals.Pretty)
 }
 
 // PublishDetailsPatchCmd patches app details.
@@ -930,7 +2100,110 @@ type PublishDetailsPatchCmd struct {
 
 // Run executes the details patch command.
 func (cmd *PublishDetailsPatchCmd) Run(globals *Globals) error {
-	return errors.NewAPIError(errors.CodeGeneralError, "publish details patch not yet implemented")
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	start := time.Now()
+
+	if globals.Package == "" {
+		return errors.ErrPackageRequired
+	}
+
+	if cmd.DryRun {
+		result := output.NewResult(map[string]interface{}{
+			"contactEmail":    cmd.ContactEmail,
+			"contactPhone":    cmd.ContactPhone,
+			"contactWebsite":  cmd.ContactWebsite,
+			"defaultLanguage": cmd.DefaultLanguage,
+			"updateMask":      cmd.UpdateMask,
+			"dryRun":          true,
+		}).WithDuration(time.Since(start)).
+			WithNoOp("dry run - details not patched")
+		return outputResult(result, globals.Output, globals.Pretty)
+	}
+
+	client, err := createAPIClient(ctx, globals)
+	if err != nil {
+		return err
+	}
+
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, "failed to initialize publisher service").
+			WithHint("Ensure authentication is configured correctly")
+	}
+
+	pkg := globals.Package
+
+	// Create or reuse edit
+	editID := cmd.EditID
+	if editID == "" {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		var edit *androidpublisher.AppEdit
+		err = client.DoWithRetry(ctx, func() error {
+			edit, err = svc.Edits.Insert(pkg, &androidpublisher.AppEdit{}).Context(ctx).Do()
+			return err
+		})
+		client.Release()
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to create edit: %v", err))
+		}
+		editID = edit.Id
+	}
+
+	details := &androidpublisher.AppDetails{
+		ContactEmail:    cmd.ContactEmail,
+		ContactPhone:    cmd.ContactPhone,
+		ContactWebsite:  cmd.ContactWebsite,
+		DefaultLanguage: cmd.DefaultLanguage,
+	}
+
+	// Patch details
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+	var patchedDetails *androidpublisher.AppDetails
+	err = client.DoWithRetry(ctx, func() error {
+		patchedDetails, err = svc.Edits.Details.Patch(pkg, editID, details).Context(ctx).Do()
+		return err
+	})
+	client.Release()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to patch details: %v", err))
+	}
+
+	// Commit
+	committed := false
+	if !cmd.NoAutoCommit {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		err = client.DoWithRetry(ctx, func() error {
+			_, cerr := svc.Edits.Commit(pkg, editID).Context(ctx).Do()
+			return cerr
+		})
+		client.Release()
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to commit edit: %v", err)).
+				WithHint("The details were patched but the edit could not be committed")
+		}
+		committed = true
+	}
+
+	result := output.NewResult(map[string]interface{}{
+		"contactEmail":    patchedDetails.ContactEmail,
+		"contactPhone":    patchedDetails.ContactPhone,
+		"contactWebsite":  patchedDetails.ContactWebsite,
+		"defaultLanguage": patchedDetails.DefaultLanguage,
+		"editId":          editID,
+		"committed":       committed,
+	}).WithDuration(time.Since(start)).
+		WithServices("androidpublisher")
+
+	return outputResult(result, globals.Output, globals.Pretty)
 }
 
 // PublishImagesCmd manages store images.
@@ -954,7 +2227,122 @@ type PublishImagesUploadCmd struct {
 
 // Run executes the images upload command.
 func (cmd *PublishImagesUploadCmd) Run(globals *Globals) error {
-	return errors.NewAPIError(errors.CodeGeneralError, "publish images upload not yet implemented")
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	start := time.Now()
+
+	if globals.Package == "" {
+		return errors.ErrPackageRequired
+	}
+
+	if cmd.File == "" {
+		return errors.NewAPIError(errors.CodeValidationError, "file is required").
+			WithHint("Provide an image file to upload")
+	}
+
+	if cmd.DryRun {
+		result := output.NewResult(map[string]interface{}{
+			"type":   cmd.Type,
+			"file":   cmd.File,
+			"locale": cmd.Locale,
+			"dryRun": true,
+		}).WithDuration(time.Since(start)).
+			WithNoOp("dry run - image not uploaded")
+		return outputResult(result, globals.Output, globals.Pretty)
+	}
+
+	client, err := createAPIClient(ctx, globals)
+	if err != nil {
+		return err
+	}
+
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, "failed to initialize publisher service").
+			WithHint("Ensure authentication is configured correctly")
+	}
+
+	pkg := globals.Package
+
+	// Create or reuse edit
+	editID := cmd.EditID
+	if editID == "" {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		var edit *androidpublisher.AppEdit
+		err = client.DoWithRetry(ctx, func() error {
+			edit, err = svc.Edits.Insert(pkg, &androidpublisher.AppEdit{}).Context(ctx).Do()
+			return err
+		})
+		client.Release()
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to create edit: %v", err))
+		}
+		editID = edit.Id
+	}
+
+	// Open file
+	file, err := os.Open(cmd.File)
+	if err != nil {
+		return errors.NewAPIError(errors.CodeValidationError, fmt.Sprintf("failed to open image file: %v", err))
+	}
+	defer func() {
+		if cerr := file.Close(); cerr != nil {
+			_ = cerr
+		}
+	}()
+
+	// Upload image
+	if err := client.AcquireForUpload(ctx); err != nil {
+		return err
+	}
+	var uploadResp *androidpublisher.ImagesUploadResponse
+	err = client.DoWithRetry(ctx, func() error {
+		uploadResp, err = svc.Edits.Images.Upload(pkg, editID, cmd.Locale, cmd.Type).Media(file).Context(ctx).Do()
+		return err
+	})
+	client.ReleaseForUpload()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to upload image: %v", err))
+	}
+
+	// Commit
+	committed := false
+	if !cmd.NoAutoCommit {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		err = client.DoWithRetry(ctx, func() error {
+			_, cerr := svc.Edits.Commit(pkg, editID).Context(ctx).Do()
+			return cerr
+		})
+		client.Release()
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to commit edit: %v", err)).
+				WithHint("The image was uploaded but the edit could not be committed")
+		}
+		committed = true
+	}
+
+	data := map[string]interface{}{
+		"type":      cmd.Type,
+		"locale":    cmd.Locale,
+		"file":      cmd.File,
+		"editId":    editID,
+		"committed": committed,
+	}
+	if uploadResp != nil && uploadResp.Image != nil {
+		data["imageId"] = uploadResp.Image.Id
+		data["sha1"] = uploadResp.Image.Sha1
+		data["sha256"] = uploadResp.Image.Sha256
+		data["url"] = uploadResp.Image.Url
+	}
+
+	result := output.NewResult(data).WithDuration(time.Since(start)).WithServices("androidpublisher")
+	return outputResult(result, globals.Output, globals.Pretty)
 }
 
 // PublishImagesListCmd lists images.
@@ -966,7 +2354,90 @@ type PublishImagesListCmd struct {
 
 // Run executes the images list command.
 func (cmd *PublishImagesListCmd) Run(globals *Globals) error {
-	return errors.NewAPIError(errors.CodeGeneralError, "publish images list not yet implemented")
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	start := time.Now()
+
+	if globals.Package == "" {
+		return errors.ErrPackageRequired
+	}
+
+	client, err := createAPIClient(ctx, globals)
+	if err != nil {
+		return err
+	}
+
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, "failed to initialize publisher service").
+			WithHint("Ensure authentication is configured correctly")
+	}
+
+	pkg := globals.Package
+
+	// Create or reuse a temporary edit
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+
+	editID := cmd.EditID
+	createdEdit := false
+	if editID == "" {
+		var edit *androidpublisher.AppEdit
+		err = client.DoWithRetry(ctx, func() error {
+			edit, err = svc.Edits.Insert(pkg, &androidpublisher.AppEdit{}).Context(ctx).Do()
+			return err
+		})
+		if err != nil {
+			client.Release()
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to create edit: %v", err))
+		}
+		editID = edit.Id
+		createdEdit = true
+	}
+
+	// List images
+	var imagesResp *androidpublisher.ImagesListResponse
+	err = client.DoWithRetry(ctx, func() error {
+		imagesResp, err = svc.Edits.Images.List(pkg, editID, cmd.Locale, cmd.Type).Context(ctx).Do()
+		return err
+	})
+
+	// Clean up temporary edit
+	if createdEdit {
+		_ = client.DoWithRetry(ctx, func() error {
+			return svc.Edits.Delete(pkg, editID).Context(ctx).Do()
+		})
+	}
+	client.Release()
+
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to list images: %v", err))
+	}
+
+	var images []map[string]interface{}
+	if imagesResp != nil {
+		for _, img := range imagesResp.Images {
+			images = append(images, map[string]interface{}{
+				"id":     img.Id,
+				"url":    img.Url,
+				"sha1":   img.Sha1,
+				"sha256": img.Sha256,
+			})
+		}
+	}
+
+	data := map[string]interface{}{
+		"type":   cmd.Type,
+		"locale": cmd.Locale,
+		"images": images,
+		"count":  len(images),
+	}
+
+	result := output.NewResult(data).WithDuration(time.Since(start)).WithServices("androidpublisher")
+	return outputResult(result, globals.Output, globals.Pretty)
 }
 
 // PublishImagesDeleteCmd deletes an image.
@@ -981,7 +2452,102 @@ type PublishImagesDeleteCmd struct {
 
 // Run executes the images delete command.
 func (cmd *PublishImagesDeleteCmd) Run(globals *Globals) error {
-	return errors.NewAPIError(errors.CodeGeneralError, "publish images delete not yet implemented")
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	start := time.Now()
+
+	if globals.Package == "" {
+		return errors.ErrPackageRequired
+	}
+
+	if cmd.DryRun {
+		result := output.NewResult(map[string]interface{}{
+			"type":    cmd.Type,
+			"imageId": cmd.ID,
+			"locale":  cmd.Locale,
+			"dryRun":  true,
+		}).WithDuration(time.Since(start)).
+			WithNoOp("dry run - image not deleted")
+		return outputResult(result, globals.Output, globals.Pretty)
+	}
+
+	client, err := createAPIClient(ctx, globals)
+	if err != nil {
+		return err
+	}
+
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, "failed to initialize publisher service").
+			WithHint("Ensure authentication is configured correctly")
+	}
+
+	pkg := globals.Package
+
+	// Create or reuse edit
+	editID := cmd.EditID
+	if editID == "" {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		var edit *androidpublisher.AppEdit
+		err = client.DoWithRetry(ctx, func() error {
+			edit, err = svc.Edits.Insert(pkg, &androidpublisher.AppEdit{}).Context(ctx).Do()
+			return err
+		})
+		client.Release()
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to create edit: %v", err))
+		}
+		editID = edit.Id
+	}
+
+	// Delete image
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+	err = client.DoWithRetry(ctx, func() error {
+		return svc.Edits.Images.Delete(pkg, editID, cmd.Locale, cmd.Type, cmd.ID).Context(ctx).Do()
+	})
+	client.Release()
+	if err != nil {
+		if apiErr, ok := err.(*googleapi.Error); ok && apiErr.Code == 404 {
+			return errors.NewAPIError(errors.CodeNotFound, fmt.Sprintf("image not found: %s", cmd.ID))
+		}
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to delete image: %v", err))
+	}
+
+	// Commit
+	committed := false
+	if !cmd.NoAutoCommit {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		err = client.DoWithRetry(ctx, func() error {
+			_, cerr := svc.Edits.Commit(pkg, editID).Context(ctx).Do()
+			return cerr
+		})
+		client.Release()
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to commit edit: %v", err)).
+				WithHint("The image was deleted but the edit could not be committed")
+		}
+		committed = true
+	}
+
+	result := output.NewResult(map[string]interface{}{
+		"type":      cmd.Type,
+		"imageId":   cmd.ID,
+		"locale":    cmd.Locale,
+		"deleted":   true,
+		"editId":    editID,
+		"committed": committed,
+	}).WithDuration(time.Since(start)).
+		WithServices("androidpublisher")
+
+	return outputResult(result, globals.Output, globals.Pretty)
 }
 
 // PublishImagesDeleteAllCmd deletes all images for type.
@@ -995,7 +2561,104 @@ type PublishImagesDeleteAllCmd struct {
 
 // Run executes the images deleteall command.
 func (cmd *PublishImagesDeleteAllCmd) Run(globals *Globals) error {
-	return errors.NewAPIError(errors.CodeGeneralError, "publish images deleteall not yet implemented")
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	start := time.Now()
+
+	if globals.Package == "" {
+		return errors.ErrPackageRequired
+	}
+
+	if cmd.DryRun {
+		result := output.NewResult(map[string]interface{}{
+			"type":   cmd.Type,
+			"locale": cmd.Locale,
+			"dryRun": true,
+		}).WithDuration(time.Since(start)).
+			WithNoOp("dry run - images not deleted")
+		return outputResult(result, globals.Output, globals.Pretty)
+	}
+
+	client, err := createAPIClient(ctx, globals)
+	if err != nil {
+		return err
+	}
+
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, "failed to initialize publisher service").
+			WithHint("Ensure authentication is configured correctly")
+	}
+
+	pkg := globals.Package
+
+	// Create or reuse edit
+	editID := cmd.EditID
+	if editID == "" {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		var edit *androidpublisher.AppEdit
+		err = client.DoWithRetry(ctx, func() error {
+			edit, err = svc.Edits.Insert(pkg, &androidpublisher.AppEdit{}).Context(ctx).Do()
+			return err
+		})
+		client.Release()
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to create edit: %v", err))
+		}
+		editID = edit.Id
+	}
+
+	// Delete all images for type
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+	var deleteResp *androidpublisher.ImagesDeleteAllResponse
+	err = client.DoWithRetry(ctx, func() error {
+		deleteResp, err = svc.Edits.Images.Deleteall(pkg, editID, cmd.Locale, cmd.Type).Context(ctx).Do()
+		return err
+	})
+	client.Release()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to delete all images: %v", err))
+	}
+
+	deletedCount := 0
+	if deleteResp != nil && deleteResp.Deleted != nil {
+		deletedCount = len(deleteResp.Deleted)
+	}
+
+	// Commit
+	committed := false
+	if !cmd.NoAutoCommit {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		err = client.DoWithRetry(ctx, func() error {
+			_, cerr := svc.Edits.Commit(pkg, editID).Context(ctx).Do()
+			return cerr
+		})
+		client.Release()
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to commit edit: %v", err)).
+				WithHint("Images were deleted but the edit could not be committed")
+		}
+		committed = true
+	}
+
+	result := output.NewResult(map[string]interface{}{
+		"type":         cmd.Type,
+		"locale":       cmd.Locale,
+		"deletedCount": deletedCount,
+		"editId":       editID,
+		"committed":    committed,
+	}).WithDuration(time.Since(start)).
+		WithServices("androidpublisher")
+
+	return outputResult(result, globals.Output, globals.Pretty)
 }
 
 // PublishAssetsCmd manages store assets.
@@ -1016,7 +2679,176 @@ type PublishAssetsUploadCmd struct {
 
 // Run executes the assets upload command.
 func (cmd *PublishAssetsUploadCmd) Run(globals *Globals) error {
-	return errors.NewAPIError(errors.CodeGeneralError, "publish assets upload not yet implemented")
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	start := time.Now()
+
+	if globals.Package == "" {
+		return errors.ErrPackageRequired
+	}
+
+	// Map category to image types
+	categoryImageTypes := map[string][]string{
+		"phone":  {"phoneScreenshots", "icon", "featureGraphic", "promoGraphic"},
+		"tablet": {"sevenInchScreenshots", "tenInchScreenshots"},
+		"tv":     {"tvScreenshots", "tvBanner"},
+		"wear":   {"wearScreenshots"},
+	}
+
+	if cmd.Category != "" {
+		if _, ok := categoryImageTypes[cmd.Category]; !ok {
+			return errors.NewAPIError(errors.CodeValidationError, fmt.Sprintf("invalid category: %s", cmd.Category)).
+				WithHint("Valid categories are: phone, tablet, tv, wear")
+		}
+	}
+
+	// Check directory exists
+	dirInfo, err := os.Stat(cmd.Dir)
+	if err != nil {
+		return errors.NewAPIError(errors.CodeValidationError, fmt.Sprintf("failed to access directory: %v", err))
+	}
+	if !dirInfo.IsDir() {
+		return errors.NewAPIError(errors.CodeValidationError, fmt.Sprintf("not a directory: %s", cmd.Dir))
+	}
+
+	if cmd.DryRun {
+		result := output.NewResult(map[string]interface{}{
+			"dir":        cmd.Dir,
+			"category":   cmd.Category,
+			"replaceAll": cmd.ReplaceAll,
+			"dryRun":     true,
+		}).WithDuration(time.Since(start)).
+			WithNoOp("dry run - assets not uploaded")
+		return outputResult(result, globals.Output, globals.Pretty)
+	}
+
+	client, err := createAPIClient(ctx, globals)
+	if err != nil {
+		return err
+	}
+
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, "failed to initialize publisher service").
+			WithHint("Ensure authentication is configured correctly")
+	}
+
+	pkg := globals.Package
+
+	// Create or reuse edit
+	editID := cmd.EditID
+	if editID == "" {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		var edit *androidpublisher.AppEdit
+		err = client.DoWithRetry(ctx, func() error {
+			edit, err = svc.Edits.Insert(pkg, &androidpublisher.AppEdit{}).Context(ctx).Do()
+			return err
+		})
+		client.Release()
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to create edit: %v", err))
+		}
+		editID = edit.Id
+	}
+
+	// Scan for image files in directory and upload them
+	// Expected structure: {dir}/{imageType}/{locale}/*.png or {dir}/{locale}/{imageType}/*.png
+	uploadedCount := 0
+	var uploadErrors []string
+
+	// Walk the directory looking for image files
+	entries, err := os.ReadDir(cmd.Dir)
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to read directory: %v", err))
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		imageType := entry.Name()
+
+		// Check if it's a valid image type subfolder
+		subEntries, subErr := os.ReadDir(filepath.Join(cmd.Dir, imageType))
+		if subErr != nil {
+			continue
+		}
+
+		for _, subEntry := range subEntries {
+			filePath := filepath.Join(cmd.Dir, imageType, subEntry.Name())
+			if subEntry.IsDir() {
+				continue
+			}
+
+			ext := strings.ToLower(filepath.Ext(subEntry.Name()))
+			if ext != ".png" && ext != ".jpg" && ext != ".jpeg" {
+				continue
+			}
+
+			// Upload file
+			imgFile, oerr := os.Open(filePath)
+			if oerr != nil {
+				uploadErrors = append(uploadErrors, fmt.Sprintf("failed to open %s: %v", filePath, oerr))
+				continue
+			}
+
+			if uerr := client.AcquireForUpload(ctx); uerr != nil {
+				_ = imgFile.Close()
+				uploadErrors = append(uploadErrors, fmt.Sprintf("failed to acquire upload lock: %v", uerr))
+				continue
+			}
+
+			locale := "en-US" // default locale
+			uerr := client.DoWithRetry(ctx, func() error {
+				_, ierr := svc.Edits.Images.Upload(pkg, editID, locale, imageType).Media(imgFile).Context(ctx).Do()
+				return ierr
+			})
+			client.ReleaseForUpload()
+			_ = imgFile.Close()
+
+			if uerr != nil {
+				uploadErrors = append(uploadErrors, fmt.Sprintf("failed to upload %s: %v", filePath, uerr))
+			} else {
+				uploadedCount++
+			}
+		}
+	}
+
+	// Commit
+	committed := false
+	if !cmd.NoAutoCommit && uploadedCount > 0 {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		err = client.DoWithRetry(ctx, func() error {
+			_, cerr := svc.Edits.Commit(pkg, editID).Context(ctx).Do()
+			return cerr
+		})
+		client.Release()
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to commit edit: %v", err)).
+				WithHint("Assets were uploaded but the edit could not be committed")
+		}
+		committed = true
+	}
+
+	resultData := map[string]interface{}{
+		"dir":           cmd.Dir,
+		"uploadedCount": uploadedCount,
+		"editId":        editID,
+		"committed":     committed,
+	}
+
+	result := output.NewResult(resultData).WithDuration(time.Since(start)).WithServices("androidpublisher")
+	if len(uploadErrors) > 0 {
+		result = result.WithWarnings(uploadErrors...)
+	}
+
+	return outputResult(result, globals.Output, globals.Pretty)
 }
 
 // PublishAssetsSpecCmd outputs asset validation matrix.
@@ -1024,7 +2856,87 @@ type PublishAssetsSpecCmd struct{}
 
 // Run executes the assets spec command.
 func (cmd *PublishAssetsSpecCmd) Run(globals *Globals) error {
-	return errors.NewAPIError(errors.CodeGeneralError, "publish assets spec not yet implemented")
+	start := time.Now()
+
+	spec := map[string]interface{}{
+		"imageTypes": map[string]interface{}{
+			"icon": map[string]interface{}{
+				"dimensions": "512x512",
+				"format":     "32-bit PNG with alpha",
+				"maxSize":    "1MB",
+				"maxCount":   1,
+			},
+			"featureGraphic": map[string]interface{}{
+				"dimensions": "1024x500",
+				"format":     "JPEG or 24-bit PNG (no alpha)",
+				"maxSize":    "1MB",
+				"maxCount":   1,
+			},
+			"promoGraphic": map[string]interface{}{
+				"dimensions": "180x120",
+				"format":     "JPEG or 24-bit PNG (no alpha)",
+				"maxSize":    "1MB",
+				"maxCount":   1,
+			},
+			"phoneScreenshots": map[string]interface{}{
+				"dimensions": "min 320px, max 3840px per side; 16:9 or 9:16 aspect ratio",
+				"format":     "JPEG or 24-bit PNG (no alpha)",
+				"maxSize":    "8MB per image",
+				"maxCount":   8,
+			},
+			"sevenInchScreenshots": map[string]interface{}{
+				"dimensions": "min 320px, max 3840px per side",
+				"format":     "JPEG or 24-bit PNG (no alpha)",
+				"maxSize":    "8MB per image",
+				"maxCount":   8,
+			},
+			"tenInchScreenshots": map[string]interface{}{
+				"dimensions": "min 320px, max 3840px per side",
+				"format":     "JPEG or 24-bit PNG (no alpha)",
+				"maxSize":    "8MB per image",
+				"maxCount":   8,
+			},
+			"tvScreenshots": map[string]interface{}{
+				"dimensions": "1280x720 or 1920x1080",
+				"format":     "JPEG or 24-bit PNG (no alpha)",
+				"maxSize":    "8MB per image",
+				"maxCount":   8,
+			},
+			"tvBanner": map[string]interface{}{
+				"dimensions": "1280x720",
+				"format":     "JPEG or 24-bit PNG (no alpha)",
+				"maxSize":    "1MB",
+				"maxCount":   1,
+			},
+			"wearScreenshots": map[string]interface{}{
+				"dimensions": "min 384px, max 3840px per side",
+				"format":     "JPEG or 24-bit PNG (no alpha)",
+				"maxSize":    "8MB per image",
+				"maxCount":   8,
+			},
+		},
+		"expansionFiles": map[string]interface{}{
+			"main": map[string]interface{}{
+				"maxSize": "2GB",
+				"format":  "OBB (opaque binary blob)",
+			},
+			"patch": map[string]interface{}{
+				"maxSize": "2GB",
+				"format":  "OBB (opaque binary blob)",
+			},
+		},
+		"artifacts": map[string]interface{}{
+			"apk": map[string]interface{}{
+				"maxSize": "150MB",
+			},
+			"aab": map[string]interface{}{
+				"maxSize": "150MB",
+			},
+		},
+	}
+
+	result := output.NewResult(spec).WithDuration(time.Since(start)).WithServices("androidpublisher")
+	return outputResult(result, globals.Output, globals.Pretty)
 }
 
 // PublishDeobfuscationCmd manages deobfuscation files.
@@ -1045,7 +2957,124 @@ type PublishDeobfuscationUploadCmd struct {
 
 // Run executes the deobfuscation upload command.
 func (cmd *PublishDeobfuscationUploadCmd) Run(globals *Globals) error {
-	return errors.NewAPIError(errors.CodeGeneralError, "publish deobfuscation upload not yet implemented")
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	start := time.Now()
+
+	if globals.Package == "" {
+		return errors.ErrPackageRequired
+	}
+
+	if cmd.VersionCode <= 0 {
+		return errors.NewAPIError(errors.CodeValidationError, "version code is required").
+			WithHint("Specify the version code with --version-code")
+	}
+
+	if cmd.File == "" {
+		return errors.NewAPIError(errors.CodeValidationError, "file is required").
+			WithHint("Provide a deobfuscation file (mapping.txt or native debug symbols)")
+	}
+
+	if cmd.DryRun {
+		result := output.NewResult(map[string]interface{}{
+			"file":        cmd.File,
+			"type":        cmd.Type,
+			"versionCode": cmd.VersionCode,
+			"dryRun":      true,
+		}).WithDuration(time.Since(start)).
+			WithNoOp("dry run - deobfuscation file not uploaded")
+		return outputResult(result, globals.Output, globals.Pretty)
+	}
+
+	client, err := createAPIClient(ctx, globals)
+	if err != nil {
+		return err
+	}
+
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, "failed to initialize publisher service").
+			WithHint("Ensure authentication is configured correctly")
+	}
+
+	pkg := globals.Package
+
+	// Create or reuse edit
+	editID := cmd.EditID
+	if editID == "" {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		var edit *androidpublisher.AppEdit
+		err = client.DoWithRetry(ctx, func() error {
+			edit, err = svc.Edits.Insert(pkg, &androidpublisher.AppEdit{}).Context(ctx).Do()
+			return err
+		})
+		client.Release()
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to create edit: %v", err))
+		}
+		editID = edit.Id
+	}
+
+	// Open file
+	file, err := os.Open(cmd.File)
+	if err != nil {
+		return errors.NewAPIError(errors.CodeValidationError, fmt.Sprintf("failed to open deobfuscation file: %v", err))
+	}
+	defer func() {
+		if cerr := file.Close(); cerr != nil {
+			_ = cerr
+		}
+	}()
+
+	// Upload deobfuscation file
+	if err := client.AcquireForUpload(ctx); err != nil {
+		return err
+	}
+	var uploadResp *androidpublisher.DeobfuscationFilesUploadResponse
+	err = client.DoWithRetry(ctx, func() error {
+		uploadResp, err = svc.Edits.Deobfuscationfiles.Upload(pkg, editID, cmd.VersionCode, cmd.Type).Media(file).Context(ctx).Do()
+		return err
+	})
+	client.ReleaseForUpload()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to upload deobfuscation file: %v", err))
+	}
+
+	// Commit
+	committed := false
+	if !cmd.NoAutoCommit {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		err = client.DoWithRetry(ctx, func() error {
+			_, cerr := svc.Edits.Commit(pkg, editID).Context(ctx).Do()
+			return cerr
+		})
+		client.Release()
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to commit edit: %v", err)).
+				WithHint("The deobfuscation file was uploaded but the edit could not be committed")
+		}
+		committed = true
+	}
+
+	data := map[string]interface{}{
+		"file":        cmd.File,
+		"type":        cmd.Type,
+		"versionCode": cmd.VersionCode,
+		"editId":      editID,
+		"committed":   committed,
+	}
+	if uploadResp != nil && uploadResp.DeobfuscationFile != nil {
+		data["symbolType"] = uploadResp.DeobfuscationFile.SymbolType
+	}
+
+	result := output.NewResult(data).WithDuration(time.Since(start)).WithServices("androidpublisher")
+	return outputResult(result, globals.Output, globals.Pretty)
 }
 
 // PublishTestersCmd manages testers.
@@ -1067,7 +3096,135 @@ type PublishTestersAddCmd struct {
 
 // Run executes the testers add command.
 func (cmd *PublishTestersAddCmd) Run(globals *Globals) error {
-	return errors.NewAPIError(errors.CodeGeneralError, "publish testers add not yet implemented")
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	start := time.Now()
+
+	if globals.Package == "" {
+		return errors.ErrPackageRequired
+	}
+
+	if len(cmd.Groups) == 0 {
+		return errors.NewAPIError(errors.CodeValidationError, "at least one group is required").
+			WithHint("Specify Google Group email addresses with --groups")
+	}
+
+	if cmd.DryRun {
+		result := output.NewResult(map[string]interface{}{
+			"track":  cmd.Track,
+			"groups": cmd.Groups,
+			"action": "add",
+			"dryRun": true,
+		}).WithDuration(time.Since(start)).
+			WithNoOp("dry run - testers not added")
+		return outputResult(result, globals.Output, globals.Pretty)
+	}
+
+	client, err := createAPIClient(ctx, globals)
+	if err != nil {
+		return err
+	}
+
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, "failed to initialize publisher service").
+			WithHint("Ensure authentication is configured correctly")
+	}
+
+	pkg := globals.Package
+
+	// Create or reuse edit
+	editID := cmd.EditID
+	if editID == "" {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		var edit *androidpublisher.AppEdit
+		err = client.DoWithRetry(ctx, func() error {
+			edit, err = svc.Edits.Insert(pkg, &androidpublisher.AppEdit{}).Context(ctx).Do()
+			return err
+		})
+		client.Release()
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to create edit: %v", err))
+		}
+		editID = edit.Id
+	}
+
+	// Get current testers
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+	var testers *androidpublisher.Testers
+	err = client.DoWithRetry(ctx, func() error {
+		testers, err = svc.Edits.Testers.Get(pkg, editID, cmd.Track).Context(ctx).Do()
+		return err
+	})
+	client.Release()
+	if err != nil {
+		// If 404, start with empty testers
+		if apiErr, ok := err.(*googleapi.Error); ok && apiErr.Code == 404 {
+			testers = &androidpublisher.Testers{}
+		} else {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to get current testers: %v", err))
+		}
+	}
+
+	// Append new groups (avoid duplicates)
+	existingGroups := make(map[string]bool)
+	for _, g := range testers.GoogleGroups {
+		existingGroups[g] = true
+	}
+	for _, g := range cmd.Groups {
+		if !existingGroups[g] {
+			testers.GoogleGroups = append(testers.GoogleGroups, g)
+		}
+	}
+
+	// Update testers
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+	var updatedTesters *androidpublisher.Testers
+	err = client.DoWithRetry(ctx, func() error {
+		updatedTesters, err = svc.Edits.Testers.Update(pkg, editID, cmd.Track, testers).Context(ctx).Do()
+		return err
+	})
+	client.Release()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to update testers: %v", err))
+	}
+
+	// Commit
+	committed := false
+	if !cmd.NoAutoCommit {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		err = client.DoWithRetry(ctx, func() error {
+			_, cerr := svc.Edits.Commit(pkg, editID).Context(ctx).Do()
+			return cerr
+		})
+		client.Release()
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to commit edit: %v", err)).
+				WithHint("Testers were added but the edit could not be committed")
+		}
+		committed = true
+	}
+
+	result := output.NewResult(map[string]interface{}{
+		"track":        cmd.Track,
+		"addedGroups":  cmd.Groups,
+		"googleGroups": updatedTesters.GoogleGroups,
+		"editId":       editID,
+		"committed":    committed,
+	}).WithDuration(time.Since(start)).
+		WithServices("androidpublisher")
+
+	return outputResult(result, globals.Output, globals.Pretty)
 }
 
 // PublishTestersRemoveCmd removes tester groups.
@@ -1081,7 +3238,132 @@ type PublishTestersRemoveCmd struct {
 
 // Run executes the testers remove command.
 func (cmd *PublishTestersRemoveCmd) Run(globals *Globals) error {
-	return errors.NewAPIError(errors.CodeGeneralError, "publish testers remove not yet implemented")
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	start := time.Now()
+
+	if globals.Package == "" {
+		return errors.ErrPackageRequired
+	}
+
+	if len(cmd.Groups) == 0 {
+		return errors.NewAPIError(errors.CodeValidationError, "at least one group is required").
+			WithHint("Specify Google Group email addresses with --groups")
+	}
+
+	if cmd.DryRun {
+		result := output.NewResult(map[string]interface{}{
+			"track":  cmd.Track,
+			"groups": cmd.Groups,
+			"action": "remove",
+			"dryRun": true,
+		}).WithDuration(time.Since(start)).
+			WithNoOp("dry run - testers not removed")
+		return outputResult(result, globals.Output, globals.Pretty)
+	}
+
+	client, err := createAPIClient(ctx, globals)
+	if err != nil {
+		return err
+	}
+
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, "failed to initialize publisher service").
+			WithHint("Ensure authentication is configured correctly")
+	}
+
+	pkg := globals.Package
+
+	// Create or reuse edit
+	editID := cmd.EditID
+	if editID == "" {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		var edit *androidpublisher.AppEdit
+		err = client.DoWithRetry(ctx, func() error {
+			edit, err = svc.Edits.Insert(pkg, &androidpublisher.AppEdit{}).Context(ctx).Do()
+			return err
+		})
+		client.Release()
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to create edit: %v", err))
+		}
+		editID = edit.Id
+	}
+
+	// Get current testers
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+	var testers *androidpublisher.Testers
+	err = client.DoWithRetry(ctx, func() error {
+		testers, err = svc.Edits.Testers.Get(pkg, editID, cmd.Track).Context(ctx).Do()
+		return err
+	})
+	client.Release()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to get current testers: %v", err))
+	}
+
+	// Remove specified groups
+	removeSet := make(map[string]bool)
+	for _, g := range cmd.Groups {
+		removeSet[g] = true
+	}
+	var filteredGroups []string
+	for _, g := range testers.GoogleGroups {
+		if !removeSet[g] {
+			filteredGroups = append(filteredGroups, g)
+		}
+	}
+	testers.GoogleGroups = filteredGroups
+
+	// Update testers
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+	var updatedTesters *androidpublisher.Testers
+	err = client.DoWithRetry(ctx, func() error {
+		updatedTesters, err = svc.Edits.Testers.Update(pkg, editID, cmd.Track, testers).Context(ctx).Do()
+		return err
+	})
+	client.Release()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to update testers: %v", err))
+	}
+
+	// Commit
+	committed := false
+	if !cmd.NoAutoCommit {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		err = client.DoWithRetry(ctx, func() error {
+			_, cerr := svc.Edits.Commit(pkg, editID).Context(ctx).Do()
+			return cerr
+		})
+		client.Release()
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to commit edit: %v", err)).
+				WithHint("Testers were removed but the edit could not be committed")
+		}
+		committed = true
+	}
+
+	result := output.NewResult(map[string]interface{}{
+		"track":         cmd.Track,
+		"removedGroups": cmd.Groups,
+		"googleGroups":  updatedTesters.GoogleGroups,
+		"editId":        editID,
+		"committed":     committed,
+	}).WithDuration(time.Since(start)).
+		WithServices("androidpublisher")
+
+	return outputResult(result, globals.Output, globals.Pretty)
 }
 
 // PublishTestersListCmd lists tester groups.
@@ -1091,7 +3373,88 @@ type PublishTestersListCmd struct {
 
 // Run executes the testers list command.
 func (cmd *PublishTestersListCmd) Run(globals *Globals) error {
-	return errors.NewAPIError(errors.CodeGeneralError, "publish testers list not yet implemented")
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	start := time.Now()
+
+	if globals.Package == "" {
+		return errors.ErrPackageRequired
+	}
+
+	client, err := createAPIClient(ctx, globals)
+	if err != nil {
+		return err
+	}
+
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, "failed to initialize publisher service").
+			WithHint("Ensure authentication is configured correctly")
+	}
+
+	pkg := globals.Package
+
+	// Create a temporary edit
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+
+	var edit *androidpublisher.AppEdit
+	err = client.DoWithRetry(ctx, func() error {
+		edit, err = svc.Edits.Insert(pkg, &androidpublisher.AppEdit{}).Context(ctx).Do()
+		return err
+	})
+	if err != nil {
+		client.Release()
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to create edit: %v", err))
+	}
+	editID := edit.Id
+
+	tracks := []string{cmd.Track}
+	if cmd.Track == "" {
+		tracks = []string{"internal", "alpha", "beta", "production"}
+	}
+
+	type trackTesters struct {
+		Track        string   `json:"track"`
+		GoogleGroups []string `json:"googleGroups"`
+	}
+
+	var allTesters []trackTesters
+	for _, track := range tracks {
+		var testers *androidpublisher.Testers
+		err = client.DoWithRetry(ctx, func() error {
+			testers, err = svc.Edits.Testers.Get(pkg, editID, track).Context(ctx).Do()
+			return err
+		})
+		if err != nil {
+			// Skip tracks with errors (e.g., no testers configured)
+			if apiErr, ok := err.(*googleapi.Error); ok && apiErr.Code == 404 {
+				continue
+			}
+			continue
+		}
+		allTesters = append(allTesters, trackTesters{
+			Track:        track,
+			GoogleGroups: testers.GoogleGroups,
+		})
+	}
+
+	// Clean up edit
+	_ = client.DoWithRetry(ctx, func() error {
+		return svc.Edits.Delete(pkg, editID).Context(ctx).Do()
+	})
+	client.Release()
+
+	data := map[string]interface{}{
+		"testers": allTesters,
+		"count":   len(allTesters),
+	}
+
+	result := output.NewResult(data).WithDuration(time.Since(start)).WithServices("androidpublisher")
+	return outputResult(result, globals.Output, globals.Pretty)
 }
 
 // PublishTestersGetCmd gets tester groups for a track.
@@ -1101,7 +3464,77 @@ type PublishTestersGetCmd struct {
 
 // Run executes the testers get command.
 func (cmd *PublishTestersGetCmd) Run(globals *Globals) error {
-	return errors.NewAPIError(errors.CodeGeneralError, "publish testers get not yet implemented")
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	start := time.Now()
+
+	if globals.Package == "" {
+		return errors.ErrPackageRequired
+	}
+
+	if cmd.Track == "" {
+		return errors.NewAPIError(errors.CodeValidationError, "track is required").
+			WithHint("Specify a track with --track, e.g., --track=internal")
+	}
+
+	client, err := createAPIClient(ctx, globals)
+	if err != nil {
+		return err
+	}
+
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, "failed to initialize publisher service").
+			WithHint("Ensure authentication is configured correctly")
+	}
+
+	pkg := globals.Package
+
+	// Create a temporary edit
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+
+	var edit *androidpublisher.AppEdit
+	err = client.DoWithRetry(ctx, func() error {
+		edit, err = svc.Edits.Insert(pkg, &androidpublisher.AppEdit{}).Context(ctx).Do()
+		return err
+	})
+	if err != nil {
+		client.Release()
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to create edit: %v", err))
+	}
+	editID := edit.Id
+
+	// Get testers
+	var testers *androidpublisher.Testers
+	err = client.DoWithRetry(ctx, func() error {
+		testers, err = svc.Edits.Testers.Get(pkg, editID, cmd.Track).Context(ctx).Do()
+		return err
+	})
+
+	// Clean up edit
+	_ = client.DoWithRetry(ctx, func() error {
+		return svc.Edits.Delete(pkg, editID).Context(ctx).Do()
+	})
+	client.Release()
+
+	if err != nil {
+		if apiErr, ok := err.(*googleapi.Error); ok && apiErr.Code == 404 {
+			return errors.NewAPIError(errors.CodeNotFound, fmt.Sprintf("no testers found for track: %s", cmd.Track))
+		}
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to get testers: %v", err))
+	}
+
+	data := map[string]interface{}{
+		"track":        cmd.Track,
+		"googleGroups": testers.GoogleGroups,
+	}
+
+	result := output.NewResult(data).WithDuration(time.Since(start)).WithServices("androidpublisher")
+	return outputResult(result, globals.Output, globals.Pretty)
 }
 
 // PublishBuildsCmd manages uploaded builds.
@@ -1120,7 +3553,115 @@ type PublishBuildsListCmd struct {
 
 // Run executes the builds list command.
 func (cmd *PublishBuildsListCmd) Run(globals *Globals) error {
-	return errors.NewAPIError(errors.CodeGeneralError, "publish builds list not yet implemented")
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	start := time.Now()
+
+	if globals.Package == "" {
+		return errors.ErrPackageRequired
+	}
+
+	client, err := createAPIClient(ctx, globals)
+	if err != nil {
+		return err
+	}
+
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, "failed to initialize publisher service").
+			WithHint("Ensure authentication is configured correctly")
+	}
+
+	pkg := globals.Package
+
+	// Create or reuse a temporary edit
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+
+	editID := cmd.EditID
+	createdEdit := false
+	if editID == "" {
+		var edit *androidpublisher.AppEdit
+		err = client.DoWithRetry(ctx, func() error {
+			edit, err = svc.Edits.Insert(pkg, &androidpublisher.AppEdit{}).Context(ctx).Do()
+			return err
+		})
+		if err != nil {
+			client.Release()
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to create edit: %v", err))
+		}
+		editID = edit.Id
+		createdEdit = true
+	}
+
+	type buildInfo struct {
+		VersionCode int64  `json:"versionCode"`
+		Type        string `json:"type"`
+		SHA1        string `json:"sha1,omitempty"`
+		SHA256      string `json:"sha256,omitempty"`
+	}
+
+	var builds []buildInfo
+
+	// List APKs
+	if cmd.Type == "all" || cmd.Type == "apk" {
+		var apkList *androidpublisher.ApksListResponse
+		err = client.DoWithRetry(ctx, func() error {
+			apkList, err = svc.Edits.Apks.List(pkg, editID).Context(ctx).Do()
+			return err
+		})
+		if err == nil && apkList != nil {
+			for _, apk := range apkList.Apks {
+				b := buildInfo{
+					VersionCode: apk.VersionCode,
+					Type:        "apk",
+				}
+				if apk.Binary != nil {
+					b.SHA1 = apk.Binary.Sha1
+					b.SHA256 = apk.Binary.Sha256
+				}
+				builds = append(builds, b)
+			}
+		}
+	}
+
+	// List bundles
+	if cmd.Type == "all" || cmd.Type == "bundle" {
+		var bundleList *androidpublisher.BundlesListResponse
+		err = client.DoWithRetry(ctx, func() error {
+			bundleList, err = svc.Edits.Bundles.List(pkg, editID).Context(ctx).Do()
+			return err
+		})
+		if err == nil && bundleList != nil {
+			for _, bundle := range bundleList.Bundles {
+				builds = append(builds, buildInfo{
+					VersionCode: bundle.VersionCode,
+					Type:        "aab",
+					SHA1:        bundle.Sha1,
+					SHA256:      bundle.Sha256,
+				})
+			}
+		}
+	}
+
+	// Clean up temporary edit
+	if createdEdit {
+		_ = client.DoWithRetry(ctx, func() error {
+			return svc.Edits.Delete(pkg, editID).Context(ctx).Do()
+		})
+	}
+	client.Release()
+
+	data := map[string]interface{}{
+		"builds": builds,
+		"count":  len(builds),
+	}
+
+	result := output.NewResult(data).WithDuration(time.Since(start)).WithServices("androidpublisher")
+	return outputResult(result, globals.Output, globals.Pretty)
 }
 
 // PublishBuildsGetCmd gets build details.
@@ -1132,7 +3673,119 @@ type PublishBuildsGetCmd struct {
 
 // Run executes the builds get command.
 func (cmd *PublishBuildsGetCmd) Run(globals *Globals) error {
-	return errors.NewAPIError(errors.CodeGeneralError, "publish builds get not yet implemented")
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	start := time.Now()
+
+	if globals.Package == "" {
+		return errors.ErrPackageRequired
+	}
+
+	if cmd.VersionCode <= 0 {
+		return errors.NewAPIError(errors.CodeValidationError, "version code is required")
+	}
+
+	client, err := createAPIClient(ctx, globals)
+	if err != nil {
+		return err
+	}
+
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, "failed to initialize publisher service").
+			WithHint("Ensure authentication is configured correctly")
+	}
+
+	pkg := globals.Package
+
+	// Create or reuse a temporary edit
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+
+	editID := cmd.EditID
+	createdEdit := false
+	if editID == "" {
+		var edit *androidpublisher.AppEdit
+		err = client.DoWithRetry(ctx, func() error {
+			edit, err = svc.Edits.Insert(pkg, &androidpublisher.AppEdit{}).Context(ctx).Do()
+			return err
+		})
+		if err != nil {
+			client.Release()
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to create edit: %v", err))
+		}
+		editID = edit.Id
+		createdEdit = true
+	}
+
+	var found bool
+	var buildData map[string]interface{}
+
+	// Search APKs
+	if cmd.Type == "all" || cmd.Type == "apk" {
+		var apkList *androidpublisher.ApksListResponse
+		err = client.DoWithRetry(ctx, func() error {
+			apkList, err = svc.Edits.Apks.List(pkg, editID).Context(ctx).Do()
+			return err
+		})
+		if err == nil && apkList != nil {
+			for _, apk := range apkList.Apks {
+				if apk.VersionCode == cmd.VersionCode {
+					buildData = map[string]interface{}{
+						"versionCode": apk.VersionCode,
+						"type":        "apk",
+					}
+					if apk.Binary != nil {
+						buildData["sha1"] = apk.Binary.Sha1
+						buildData["sha256"] = apk.Binary.Sha256
+					}
+					found = true
+					break
+				}
+			}
+		}
+	}
+
+	// Search bundles if not found yet
+	if !found && (cmd.Type == "all" || cmd.Type == "bundle") {
+		var bundleList *androidpublisher.BundlesListResponse
+		err = client.DoWithRetry(ctx, func() error {
+			bundleList, err = svc.Edits.Bundles.List(pkg, editID).Context(ctx).Do()
+			return err
+		})
+		if err == nil && bundleList != nil {
+			for _, bundle := range bundleList.Bundles {
+				if bundle.VersionCode == cmd.VersionCode {
+					buildData = map[string]interface{}{
+						"versionCode": bundle.VersionCode,
+						"type":        "aab",
+						"sha1":        bundle.Sha1,
+						"sha256":      bundle.Sha256,
+					}
+					found = true
+					break
+				}
+			}
+		}
+	}
+
+	// Clean up temporary edit
+	if createdEdit {
+		_ = client.DoWithRetry(ctx, func() error {
+			return svc.Edits.Delete(pkg, editID).Context(ctx).Do()
+		})
+	}
+	client.Release()
+
+	if !found {
+		return errors.NewAPIError(errors.CodeNotFound, fmt.Sprintf("build not found for version code: %d", cmd.VersionCode))
+	}
+
+	result := output.NewResult(buildData).WithDuration(time.Since(start)).WithServices("androidpublisher")
+	return outputResult(result, globals.Output, globals.Pretty)
 }
 
 // PublishBuildsExpireCmd expires a build from tracks.
@@ -1146,7 +3799,138 @@ type PublishBuildsExpireCmd struct {
 
 // Run executes the builds expire command.
 func (cmd *PublishBuildsExpireCmd) Run(globals *Globals) error {
-	return errors.NewAPIError(errors.CodeGeneralError, "publish builds expire not yet implemented")
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	start := time.Now()
+
+	if globals.Package == "" {
+		return errors.ErrPackageRequired
+	}
+
+	if cmd.VersionCode <= 0 {
+		return errors.NewAPIError(errors.CodeValidationError, "version code is required")
+	}
+
+	if !cmd.Confirm {
+		return errors.NewAPIError(errors.CodeValidationError, "expire requires confirmation").
+			WithHint("Use --confirm to confirm this destructive operation")
+	}
+
+	if cmd.DryRun {
+		result := output.NewResult(map[string]interface{}{
+			"versionCode": cmd.VersionCode,
+			"action":      "expire",
+			"dryRun":      true,
+		}).WithDuration(time.Since(start)).
+			WithNoOp("dry run - build not expired")
+		return outputResult(result, globals.Output, globals.Pretty)
+	}
+
+	client, err := createAPIClient(ctx, globals)
+	if err != nil {
+		return err
+	}
+
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, "failed to initialize publisher service").
+			WithHint("Ensure authentication is configured correctly")
+	}
+
+	pkg := globals.Package
+
+	// Create or reuse edit
+	editID := cmd.EditID
+	if editID == "" {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		var edit *androidpublisher.AppEdit
+		err = client.DoWithRetry(ctx, func() error {
+			edit, err = svc.Edits.Insert(pkg, &androidpublisher.AppEdit{}).Context(ctx).Do()
+			return err
+		})
+		client.Release()
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to create edit: %v", err))
+		}
+		editID = edit.Id
+	}
+
+	// List all tracks and remove the version code from any releases
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+	var tracksList *androidpublisher.TracksListResponse
+	err = client.DoWithRetry(ctx, func() error {
+		tracksList, err = svc.Edits.Tracks.List(pkg, editID).Context(ctx).Do()
+		return err
+	})
+	client.Release()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to list tracks: %v", err))
+	}
+
+	var modifiedTracks []string
+	for _, track := range tracksList.Tracks {
+		modified := false
+		for _, release := range track.Releases {
+			var filteredCodes []int64
+			for _, vc := range release.VersionCodes {
+				if vc != cmd.VersionCode {
+					filteredCodes = append(filteredCodes, vc)
+				} else {
+					modified = true
+				}
+			}
+			release.VersionCodes = filteredCodes
+		}
+
+		if modified {
+			if err := client.Acquire(ctx); err != nil {
+				return err
+			}
+			err = client.DoWithRetry(ctx, func() error {
+				_, uerr := svc.Edits.Tracks.Update(pkg, editID, track.Track, track).Context(ctx).Do()
+				return uerr
+			})
+			client.Release()
+			if err != nil {
+				return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to update track %s: %v", track.Track, err))
+			}
+			modifiedTracks = append(modifiedTracks, track.Track)
+		}
+	}
+
+	// Commit
+	committed := false
+	if !cmd.NoAutoCommit && len(modifiedTracks) > 0 {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		err = client.DoWithRetry(ctx, func() error {
+			_, cerr := svc.Edits.Commit(pkg, editID).Context(ctx).Do()
+			return cerr
+		})
+		client.Release()
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to commit edit: %v", err)).
+				WithHint("The version code was removed from tracks but the edit could not be committed")
+		}
+		committed = true
+	}
+
+	result := output.NewResult(map[string]interface{}{
+		"versionCode":    cmd.VersionCode,
+		"modifiedTracks": modifiedTracks,
+		"editId":         editID,
+		"committed":      committed,
+	}).WithDuration(time.Since(start)).
+		WithServices("androidpublisher")
+
+	return outputResult(result, globals.Output, globals.Pretty)
 }
 
 // PublishBuildsExpireAllCmd expires all builds from tracks.
@@ -1159,7 +3943,130 @@ type PublishBuildsExpireAllCmd struct {
 
 // Run executes the builds expire-all command.
 func (cmd *PublishBuildsExpireAllCmd) Run(globals *Globals) error {
-	return errors.NewAPIError(errors.CodeGeneralError, "publish builds expire-all not yet implemented")
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	start := time.Now()
+
+	if globals.Package == "" {
+		return errors.ErrPackageRequired
+	}
+
+	if !cmd.Confirm {
+		return errors.NewAPIError(errors.CodeValidationError, "expire-all requires confirmation").
+			WithHint("Use --confirm to confirm this destructive operation")
+	}
+
+	if cmd.DryRun {
+		result := output.NewResult(map[string]interface{}{
+			"action": "expire-all",
+			"dryRun": true,
+		}).WithDuration(time.Since(start)).
+			WithNoOp("dry run - no builds expired")
+		return outputResult(result, globals.Output, globals.Pretty)
+	}
+
+	client, err := createAPIClient(ctx, globals)
+	if err != nil {
+		return err
+	}
+
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, "failed to initialize publisher service").
+			WithHint("Ensure authentication is configured correctly")
+	}
+
+	pkg := globals.Package
+
+	// Create or reuse edit
+	editID := cmd.EditID
+	if editID == "" {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		var edit *androidpublisher.AppEdit
+		err = client.DoWithRetry(ctx, func() error {
+			edit, err = svc.Edits.Insert(pkg, &androidpublisher.AppEdit{}).Context(ctx).Do()
+			return err
+		})
+		client.Release()
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to create edit: %v", err))
+		}
+		editID = edit.Id
+	}
+
+	// List all tracks and clear version codes from draft releases
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+	var tracksList *androidpublisher.TracksListResponse
+	err = client.DoWithRetry(ctx, func() error {
+		tracksList, err = svc.Edits.Tracks.List(pkg, editID).Context(ctx).Do()
+		return err
+	})
+	client.Release()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to list tracks: %v", err))
+	}
+
+	var modifiedTracks []string
+	var expiredCount int
+	for _, track := range tracksList.Tracks {
+		modified := false
+		for _, release := range track.Releases {
+			if release.Status == "draft" && len(release.VersionCodes) > 0 {
+				expiredCount += len(release.VersionCodes)
+				release.VersionCodes = nil
+				modified = true
+			}
+		}
+
+		if modified {
+			if err := client.Acquire(ctx); err != nil {
+				return err
+			}
+			err = client.DoWithRetry(ctx, func() error {
+				_, uerr := svc.Edits.Tracks.Update(pkg, editID, track.Track, track).Context(ctx).Do()
+				return uerr
+			})
+			client.Release()
+			if err != nil {
+				return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to update track %s: %v", track.Track, err))
+			}
+			modifiedTracks = append(modifiedTracks, track.Track)
+		}
+	}
+
+	// Commit
+	committed := false
+	if !cmd.NoAutoCommit && len(modifiedTracks) > 0 {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		err = client.DoWithRetry(ctx, func() error {
+			_, cerr := svc.Edits.Commit(pkg, editID).Context(ctx).Do()
+			return cerr
+		})
+		client.Release()
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to commit edit: %v", err)).
+				WithHint("Builds were expired but the edit could not be committed")
+		}
+		committed = true
+	}
+
+	result := output.NewResult(map[string]interface{}{
+		"expiredCount":   expiredCount,
+		"modifiedTracks": modifiedTracks,
+		"editId":         editID,
+		"committed":      committed,
+	}).WithDuration(time.Since(start)).
+		WithServices("androidpublisher")
+
+	return outputResult(result, globals.Output, globals.Pretty)
 }
 
 // PublishBetaGroupsCmd manages beta groups (ASC compatibility).
@@ -1180,7 +4087,87 @@ type PublishBetaGroupsListCmd struct {
 
 // Run executes the beta-groups list command.
 func (cmd *PublishBetaGroupsListCmd) Run(globals *Globals) error {
-	return errors.NewAPIError(errors.CodeGeneralError, "publish beta-groups list not yet implemented")
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	start := time.Now()
+
+	if globals.Package == "" {
+		return errors.ErrPackageRequired
+	}
+
+	client, err := createAPIClient(ctx, globals)
+	if err != nil {
+		return err
+	}
+
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, "failed to initialize publisher service").
+			WithHint("Ensure authentication is configured correctly")
+	}
+
+	pkg := globals.Package
+
+	// Create a temporary edit
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+
+	var edit *androidpublisher.AppEdit
+	err = client.DoWithRetry(ctx, func() error {
+		edit, err = svc.Edits.Insert(pkg, &androidpublisher.AppEdit{}).Context(ctx).Do()
+		return err
+	})
+	if err != nil {
+		client.Release()
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to create edit: %v", err))
+	}
+	editID := edit.Id
+
+	// Beta groups map to testing tracks
+	testingTracks := []string{"internal", "alpha", "beta"}
+	if cmd.Track != "" {
+		testingTracks = []string{cmd.Track}
+	}
+
+	type betaGroup struct {
+		Name         string   `json:"name"`
+		Track        string   `json:"track"`
+		GoogleGroups []string `json:"googleGroups"`
+	}
+
+	var groups []betaGroup
+	for _, track := range testingTracks {
+		var testers *androidpublisher.Testers
+		err = client.DoWithRetry(ctx, func() error {
+			testers, err = svc.Edits.Testers.Get(pkg, editID, track).Context(ctx).Do()
+			return err
+		})
+		if err != nil {
+			continue
+		}
+		groups = append(groups, betaGroup{
+			Name:         track,
+			Track:        track,
+			GoogleGroups: testers.GoogleGroups,
+		})
+	}
+
+	// Clean up edit
+	_ = client.DoWithRetry(ctx, func() error {
+		return svc.Edits.Delete(pkg, editID).Context(ctx).Do()
+	})
+	client.Release()
+
+	data := map[string]interface{}{
+		"betaGroups": groups,
+		"count":      len(groups),
+	}
+
+	result := output.NewResult(data).WithDuration(time.Since(start)).WithServices("androidpublisher")
+	return outputResult(result, globals.Output, globals.Pretty)
 }
 
 // PublishBetaGroupsGetCmd gets beta group details.
@@ -1190,7 +4177,97 @@ type PublishBetaGroupsGetCmd struct {
 
 // Run executes the beta-groups get command.
 func (cmd *PublishBetaGroupsGetCmd) Run(globals *Globals) error {
-	return errors.NewAPIError(errors.CodeGeneralError, "publish beta-groups get not yet implemented")
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	start := time.Now()
+
+	if globals.Package == "" {
+		return errors.ErrPackageRequired
+	}
+
+	if cmd.Group == "" {
+		return errors.NewAPIError(errors.CodeValidationError, "group name is required").
+			WithHint("Specify a beta group (track) name: internal, alpha, or beta")
+	}
+
+	client, err := createAPIClient(ctx, globals)
+	if err != nil {
+		return err
+	}
+
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, "failed to initialize publisher service").
+			WithHint("Ensure authentication is configured correctly")
+	}
+
+	pkg := globals.Package
+
+	// Create a temporary edit
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+
+	var edit *androidpublisher.AppEdit
+	err = client.DoWithRetry(ctx, func() error {
+		edit, err = svc.Edits.Insert(pkg, &androidpublisher.AppEdit{}).Context(ctx).Do()
+		return err
+	})
+	if err != nil {
+		client.Release()
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to create edit: %v", err))
+	}
+	editID := edit.Id
+
+	// Get testers for the track
+	var testers *androidpublisher.Testers
+	err = client.DoWithRetry(ctx, func() error {
+		testers, err = svc.Edits.Testers.Get(pkg, editID, cmd.Group).Context(ctx).Do()
+		return err
+	})
+
+	// Get track info
+	var track *androidpublisher.Track
+	trackErr := client.DoWithRetry(ctx, func() error {
+		track, err = svc.Edits.Tracks.Get(pkg, editID, cmd.Group).Context(ctx).Do()
+		return err
+	})
+
+	// Clean up edit
+	_ = client.DoWithRetry(ctx, func() error {
+		return svc.Edits.Delete(pkg, editID).Context(ctx).Do()
+	})
+	client.Release()
+
+	if err != nil {
+		if apiErr, ok := err.(*googleapi.Error); ok && apiErr.Code == 404 {
+			return errors.NewAPIError(errors.CodeNotFound, fmt.Sprintf("beta group not found: %s", cmd.Group))
+		}
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to get beta group: %v", err))
+	}
+
+	data := map[string]interface{}{
+		"name":         cmd.Group,
+		"track":        cmd.Group,
+		"googleGroups": testers.GoogleGroups,
+	}
+
+	if trackErr == nil && track != nil && len(track.Releases) > 0 {
+		var releases []map[string]interface{}
+		for _, r := range track.Releases {
+			releases = append(releases, map[string]interface{}{
+				"status":       r.Status,
+				"versionCodes": r.VersionCodes,
+				"name":         r.Name,
+			})
+		}
+		data["releases"] = releases
+	}
+
+	result := output.NewResult(data).WithDuration(time.Since(start)).WithServices("androidpublisher")
+	return outputResult(result, globals.Output, globals.Pretty)
 }
 
 // PublishBetaGroupsCreateCmd creates a beta group.
@@ -1204,7 +4281,108 @@ type PublishBetaGroupsCreateCmd struct {
 
 // Run executes the beta-groups create command.
 func (cmd *PublishBetaGroupsCreateCmd) Run(globals *Globals) error {
-	return errors.NewAPIError(errors.CodeGeneralError, "publish beta-groups create not yet implemented")
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	start := time.Now()
+
+	if globals.Package == "" {
+		return errors.ErrPackageRequired
+	}
+
+	if cmd.Group == "" {
+		return errors.NewAPIError(errors.CodeValidationError, "group name is required").
+			WithHint("Specify a beta group (track) name: internal, alpha, or beta")
+	}
+
+	if cmd.DryRun {
+		result := output.NewResult(map[string]interface{}{
+			"group":  cmd.Group,
+			"groups": cmd.Groups,
+			"dryRun": true,
+		}).WithDuration(time.Since(start)).
+			WithNoOp("dry run - beta group not created")
+		return outputResult(result, globals.Output, globals.Pretty)
+	}
+
+	client, err := createAPIClient(ctx, globals)
+	if err != nil {
+		return err
+	}
+
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, "failed to initialize publisher service").
+			WithHint("Ensure authentication is configured correctly")
+	}
+
+	pkg := globals.Package
+
+	// Create or reuse edit
+	editID := cmd.EditID
+	if editID == "" {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		var edit *androidpublisher.AppEdit
+		err = client.DoWithRetry(ctx, func() error {
+			edit, err = svc.Edits.Insert(pkg, &androidpublisher.AppEdit{}).Context(ctx).Do()
+			return err
+		})
+		client.Release()
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to create edit: %v", err))
+		}
+		editID = edit.Id
+	}
+
+	// Set up testers for the track
+	testers := &androidpublisher.Testers{
+		GoogleGroups: cmd.Groups,
+	}
+
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+	var updatedTesters *androidpublisher.Testers
+	err = client.DoWithRetry(ctx, func() error {
+		updatedTesters, err = svc.Edits.Testers.Update(pkg, editID, cmd.Group, testers).Context(ctx).Do()
+		return err
+	})
+	client.Release()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to create beta group: %v", err))
+	}
+
+	// Commit
+	committed := false
+	if !cmd.NoAutoCommit {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		err = client.DoWithRetry(ctx, func() error {
+			_, cerr := svc.Edits.Commit(pkg, editID).Context(ctx).Do()
+			return cerr
+		})
+		client.Release()
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to commit edit: %v", err)).
+				WithHint("The beta group was created but the edit could not be committed")
+		}
+		committed = true
+	}
+
+	result := output.NewResult(map[string]interface{}{
+		"name":         cmd.Group,
+		"track":        cmd.Group,
+		"googleGroups": updatedTesters.GoogleGroups,
+		"editId":       editID,
+		"committed":    committed,
+	}).WithDuration(time.Since(start)).
+		WithServices("androidpublisher")
+
+	return outputResult(result, globals.Output, globals.Pretty)
 }
 
 // PublishBetaGroupsUpdateCmd updates beta group testers.
@@ -1218,7 +4396,91 @@ type PublishBetaGroupsUpdateCmd struct {
 
 // Run executes the beta-groups update command.
 func (cmd *PublishBetaGroupsUpdateCmd) Run(globals *Globals) error {
-	return errors.NewAPIError(errors.CodeGeneralError, "publish beta-groups update not yet implemented")
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if globals.Package == "" {
+		return errors.ErrPackageRequired
+	}
+	start := time.Now()
+	pkg := globals.Package
+
+	if cmd.DryRun {
+		result := output.NewResult(map[string]interface{}{
+			"group":        cmd.Group,
+			"googleGroups": cmd.Groups,
+			"dryRun":       true,
+		}).WithNoOp("dry run - no beta group updated")
+		return outputResult(result, globals.Output, globals.Pretty)
+	}
+
+	client, err := createAPIClient(ctx, globals)
+	if err != nil {
+		return err
+	}
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, "failed to initialize publisher service")
+	}
+
+	// Create edit
+	editID := cmd.EditID
+	if editID == "" {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		var edit *androidpublisher.AppEdit
+		err = client.DoWithRetry(ctx, func() error {
+			edit, err = svc.Edits.Insert(pkg, &androidpublisher.AppEdit{}).Context(ctx).Do()
+			return err
+		})
+		client.Release()
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to create edit: %v", err))
+		}
+		editID = edit.Id
+	}
+
+	// Update testers for the track
+	testers := &androidpublisher.Testers{
+		GoogleGroups: cmd.Groups,
+	}
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+	var updatedTesters *androidpublisher.Testers
+	err = client.DoWithRetry(ctx, func() error {
+		updatedTesters, err = svc.Edits.Testers.Update(pkg, editID, cmd.Group, testers).Context(ctx).Do()
+		return err
+	})
+	client.Release()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to update beta group: %v", err))
+	}
+
+	committed := false
+	if !cmd.NoAutoCommit {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		err = client.DoWithRetry(ctx, func() error {
+			_, cerr := svc.Edits.Commit(pkg, editID).Context(ctx).Do()
+			return cerr
+		})
+		client.Release()
+		if err == nil {
+			committed = true
+		}
+	}
+
+	result := output.NewResult(map[string]interface{}{
+		"name":         cmd.Group,
+		"googleGroups": updatedTesters.GoogleGroups,
+		"editId":       editID,
+		"committed":    committed,
+	}).WithDuration(time.Since(start)).WithServices("androidpublisher")
+	return outputResult(result, globals.Output, globals.Pretty)
 }
 
 // PublishBetaGroupsDeleteCmd deletes a beta group.
@@ -1228,7 +4490,75 @@ type PublishBetaGroupsDeleteCmd struct {
 
 // Run executes the beta-groups delete command.
 func (cmd *PublishBetaGroupsDeleteCmd) Run(globals *Globals) error {
-	return errors.NewAPIError(errors.CodeGeneralError, "publish beta-groups delete not yet implemented")
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if globals.Package == "" {
+		return errors.ErrPackageRequired
+	}
+	start := time.Now()
+	pkg := globals.Package
+
+	client, err := createAPIClient(ctx, globals)
+	if err != nil {
+		return err
+	}
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, "failed to initialize publisher service")
+	}
+
+	// Create edit
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+	var edit *androidpublisher.AppEdit
+	err = client.DoWithRetry(ctx, func() error {
+		edit, err = svc.Edits.Insert(pkg, &androidpublisher.AppEdit{}).Context(ctx).Do()
+		return err
+	})
+	client.Release()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to create edit: %v", err))
+	}
+	editID := edit.Id
+
+	// Clear testers for the track (effectively deleting the beta group)
+	testers := &androidpublisher.Testers{
+		GoogleGroups: []string{},
+	}
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+	err = client.DoWithRetry(ctx, func() error {
+		_, uerr := svc.Edits.Testers.Update(pkg, editID, cmd.Group, testers).Context(ctx).Do()
+		return uerr
+	})
+	client.Release()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to delete beta group: %v", err))
+	}
+
+	// Commit
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+	err = client.DoWithRetry(ctx, func() error {
+		_, cerr := svc.Edits.Commit(pkg, editID).Context(ctx).Do()
+		return cerr
+	})
+	client.Release()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to commit edit: %v", err))
+	}
+
+	result := output.NewResult(map[string]interface{}{
+		"name":    cmd.Group,
+		"deleted": true,
+		"editId":  editID,
+	}).WithDuration(time.Since(start)).WithServices("androidpublisher")
+	return outputResult(result, globals.Output, globals.Pretty)
 }
 
 // PublishBetaGroupsAddTestersCmd adds tester Google Groups to a beta group.
@@ -1242,7 +4572,117 @@ type PublishBetaGroupsAddTestersCmd struct {
 
 // Run executes the beta-groups add-testers command.
 func (cmd *PublishBetaGroupsAddTestersCmd) Run(globals *Globals) error {
-	return errors.NewAPIError(errors.CodeGeneralError, "publish beta-groups add-testers not yet implemented")
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if globals.Package == "" {
+		return errors.ErrPackageRequired
+	}
+	start := time.Now()
+	pkg := globals.Package
+
+	if cmd.DryRun {
+		result := output.NewResult(map[string]interface{}{
+			"group":  cmd.Group,
+			"adding": cmd.Groups,
+			"dryRun": true,
+		}).WithNoOp("dry run - no testers added")
+		return outputResult(result, globals.Output, globals.Pretty)
+	}
+
+	client, err := createAPIClient(ctx, globals)
+	if err != nil {
+		return err
+	}
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, "failed to initialize publisher service")
+	}
+
+	editID := cmd.EditID
+	if editID == "" {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		var edit *androidpublisher.AppEdit
+		err = client.DoWithRetry(ctx, func() error {
+			edit, err = svc.Edits.Insert(pkg, &androidpublisher.AppEdit{}).Context(ctx).Do()
+			return err
+		})
+		client.Release()
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to create edit: %v", err))
+		}
+		editID = edit.Id
+	}
+
+	// Get current testers
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+	var current *androidpublisher.Testers
+	err = client.DoWithRetry(ctx, func() error {
+		current, err = svc.Edits.Testers.Get(pkg, editID, cmd.Group).Context(ctx).Do()
+		return err
+	})
+	client.Release()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to get current testers: %v", err))
+	}
+
+	// Merge new groups with existing
+	existing := make(map[string]bool)
+	for _, g := range current.GoogleGroups {
+		existing[g] = true
+	}
+	merged := current.GoogleGroups
+	var added []string
+	for _, g := range cmd.Groups {
+		if !existing[g] {
+			merged = append(merged, g)
+			added = append(added, g)
+		}
+	}
+
+	// Update
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+	var updated *androidpublisher.Testers
+	err = client.DoWithRetry(ctx, func() error {
+		updated, err = svc.Edits.Testers.Update(pkg, editID, cmd.Group, &androidpublisher.Testers{GoogleGroups: merged}).Context(ctx).Do()
+		return err
+	})
+	client.Release()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to add testers: %v", err))
+	}
+
+	committed := false
+	if !cmd.NoAutoCommit {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		err = client.DoWithRetry(ctx, func() error {
+			_, cerr := svc.Edits.Commit(pkg, editID).Context(ctx).Do()
+			return cerr
+		})
+		client.Release()
+		if err == nil {
+			committed = true
+		}
+	}
+
+	result := output.NewResult(map[string]interface{}{
+		"group":        cmd.Group,
+		"added":        added,
+		"totalGroups":  len(updated.GoogleGroups),
+		"googleGroups": updated.GoogleGroups,
+		"editId":       editID,
+		"committed":    committed,
+	}).WithDuration(time.Since(start)).WithServices("androidpublisher")
+	return outputResult(result, globals.Output, globals.Pretty)
 }
 
 // PublishBetaGroupsRemoveTestersCmd removes tester Google Groups from a beta group.
@@ -1256,7 +4696,118 @@ type PublishBetaGroupsRemoveTestersCmd struct {
 
 // Run executes the beta-groups remove-testers command.
 func (cmd *PublishBetaGroupsRemoveTestersCmd) Run(globals *Globals) error {
-	return errors.NewAPIError(errors.CodeGeneralError, "publish beta-groups remove-testers not yet implemented")
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if globals.Package == "" {
+		return errors.ErrPackageRequired
+	}
+	start := time.Now()
+	pkg := globals.Package
+
+	if cmd.DryRun {
+		result := output.NewResult(map[string]interface{}{
+			"group":    cmd.Group,
+			"removing": cmd.Groups,
+			"dryRun":   true,
+		}).WithNoOp("dry run - no testers removed")
+		return outputResult(result, globals.Output, globals.Pretty)
+	}
+
+	client, err := createAPIClient(ctx, globals)
+	if err != nil {
+		return err
+	}
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, "failed to initialize publisher service")
+	}
+
+	editID := cmd.EditID
+	if editID == "" {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		var edit *androidpublisher.AppEdit
+		err = client.DoWithRetry(ctx, func() error {
+			edit, err = svc.Edits.Insert(pkg, &androidpublisher.AppEdit{}).Context(ctx).Do()
+			return err
+		})
+		client.Release()
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to create edit: %v", err))
+		}
+		editID = edit.Id
+	}
+
+	// Get current testers
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+	var current *androidpublisher.Testers
+	err = client.DoWithRetry(ctx, func() error {
+		current, err = svc.Edits.Testers.Get(pkg, editID, cmd.Group).Context(ctx).Do()
+		return err
+	})
+	client.Release()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to get current testers: %v", err))
+	}
+
+	// Remove specified groups
+	toRemove := make(map[string]bool)
+	for _, g := range cmd.Groups {
+		toRemove[g] = true
+	}
+	var remaining []string
+	var removed []string
+	for _, g := range current.GoogleGroups {
+		if toRemove[g] {
+			removed = append(removed, g)
+		} else {
+			remaining = append(remaining, g)
+		}
+	}
+
+	// Update
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+	var updated *androidpublisher.Testers
+	err = client.DoWithRetry(ctx, func() error {
+		updated, err = svc.Edits.Testers.Update(pkg, editID, cmd.Group, &androidpublisher.Testers{GoogleGroups: remaining}).Context(ctx).Do()
+		return err
+	})
+	client.Release()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to remove testers: %v", err))
+	}
+
+	committed := false
+	if !cmd.NoAutoCommit {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+		err = client.DoWithRetry(ctx, func() error {
+			_, cerr := svc.Edits.Commit(pkg, editID).Context(ctx).Do()
+			return cerr
+		})
+		client.Release()
+		if err == nil {
+			committed = true
+		}
+	}
+
+	result := output.NewResult(map[string]interface{}{
+		"group":        cmd.Group,
+		"removed":      removed,
+		"totalGroups":  len(updated.GoogleGroups),
+		"googleGroups": updated.GoogleGroups,
+		"editId":       editID,
+		"committed":    committed,
+	}).WithDuration(time.Since(start)).WithServices("androidpublisher")
+	return outputResult(result, globals.Output, globals.Pretty)
 }
 
 // PublishInternalShareCmd uploads artifacts for internal sharing.
@@ -1272,5 +4823,110 @@ type PublishInternalShareUploadCmd struct {
 
 // Run executes the internal-share upload command.
 func (cmd *PublishInternalShareUploadCmd) Run(globals *Globals) error {
-	return errors.NewAPIError(errors.CodeGeneralError, "publish internal-share upload not yet implemented")
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	start := time.Now()
+
+	if globals.Package == "" {
+		return errors.ErrPackageRequired
+	}
+
+	if cmd.File == "" {
+		return errors.NewAPIError(errors.CodeValidationError, "file is required").
+			WithHint("Provide an APK or AAB file to upload for internal sharing")
+	}
+
+	ext := strings.ToLower(filepath.Ext(cmd.File))
+	if ext != ".apk" && ext != ".aab" {
+		return errors.NewAPIError(errors.CodeValidationError, fmt.Sprintf("invalid file type: %s. Only .apk and .aab files are supported", ext))
+	}
+
+	if cmd.DryRun {
+		fileType := "apk"
+		if ext == ".aab" {
+			fileType = "aab"
+		}
+		result := output.NewResult(map[string]interface{}{
+			"file":   cmd.File,
+			"type":   fileType,
+			"dryRun": true,
+		}).WithDuration(time.Since(start)).
+			WithNoOp("dry run - artifact not uploaded for internal sharing")
+		return outputResult(result, globals.Output, globals.Pretty)
+	}
+
+	client, err := createAPIClient(ctx, globals)
+	if err != nil {
+		return err
+	}
+
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, "failed to initialize publisher service").
+			WithHint("Ensure authentication is configured correctly")
+	}
+
+	pkg := globals.Package
+
+	// Open file
+	file, err := os.Open(cmd.File)
+	if err != nil {
+		return errors.NewAPIError(errors.CodeValidationError, fmt.Sprintf("failed to open file: %v", err))
+	}
+	defer func() {
+		if cerr := file.Close(); cerr != nil {
+			_ = cerr
+		}
+	}()
+
+	// Upload for internal sharing (no edit needed)
+	if err := client.AcquireForUpload(ctx); err != nil {
+		return err
+	}
+
+	var data map[string]interface{}
+	if ext == ".aab" {
+		var resp *androidpublisher.InternalAppSharingArtifact
+		err = client.DoWithRetry(ctx, func() error {
+			resp, err = svc.Internalappsharingartifacts.Uploadbundle(pkg).Media(file).Context(ctx).Do()
+			return err
+		})
+		client.ReleaseForUpload()
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to upload bundle for internal sharing: %v", err))
+		}
+		data = map[string]interface{}{
+			"type":        "aab",
+			"file":        cmd.File,
+			"downloadUrl": resp.DownloadUrl,
+			"sha256":      resp.Sha256,
+		}
+		if resp.CertificateFingerprint != "" {
+			data["certificateFingerprint"] = resp.CertificateFingerprint
+		}
+	} else {
+		var resp *androidpublisher.InternalAppSharingArtifact
+		err = client.DoWithRetry(ctx, func() error {
+			resp, err = svc.Internalappsharingartifacts.Uploadapk(pkg).Media(file).Context(ctx).Do()
+			return err
+		})
+		client.ReleaseForUpload()
+		if err != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to upload APK for internal sharing: %v", err))
+		}
+		data = map[string]interface{}{
+			"type":        "apk",
+			"file":        cmd.File,
+			"downloadUrl": resp.DownloadUrl,
+			"sha256":      resp.Sha256,
+		}
+		if resp.CertificateFingerprint != "" {
+			data["certificateFingerprint"] = resp.CertificateFingerprint
+		}
+	}
+
+	result := output.NewResult(data).WithDuration(time.Since(start)).WithServices("androidpublisher")
+	return outputResult(result, globals.Output, globals.Pretty)
 }

@@ -7,8 +7,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-
-	"github.com/dl-alexandre/gpd/internal/errors"
 )
 
 // ============================================================================
@@ -307,12 +305,30 @@ func TestMigrateCmd_Exists(t *testing.T) {
 }
 
 // ============================================================================
-// Test Stubbed Commands Return Not Implemented Errors
+// Test Implemented Commands Return Proper Errors (not stubs)
 // ============================================================================
 
-func TestPublishCommands_ReturnNotImplemented(t *testing.T) {
+func TestPublishCommands_Implemented(t *testing.T) {
 	globals := &Globals{}
 
+	// Commands that return success with hardcoded info (no auth/package needed)
+	t.Run("PublishCapabilitiesCmd", func(t *testing.T) {
+		cmd := &PublishCapabilitiesCmd{}
+		err := cmd.Run(globals)
+		if err != nil {
+			t.Errorf("PublishCapabilitiesCmd.Run() should succeed, got: %v", err)
+		}
+	})
+
+	t.Run("PublishAssetsSpecCmd", func(t *testing.T) {
+		cmd := &PublishAssetsSpecCmd{}
+		err := cmd.Run(globals)
+		if err != nil {
+			t.Errorf("PublishAssetsSpecCmd.Run() should succeed, got: %v", err)
+		}
+	})
+
+	// Commands that require package/auth — verify they don't return "not yet implemented"
 	commands := []struct {
 		name string
 		cmd  interface{ Run(*Globals) error }
@@ -322,7 +338,6 @@ func TestPublishCommands_ReturnNotImplemented(t *testing.T) {
 		{"PublishHaltCmd", &PublishHaltCmd{}},
 		{"PublishRollbackCmd", &PublishRollbackCmd{}},
 		{"PublishStatusCmd", &PublishStatusCmd{}},
-		{"PublishCapabilitiesCmd", &PublishCapabilitiesCmd{}},
 		{"PublishListingUpdateCmd", &PublishListingUpdateCmd{}},
 		{"PublishListingGetCmd", &PublishListingGetCmd{}},
 		{"PublishListingDeleteCmd", &PublishListingDeleteCmd{}},
@@ -334,7 +349,6 @@ func TestPublishCommands_ReturnNotImplemented(t *testing.T) {
 		{"PublishImagesDeleteCmd", &PublishImagesDeleteCmd{Type: "icon", ID: "123"}},
 		{"PublishImagesDeleteAllCmd", &PublishImagesDeleteAllCmd{Type: "icon"}},
 		{"PublishAssetsUploadCmd", &PublishAssetsUploadCmd{Dir: "assets"}},
-		{"PublishAssetsSpecCmd", &PublishAssetsSpecCmd{}},
 		{"PublishDeobfuscationUploadCmd", &PublishDeobfuscationUploadCmd{File: "mapping.txt", Type: "proguard"}},
 		{"PublishTestersAddCmd", &PublishTestersAddCmd{}},
 		{"PublishTestersRemoveCmd", &PublishTestersRemoveCmd{}},
@@ -358,20 +372,11 @@ func TestPublishCommands_ReturnNotImplemented(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.cmd.Run(globals)
 			if err == nil {
-				t.Errorf("%s.Run() should return error, got nil", tc.name)
-				return
+				return // success is fine too
 			}
 
-			if !strings.Contains(err.Error(), "not yet implemented") {
-				t.Errorf("%s.Run() error should contain 'not yet implemented', got: %v", tc.name, err)
-			}
-
-			if apiErr, ok := err.(*errors.APIError); ok {
-				if apiErr.Code != errors.CodeGeneralError {
-					t.Errorf("%s.Run() error code should be CodeGeneralError, got: %v", tc.name, apiErr.Code)
-				}
-			} else {
-				t.Errorf("%s.Run() error should be *errors.APIError, got: %T", tc.name, err)
+			if strings.Contains(err.Error(), "not yet implemented") {
+				t.Errorf("%s.Run() should be implemented, but still returns 'not yet implemented'", tc.name)
 			}
 		})
 	}
@@ -430,30 +435,27 @@ func TestReviewsCommands_RequireReviewID(t *testing.T) {
 	}
 }
 
-func TestVitalsCommands_ReturnNotImplemented(t *testing.T) {
+func TestVitalsCommands_Implemented(t *testing.T) {
 	globals := &Globals{Package: "com.example.app"}
 
-	commands := []struct {
-		name string
-		cmd  interface{ Run(*Globals) error }
-	}{
-		{"VitalsQueryCmd", &VitalsQueryCmd{}},
-		{"VitalsCapabilitiesCmd", &VitalsCapabilitiesCmd{}},
-	}
+	t.Run("VitalsCapabilitiesCmd", func(t *testing.T) {
+		cmd := &VitalsCapabilitiesCmd{}
+		err := cmd.Run(globals)
+		if err != nil {
+			t.Errorf("VitalsCapabilitiesCmd.Run() should succeed, got: %v", err)
+		}
+	})
 
-	for _, tc := range commands {
-		t.Run(tc.name, func(t *testing.T) {
-			err := tc.cmd.Run(globals)
-			if err == nil {
-				t.Errorf("%s.Run() should return error, got nil", tc.name)
-				return
-			}
-
-			if !strings.Contains(err.Error(), "not yet implemented") {
-				t.Errorf("%s.Run() error should contain 'not yet implemented', got: %v", tc.name, err)
-			}
-		})
-	}
+	t.Run("VitalsQueryCmd", func(t *testing.T) {
+		cmd := &VitalsQueryCmd{}
+		err := cmd.Run(globals)
+		if err == nil {
+			return
+		}
+		if strings.Contains(err.Error(), "not yet implemented") {
+			t.Errorf("VitalsQueryCmd.Run() should be implemented, but still returns 'not yet implemented'")
+		}
+	})
 }
 
 func TestVitalsCommands_RequireAuth(t *testing.T) {
@@ -491,61 +493,66 @@ func TestVitalsCommands_RequireAuth(t *testing.T) {
 	}
 }
 
-func TestAnalyticsCommands_ReturnNotImplemented(t *testing.T) {
-	globals := &Globals{}
+func TestAnalyticsCommands_Implemented(t *testing.T) {
+	t.Run("AnalyticsCapabilitiesCmd", func(t *testing.T) {
+		globals := &Globals{}
+		cmd := &AnalyticsCapabilitiesCmd{}
+		err := cmd.Run(globals)
+		if err != nil {
+			t.Errorf("AnalyticsCapabilitiesCmd.Run() should succeed, got: %v", err)
+		}
+	})
 
-	commands := []struct {
-		name string
-		cmd  interface{ Run(*Globals) error }
-	}{
-		{"AnalyticsQueryCmd", &AnalyticsQueryCmd{}},
-		{"AnalyticsCapabilitiesCmd", &AnalyticsCapabilitiesCmd{}},
-	}
-
-	for _, tc := range commands {
-		t.Run(tc.name, func(t *testing.T) {
-			err := tc.cmd.Run(globals)
-			if err == nil {
-				t.Errorf("%s.Run() should return error, got nil", tc.name)
-				return
-			}
-
-			if !strings.Contains(err.Error(), "not yet implemented") {
-				t.Errorf("%s.Run() error should contain 'not yet implemented', got: %v", tc.name, err)
-			}
-		})
-	}
+	t.Run("AnalyticsQueryCmd", func(t *testing.T) {
+		globals := &Globals{}
+		cmd := &AnalyticsQueryCmd{}
+		err := cmd.Run(globals)
+		if err == nil {
+			return
+		}
+		if strings.Contains(err.Error(), "not yet implemented") {
+			t.Errorf("AnalyticsQueryCmd.Run() should be implemented, but still returns 'not yet implemented'")
+		}
+	})
 }
 
-func TestAppsCommands_ReturnNotImplemented(t *testing.T) {
-	globals := &Globals{}
-
-	commands := []struct {
-		name string
-		cmd  interface{ Run(*Globals) error }
-	}{
-		{"AppsListCmd", &AppsListCmd{}},
-		{"AppsGetCmd", &AppsGetCmd{Package: "com.example.app"}},
-	}
-
-	for _, tc := range commands {
-		t.Run(tc.name, func(t *testing.T) {
-			err := tc.cmd.Run(globals)
-			if err == nil {
-				t.Errorf("%s.Run() should return error, got nil", tc.name)
-				return
+func TestAppsCommands_Implemented(t *testing.T) {
+	t.Run("AppsListCmd", func(t *testing.T) {
+		globals := &Globals{}
+		cmd := &AppsListCmd{}
+		err := cmd.Run(globals)
+		// AppsListCmd returns informational output (no list-apps API), should succeed
+		if err != nil {
+			if strings.Contains(err.Error(), "not yet implemented") {
+				t.Errorf("AppsListCmd.Run() should be implemented, but still returns 'not yet implemented'")
 			}
+		}
+	})
 
-			if !strings.Contains(err.Error(), "not yet implemented") {
-				t.Errorf("%s.Run() error should contain 'not yet implemented', got: %v", tc.name, err)
-			}
-		})
-	}
+	t.Run("AppsGetCmd", func(t *testing.T) {
+		globals := &Globals{}
+		cmd := &AppsGetCmd{Package: "com.example.app"}
+		err := cmd.Run(globals)
+		if err == nil {
+			return
+		}
+		if strings.Contains(err.Error(), "not yet implemented") {
+			t.Errorf("AppsGetCmd.Run() should be implemented, but still returns 'not yet implemented'")
+		}
+	})
 }
 
-func TestGamesCommands_ReturnNotImplemented(t *testing.T) {
-	globals := &Globals{}
+func TestGamesCommands_Implemented(t *testing.T) {
+	t.Run("GamesCapabilitiesCmd", func(t *testing.T) {
+		globals := &Globals{}
+		cmd := &GamesCapabilitiesCmd{}
+		err := cmd.Run(globals)
+		if err != nil {
+			t.Errorf("GamesCapabilitiesCmd.Run() should succeed, got: %v", err)
+		}
+	})
 
+	// Commands that require auth — verify they don't return "not yet implemented"
 	commands := []struct {
 		name string
 		cmd  interface{ Run(*Globals) error }
@@ -555,26 +562,31 @@ func TestGamesCommands_ReturnNotImplemented(t *testing.T) {
 		{"GamesEventsResetCmd", &GamesEventsResetCmd{EventID: "test"}},
 		{"GamesPlayersHideCmd", &GamesPlayersHideCmd{PlayerID: "player1", ApplicationID: "app1"}},
 		{"GamesPlayersUnhideCmd", &GamesPlayersUnhideCmd{PlayerID: "player1", ApplicationID: "app1"}},
-		{"GamesCapabilitiesCmd", &GamesCapabilitiesCmd{}},
 	}
 
 	for _, tc := range commands {
 		t.Run(tc.name, func(t *testing.T) {
+			globals := &Globals{}
 			err := tc.cmd.Run(globals)
 			if err == nil {
-				t.Errorf("%s.Run() should return error, got nil", tc.name)
 				return
 			}
-
-			if !strings.Contains(err.Error(), "not yet implemented") {
-				t.Errorf("%s.Run() error should contain 'not yet implemented', got: %v", tc.name, err)
+			if strings.Contains(err.Error(), "not yet implemented") {
+				t.Errorf("%s.Run() should be implemented, but still returns 'not yet implemented'", tc.name)
 			}
 		})
 	}
 }
 
-func TestPurchasesCommands_ReturnNotImplemented(t *testing.T) {
-	globals := &Globals{}
+func TestPurchasesCommands_Implemented(t *testing.T) {
+	t.Run("PurchasesCapabilitiesCmd", func(t *testing.T) {
+		globals := &Globals{}
+		cmd := &PurchasesCapabilitiesCmd{}
+		err := cmd.Run(globals)
+		if err != nil {
+			t.Errorf("PurchasesCapabilitiesCmd.Run() should succeed, got: %v", err)
+		}
+	})
 
 	commands := []struct {
 		name string
@@ -589,26 +601,31 @@ func TestPurchasesCommands_ReturnNotImplemented(t *testing.T) {
 		{"PurchasesSubscriptionsRevokeCmd", &PurchasesSubscriptionsRevokeCmd{Token: "t1"}},
 		{"PurchasesVerifyCmd", &PurchasesVerifyCmd{Token: "t1"}},
 		{"PurchasesVoidedListCmd", &PurchasesVoidedListCmd{}},
-		{"PurchasesCapabilitiesCmd", &PurchasesCapabilitiesCmd{}},
 	}
 
 	for _, tc := range commands {
 		t.Run(tc.name, func(t *testing.T) {
+			globals := &Globals{}
 			err := tc.cmd.Run(globals)
 			if err == nil {
-				t.Errorf("%s.Run() should return error, got nil", tc.name)
 				return
 			}
-
-			if !strings.Contains(err.Error(), "not yet implemented") {
-				t.Errorf("%s.Run() error should contain 'not yet implemented', got: %v", tc.name, err)
+			if strings.Contains(err.Error(), "not yet implemented") {
+				t.Errorf("%s.Run() should be implemented, but still returns 'not yet implemented'", tc.name)
 			}
 		})
 	}
 }
 
-func TestMonetizationCommands_ReturnNotImplemented(t *testing.T) {
-	globals := &Globals{}
+func TestMonetizationCommands_Implemented(t *testing.T) {
+	t.Run("MonetizationCapabilitiesCmd", func(t *testing.T) {
+		globals := &Globals{}
+		cmd := &MonetizationCapabilitiesCmd{}
+		err := cmd.Run(globals)
+		if err != nil {
+			t.Errorf("MonetizationCapabilitiesCmd.Run() should succeed, got: %v", err)
+		}
+	})
 
 	commands := []struct {
 		name string
@@ -643,26 +660,34 @@ func TestMonetizationCommands_ReturnNotImplemented(t *testing.T) {
 		{"MonetizationOffersBatchGetCmd", &MonetizationOffersBatchGetCmd{SubscriptionID: "s1", BasePlanID: "bp1", OfferIDs: []string{"o1"}}},
 		{"MonetizationOffersBatchUpdateCmd", &MonetizationOffersBatchUpdateCmd{SubscriptionID: "s1", BasePlanID: "bp1", File: "batch.json"}},
 		{"MonetizationOffersBatchUpdateStatesCmd", &MonetizationOffersBatchUpdateStatesCmd{SubscriptionID: "s1", BasePlanID: "bp1", File: "batch.json"}},
-		{"MonetizationCapabilitiesCmd", &MonetizationCapabilitiesCmd{}},
 	}
 
 	for _, tc := range commands {
 		t.Run(tc.name, func(t *testing.T) {
+			globals := &Globals{}
 			err := tc.cmd.Run(globals)
 			if err == nil {
-				t.Errorf("%s.Run() should return error, got nil", tc.name)
 				return
 			}
-
-			if !strings.Contains(err.Error(), "not yet implemented") {
-				t.Errorf("%s.Run() error should contain 'not yet implemented', got: %v", tc.name, err)
+			if strings.Contains(err.Error(), "not yet implemented") {
+				t.Errorf("%s.Run() should be implemented, but still returns 'not yet implemented'", tc.name)
 			}
 		})
 	}
 }
 
-func TestPermissionsCommands_ReturnNotImplemented(t *testing.T) {
-	globals := &Globals{}
+func TestPermissionsCommands_Implemented(t *testing.T) {
+	t.Run("PermissionsListCmd", func(t *testing.T) {
+		globals := &Globals{}
+		cmd := &PermissionsListCmd{}
+		err := cmd.Run(globals)
+		// PermissionsListCmd returns hardcoded permissions list, should succeed
+		if err != nil {
+			if strings.Contains(err.Error(), "not yet implemented") {
+				t.Errorf("PermissionsListCmd.Run() should be implemented, but still returns 'not yet implemented'")
+			}
+		}
+	})
 
 	commands := []struct {
 		name string
@@ -674,27 +699,23 @@ func TestPermissionsCommands_ReturnNotImplemented(t *testing.T) {
 		{"PermissionsGrantsAddCmd", &PermissionsGrantsAddCmd{Email: "test@example.com", Grant: "read"}},
 		{"PermissionsGrantsRemoveCmd", &PermissionsGrantsRemoveCmd{Email: "test@example.com", Grant: "read"}},
 		{"PermissionsGrantsListCmd", &PermissionsGrantsListCmd{}},
-		{"PermissionsListCmd", &PermissionsListCmd{}},
 	}
 
 	for _, tc := range commands {
 		t.Run(tc.name, func(t *testing.T) {
+			globals := &Globals{}
 			err := tc.cmd.Run(globals)
 			if err == nil {
-				t.Errorf("%s.Run() should return error, got nil", tc.name)
 				return
 			}
-
-			if !strings.Contains(err.Error(), "not yet implemented") {
-				t.Errorf("%s.Run() error should contain 'not yet implemented', got: %v", tc.name, err)
+			if strings.Contains(err.Error(), "not yet implemented") {
+				t.Errorf("%s.Run() should be implemented, but still returns 'not yet implemented'", tc.name)
 			}
 		})
 	}
 }
 
-func TestRecoveryCommands_ReturnNotImplemented(t *testing.T) {
-	globals := &Globals{}
-
+func TestRecoveryCommands_Implemented(t *testing.T) {
 	commands := []struct {
 		name string
 		cmd  interface{ Run(*Globals) error }
@@ -707,31 +728,28 @@ func TestRecoveryCommands_ReturnNotImplemented(t *testing.T) {
 
 	for _, tc := range commands {
 		t.Run(tc.name, func(t *testing.T) {
+			globals := &Globals{}
 			err := tc.cmd.Run(globals)
 			if err == nil {
-				t.Errorf("%s.Run() should return error, got nil", tc.name)
 				return
 			}
-
-			if !strings.Contains(err.Error(), "not yet implemented") {
-				t.Errorf("%s.Run() error should contain 'not yet implemented', got: %v", tc.name, err)
+			if strings.Contains(err.Error(), "not yet implemented") {
+				t.Errorf("%s.Run() should be implemented, but still returns 'not yet implemented'", tc.name)
 			}
 		})
 	}
 }
 
-func TestIntegrityCommands_ReturnNotImplemented(t *testing.T) {
+func TestIntegrityCommands_Implemented(t *testing.T) {
 	globals := &Globals{}
 
 	cmd := &IntegrityDecodeCmd{Token: "test-token"}
 	err := cmd.Run(globals)
 	if err == nil {
-		t.Error("IntegrityDecodeCmd.Run() should return error, got nil")
 		return
 	}
-
-	if !strings.Contains(err.Error(), "not yet implemented") {
-		t.Errorf("IntegrityDecodeCmd.Run() error should contain 'not yet implemented', got: %v", err)
+	if strings.Contains(err.Error(), "not yet implemented") {
+		t.Errorf("IntegrityDecodeCmd.Run() should be implemented, but still returns 'not yet implemented'")
 	}
 }
 

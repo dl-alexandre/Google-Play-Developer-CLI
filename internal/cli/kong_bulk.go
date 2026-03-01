@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -194,12 +195,55 @@ func (cmd *BulkUploadCmd) Run(globals *Globals) error {
 	return writeOutput(globals, outputResult)
 }
 
-func (cmd *BulkUploadCmd) uploadFile(_ context.Context, _ *api.Client, _, _, file string, _ bool) bulkUploadItemResult {
-	// Full implementation would handle AAB vs APK detection and proper upload via Android Publisher API
-	return bulkUploadItemResult{
-		File:   file,
-		Status: "not_implemented",
-		Error:  "Bulk upload requires full implementation with Android Publisher API integration",
+func (cmd *BulkUploadCmd) uploadFile(ctx context.Context, client *api.Client, pkg, editID, file string, verbose bool) bulkUploadItemResult {
+	// Detect file type
+	ext := strings.ToLower(filepath.Ext(file))
+
+	f, err := os.Open(file)
+	if err != nil {
+		return bulkUploadItemResult{File: file, Status: "failed", Error: err.Error()}
+	}
+	defer f.Close()
+
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return bulkUploadItemResult{File: file, Status: "failed", Error: err.Error()}
+	}
+
+	if err := client.AcquireForUpload(ctx); err != nil {
+		return bulkUploadItemResult{File: file, Status: "failed", Error: err.Error()}
+	}
+	defer client.ReleaseForUpload()
+
+	if verbose {
+		fmt.Fprintf(os.Stderr, "Uploading %s (%s)\n", filepath.Base(file), ext)
+	}
+
+	switch ext {
+	case ".aab":
+		var bundle *androidpublisher.Bundle
+		err = client.DoWithRetry(ctx, func() error {
+			var uerr error
+			bundle, uerr = svc.Edits.Bundles.Upload(pkg, editID).Media(f).Context(ctx).Do()
+			return uerr
+		})
+		if err != nil {
+			return bulkUploadItemResult{File: file, Status: "failed", Error: err.Error()}
+		}
+		return bulkUploadItemResult{File: file, VersionCode: int64(bundle.VersionCode), Status: "success", SHA1: bundle.Sha1}
+	case ".apk":
+		var apk *androidpublisher.Apk
+		err = client.DoWithRetry(ctx, func() error {
+			var uerr error
+			apk, uerr = svc.Edits.Apks.Upload(pkg, editID).Media(f).Context(ctx).Do()
+			return uerr
+		})
+		if err != nil {
+			return bulkUploadItemResult{File: file, Status: "failed", Error: err.Error()}
+		}
+		return bulkUploadItemResult{File: file, VersionCode: int64(apk.VersionCode), Status: "success"}
+	default:
+		return bulkUploadItemResult{File: file, Status: "failed", Error: "unsupported file type: " + ext}
 	}
 }
 
@@ -295,28 +339,124 @@ func (cmd *BulkListingsCmd) Run(globals *Globals) error {
 		return writeOutput(globals, result)
 	}
 
-	// Full implementation would:
-	// 1. Create/get edit
-	// 2. Update listings for each locale via API
-	// 3. Commit edit
+	// Create authenticated API client
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	authMgr := newAuthManager()
+	creds, err := authMgr.Authenticate(ctx, globals.KeyPath)
+	if err != nil {
+		return err
+	}
+
+	client, err := api.NewClient(ctx, creds.TokenSource,
+		api.WithTimeout(globals.Timeout),
+		api.WithVerboseLogging(globals.Verbose))
+	if err != nil {
+		return err
+	}
+
+	// Create edit if not specified
+	editID := cmd.EditID
+	if editID == "" {
+		if err := client.Acquire(ctx); err != nil {
+			return err
+		}
+
+		svc, svcErr := client.AndroidPublisher()
+		if svcErr != nil {
+			client.Release()
+			return svcErr
+		}
+
+		var edit *androidpublisher.AppEdit
+		createErr := client.DoWithRetry(ctx, func() error {
+			var e error
+			edit, e = svc.Edits.Insert(globals.Package, &androidpublisher.AppEdit{}).Context(ctx).Do()
+			return e
+		})
+
+		client.Release()
+
+		if createErr != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, "failed to create edit").
+				WithDetails(map[string]interface{}{"error": createErr.Error()})
+		}
+		editID = edit.Id
+	}
+
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return err
+	}
 
 	result := &bulkListingsResult{
-		SuccessCount: 0,
-		FailureCount: len(listings),
-		Locales:      make([]bulkListingItemResult, 0, len(listings)),
+		Locales: make([]bulkListingItemResult, 0, len(listings)),
+		EditID:  editID,
 	}
 
-	for locale := range listings {
-		result.Locales = append(result.Locales, bulkListingItemResult{
-			Locale: locale,
-			Status: "not_implemented",
-			Error:  "Bulk listings update requires full Android Publisher API implementation",
+	for locale, listing := range listings {
+		if err := client.Acquire(ctx); err != nil {
+			result.FailureCount++
+			result.Locales = append(result.Locales, bulkListingItemResult{
+				Locale: locale,
+				Status: "failed",
+				Error:  err.Error(),
+			})
+			continue
+		}
+
+		updateErr := client.DoWithRetry(ctx, func() error {
+			_, e := svc.Edits.Listings.Update(globals.Package, editID, locale, &androidpublisher.Listing{
+				Title:            listing.Title,
+				ShortDescription: listing.ShortDescription,
+				FullDescription:  listing.FullDescription,
+				Video:            listing.Video,
+			}).Context(ctx).Do()
+			return e
 		})
+
+		client.Release()
+
+		if updateErr != nil {
+			result.FailureCount++
+			result.Locales = append(result.Locales, bulkListingItemResult{
+				Locale: locale,
+				Status: "failed",
+				Error:  updateErr.Error(),
+			})
+		} else {
+			result.SuccessCount++
+			result.Locales = append(result.Locales, bulkListingItemResult{
+				Locale: locale,
+				Status: "success",
+			})
+		}
 	}
 
-	return writeOutput(globals, output.NewResult(result).
-		WithServices("androidpublisher").
-		WithNoOp("bulk listings update not yet implemented"))
+	// Commit edit if no failures
+	if result.FailureCount == 0 {
+		if commitErr := client.Acquire(ctx); commitErr == nil {
+			commitErr = client.DoWithRetry(ctx, func() error {
+				_, e := svc.Edits.Commit(globals.Package, editID).Context(ctx).Do()
+				return e
+			})
+			client.Release()
+			if commitErr != nil && globals.Verbose {
+				fmt.Fprintf(os.Stderr, "Warning: failed to commit edit: %v\n", commitErr)
+			}
+		}
+	}
+
+	outputResult := output.NewResult(result).
+		WithServices("androidpublisher")
+
+	if result.FailureCount > 0 {
+		outputResult = outputResult.WithWarnings(fmt.Sprintf("%d locale updates failed", result.FailureCount))
+	}
+
+	return writeOutput(globals, outputResult)
 }
 
 // BulkImagesCmd batch uploads images for multiple types.
@@ -411,20 +551,159 @@ func (cmd *BulkImagesCmd) Run(globals *Globals) error {
 		}).WithNoOp("dry run - no images uploaded"))
 	}
 
-	// Full implementation would upload images via Android Publisher API
+	// Create authenticated API client
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	authMgr := newAuthManager()
+	creds, err := authMgr.Authenticate(ctx, globals.KeyPath)
+	if err != nil {
+		return err
+	}
+
+	client, err := api.NewClient(ctx, creds.TokenSource,
+		api.WithTimeout(globals.Timeout),
+		api.WithVerboseLogging(globals.Verbose))
+	if err != nil {
+		return err
+	}
+
+	// Create edit if not specified
+	editID := cmd.EditID
+	if editID == "" {
+		if acquireErr := client.Acquire(ctx); acquireErr != nil {
+			return acquireErr
+		}
+
+		svc, svcErr := client.AndroidPublisher()
+		if svcErr != nil {
+			client.Release()
+			return svcErr
+		}
+
+		var edit *androidpublisher.AppEdit
+		createErr := client.DoWithRetry(ctx, func() error {
+			var e error
+			edit, e = svc.Edits.Insert(globals.Package, &androidpublisher.AppEdit{}).Context(ctx).Do()
+			return e
+		})
+
+		client.Release()
+
+		if createErr != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, "failed to create edit").
+				WithDetails(map[string]interface{}{"error": createErr.Error()})
+		}
+		editID = edit.Id
+	}
+
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return err
+	}
+
 	result := &bulkImagesResult{
-		Images:       images,
-		SuccessCount: 0,
-		FailureCount: len(images),
+		Images: make([]bulkImageItemResult, 0, len(images)),
+		EditID: editID,
 	}
 
-	for i := range result.Images {
-		result.Images[i].Status = "not_implemented"
+	// Upload images in parallel with controlled concurrency
+	var wg sync.WaitGroup
+	semaphore := make(chan struct{}, cmd.MaxParallel)
+	var mu sync.Mutex
+
+	for _, img := range images {
+		wg.Add(1)
+		go func(item bulkImageItemResult) {
+			defer wg.Done()
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+
+			f, openErr := os.Open(item.Filename)
+			if openErr != nil {
+				mu.Lock()
+				result.FailureCount++
+				result.Images = append(result.Images, bulkImageItemResult{
+					Type:     item.Type,
+					Locale:   item.Locale,
+					Filename: item.Filename,
+					Status:   "failed",
+					Error:    openErr.Error(),
+				})
+				mu.Unlock()
+				return
+			}
+			defer f.Close()
+
+			if acquireErr := client.AcquireForUpload(ctx); acquireErr != nil {
+				mu.Lock()
+				result.FailureCount++
+				result.Images = append(result.Images, bulkImageItemResult{
+					Type:     item.Type,
+					Locale:   item.Locale,
+					Filename: item.Filename,
+					Status:   "failed",
+					Error:    acquireErr.Error(),
+				})
+				mu.Unlock()
+				return
+			}
+
+			uploadErr := client.DoWithRetry(ctx, func() error {
+				_, e := svc.Edits.Images.Upload(globals.Package, editID, item.Locale, item.Type).Media(f).Context(ctx).Do()
+				return e
+			})
+
+			client.ReleaseForUpload()
+
+			mu.Lock()
+			if uploadErr != nil {
+				result.FailureCount++
+				result.Images = append(result.Images, bulkImageItemResult{
+					Type:     item.Type,
+					Locale:   item.Locale,
+					Filename: item.Filename,
+					Status:   "failed",
+					Error:    uploadErr.Error(),
+				})
+			} else {
+				result.SuccessCount++
+				result.Images = append(result.Images, bulkImageItemResult{
+					Type:     item.Type,
+					Locale:   item.Locale,
+					Filename: item.Filename,
+					Status:   "success",
+				})
+			}
+			mu.Unlock()
+		}(img)
 	}
 
-	return writeOutput(globals, output.NewResult(result).
-		WithServices("androidpublisher").
-		WithNoOp("bulk images upload not yet implemented"))
+	wg.Wait()
+
+	// Commit edit if no failures
+	if result.FailureCount == 0 {
+		if acquireErr := client.Acquire(ctx); acquireErr == nil {
+			commitErr := client.DoWithRetry(ctx, func() error {
+				_, e := svc.Edits.Commit(globals.Package, editID).Context(ctx).Do()
+				return e
+			})
+			client.Release()
+			if commitErr != nil && globals.Verbose {
+				fmt.Fprintf(os.Stderr, "Warning: failed to commit edit: %v\n", commitErr)
+			}
+		}
+	}
+
+	outputResult := output.NewResult(result).
+		WithServices("androidpublisher")
+
+	if result.FailureCount > 0 {
+		outputResult = outputResult.WithWarnings(fmt.Sprintf("%d image uploads failed", result.FailureCount))
+	}
+
+	return writeOutput(globals, outputResult)
 }
 
 // BulkTracksCmd updates multiple tracks at once.
@@ -477,26 +756,146 @@ func (cmd *BulkTracksCmd) Run(globals *Globals) error {
 		}).WithNoOp("dry run - no tracks updated"))
 	}
 
-	// Full implementation would:
-	// 1. Create/get edit
-	// 2. Update each track with the release
-	// 3. Commit edit
+	// Parse version codes to int64
+	versionCodes := make([]int64, 0, len(cmd.VersionCodes))
+	for _, vc := range cmd.VersionCodes {
+		code, parseErr := strconv.ParseInt(vc, 10, 64)
+		if parseErr != nil {
+			return errors.NewAPIError(errors.CodeValidationError, fmt.Sprintf("invalid version code %q: %v", vc, parseErr)).
+				WithHint("Version codes must be positive integers")
+		}
+		versionCodes = append(versionCodes, code)
+	}
+
+	// Create authenticated API client
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	authMgr := newAuthManager()
+	creds, err := authMgr.Authenticate(ctx, globals.KeyPath)
+	if err != nil {
+		return err
+	}
+
+	client, err := api.NewClient(ctx, creds.TokenSource,
+		api.WithTimeout(globals.Timeout),
+		api.WithVerboseLogging(globals.Verbose))
+	if err != nil {
+		return err
+	}
+
+	// Create edit if not specified
+	editID := cmd.EditID
+	if editID == "" {
+		if acquireErr := client.Acquire(ctx); acquireErr != nil {
+			return acquireErr
+		}
+
+		svc, svcErr := client.AndroidPublisher()
+		if svcErr != nil {
+			client.Release()
+			return svcErr
+		}
+
+		var edit *androidpublisher.AppEdit
+		createErr := client.DoWithRetry(ctx, func() error {
+			var e error
+			edit, e = svc.Edits.Insert(globals.Package, &androidpublisher.AppEdit{}).Context(ctx).Do()
+			return e
+		})
+
+		client.Release()
+
+		if createErr != nil {
+			return errors.NewAPIError(errors.CodeGeneralError, "failed to create edit").
+				WithDetails(map[string]interface{}{"error": createErr.Error()})
+		}
+		editID = edit.Id
+	}
+
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return err
+	}
 
 	result := &bulkTracksResult{
-		Tracks:       make([]bulkTrackItemResult, 0, len(cmd.Tracks)),
-		SuccessCount: 0,
-		FailureCount: len(cmd.Tracks),
+		Tracks: make([]bulkTrackItemResult, 0, len(cmd.Tracks)),
+		EditID: editID,
 	}
 
 	for _, track := range cmd.Tracks {
-		result.Tracks = append(result.Tracks, bulkTrackItemResult{
-			Track:        track,
-			Status:       "not_implemented",
-			VersionCodes: cmd.VersionCodes,
+		if acquireErr := client.Acquire(ctx); acquireErr != nil {
+			result.FailureCount++
+			result.Tracks = append(result.Tracks, bulkTrackItemResult{
+				Track:        track,
+				Status:       "failed",
+				VersionCodes: cmd.VersionCodes,
+				Error:        acquireErr.Error(),
+			})
+			continue
+		}
+
+		release := &androidpublisher.TrackRelease{
+			VersionCodes: versionCodes,
+			Status:       cmd.Status,
+		}
+		if cmd.Name != "" {
+			release.Name = cmd.Name
+		}
+
+		updateErr := client.DoWithRetry(ctx, func() error {
+			_, e := svc.Edits.Tracks.Update(globals.Package, editID, track, &androidpublisher.Track{
+				Track:    track,
+				Releases: []*androidpublisher.TrackRelease{release},
+			}).Context(ctx).Do()
+			return e
 		})
+
+		client.Release()
+
+		if updateErr != nil {
+			result.FailureCount++
+			result.Tracks = append(result.Tracks, bulkTrackItemResult{
+				Track:        track,
+				Status:       "failed",
+				VersionCodes: cmd.VersionCodes,
+				Error:        updateErr.Error(),
+			})
+		} else {
+			result.SuccessCount++
+			result.Tracks = append(result.Tracks, bulkTrackItemResult{
+				Track:        track,
+				Status:       "success",
+				VersionCodes: cmd.VersionCodes,
+			})
+		}
 	}
 
-	return writeOutput(globals, output.NewResult(result).
-		WithServices("androidpublisher").
-		WithNoOp("bulk tracks update not yet implemented"))
+	// Commit edit if no failures
+	if result.FailureCount == 0 {
+		if acquireErr := client.Acquire(ctx); acquireErr == nil {
+			commitErr := client.DoWithRetry(ctx, func() error {
+				_, e := svc.Edits.Commit(globals.Package, editID).Context(ctx).Do()
+				return e
+			})
+			client.Release()
+			if commitErr != nil {
+				if globals.Verbose {
+					fmt.Fprintf(os.Stderr, "Warning: failed to commit edit: %v\n", commitErr)
+				}
+			} else {
+				result.Committed = true
+			}
+		}
+	}
+
+	outputResult := output.NewResult(result).
+		WithServices("androidpublisher")
+
+	if result.FailureCount > 0 {
+		outputResult = outputResult.WithWarnings(fmt.Sprintf("%d track updates failed", result.FailureCount))
+	}
+
+	return writeOutput(globals, outputResult)
 }

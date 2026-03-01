@@ -22,6 +22,15 @@ import (
 // actionGet is the constant for the "get" release notes action.
 const actionGet = "get"
 
+// Constants for release management operations.
+const (
+	trackAll          = "all"
+	eventTypeRelease  = "release"
+	eventTypeRollout  = "rollout"
+	recommendContinue = "continue"
+	actionCopy        = "copy"
+)
+
 // ReleaseMgmtCmd contains release management commands.
 type ReleaseMgmtCmd struct {
 	Calendar  ReleaseCalendarCmd  `cmd:"" help:"Show upcoming and past releases"`
@@ -132,7 +141,7 @@ func (cmd *ReleaseCalendarCmd) Run(globals *Globals) error {
 	// Build calendar events from track/release data
 	for _, track := range tracksList.Tracks {
 		// Filter by track if specified
-		if cmd.Track != "all" && track.Track != cmd.Track {
+		if cmd.Track != trackAll && track.Track != cmd.Track {
 			continue
 		}
 
@@ -142,7 +151,7 @@ func (cmd *ReleaseCalendarCmd) Run(globals *Globals) error {
 				versionCode = fmt.Sprintf("%d", release.VersionCodes[0])
 			}
 
-			eventType := "release"
+			eventType := eventTypeRelease
 			description := ""
 
 			switch release.Status {
@@ -150,14 +159,14 @@ func (cmd *ReleaseCalendarCmd) Run(globals *Globals) error {
 				eventType = releaseCompleted
 				description = fmt.Sprintf("Completed release %s on %s", release.Name, track.Track)
 			case statusInProgress:
-				eventType = "rollout"
+				eventType = eventTypeRollout
 				rolloutPct := release.UserFraction * 100
 				description = fmt.Sprintf("Rolling out %s on %s (%.1f%%)", release.Name, track.Track, rolloutPct)
 			case statusHalted:
 				eventType = statusHalted
 				description = fmt.Sprintf("Halted release %s on %s", release.Name, track.Track)
-			case "draft":
-				eventType = "draft"
+			case releaseStatusDraft:
+				eventType = releaseStatusDraft
 				description = fmt.Sprintf("Draft release %s on %s", release.Name, track.Track)
 			default:
 				description = fmt.Sprintf("Release %s on %s (status: %s)", release.Name, track.Track, release.Status)
@@ -289,7 +298,7 @@ func (cmd *ReleaseConflictsCmd) Run(globals *Globals) error {
 	var maxExistingVC int64
 	for _, track := range tracksList.Tracks {
 		// Filter by track if specified
-		if cmd.CheckTrack != "all" && track.Track != cmd.CheckTrack {
+		if cmd.CheckTrack != trackAll && track.Track != cmd.CheckTrack {
 			continue
 		}
 
@@ -505,7 +514,7 @@ func (cmd *ReleaseStrategyCmd) buildStrategyRecommendation(healthScore, userFrac
 
 	switch {
 	case healthScore >= cmd.HealthThreshold:
-		recommendation = "continue"
+		recommendation = recommendContinue
 		reasoning = fmt.Sprintf("Health score %.2f is above threshold %.2f. Metrics are within acceptable thresholds.", healthScore, cmd.HealthThreshold)
 		actions = append(actions, "Continue monitoring crash rate and ANR rate")
 		if userFraction > 0 && userFraction < 1.0 {
@@ -1192,7 +1201,7 @@ func (cmd *ReleaseNotesCmd) Run(globals *Globals) error {
 		if err := cmd.releaseNotesActionSet(ctx, client, svc, pkg, result); err != nil {
 			return err
 		}
-	case "copy":
+	case actionCopy:
 		if err := cmd.releaseNotesActionCopy(ctx, client, svc, pkg, result); err != nil {
 			return err
 		}

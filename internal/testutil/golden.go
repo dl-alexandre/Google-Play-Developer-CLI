@@ -114,7 +114,7 @@ func (m *GoldenMismatch) Diff() string {
 	actualLines := strings.Split(m.Actual, "\n")
 
 	var diff strings.Builder
-	diff.WriteString(fmt.Sprintf("--- %s (expected)\n", m.GoldenFile))
+	fmt.Fprintf(&diff, "--- %s (expected)\n", m.GoldenFile)
 	diff.WriteString("+++ actual\n\n")
 
 	maxLen := len(expectedLines)
@@ -132,9 +132,9 @@ func (m *GoldenMismatch) Diff() string {
 		}
 
 		if exp != act {
-			diff.WriteString(fmt.Sprintf("Line %d:\n", i+1))
-			diff.WriteString(fmt.Sprintf("- %s\n", exp))
-			diff.WriteString(fmt.Sprintf("+ %s\n", act))
+			fmt.Fprintf(&diff, "Line %d:\n", i+1)
+			fmt.Fprintf(&diff, "- %s\n", exp)
+			fmt.Fprintf(&diff, "+ %s\n", act)
 		}
 	}
 

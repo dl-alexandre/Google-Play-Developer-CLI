@@ -32,16 +32,20 @@ func main() {
 	)
 
 	flag.Usage = func() {
+		//nolint:gosec // os.Args[0] is the program name, not user input
 		fmt.Fprintf(os.Stderr, "Usage: %s [OPTIONS]\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "Compare Go benchmark results and detect performance regressions.\n\n")
 		fmt.Fprintf(os.Stderr, "Options:\n")
 		flag.PrintDefaults()
 		fmt.Fprintf(os.Stderr, "\nExamples:\n")
 		fmt.Fprintf(os.Stderr, "  # Compare two benchmark files\n")
+		//nolint:gosec // os.Args[0] is the program name, not user input
 		fmt.Fprintf(os.Stderr, "  %s --baseline main.bench --current pr.bench\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  # Compare with stricter threshold\n")
+		//nolint:gosec // os.Args[0] is the program name, not user input
 		fmt.Fprintf(os.Stderr, "  %s --baseline main.bench --current pr.bench --threshold 1.10\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  # GitHub Actions output format\n")
+		//nolint:gosec // os.Args[0] is the program name, not user input
 		fmt.Fprintf(os.Stderr, "  %s --baseline main.bench --current pr.bench --format github\n", os.Args[0])
 	}
 

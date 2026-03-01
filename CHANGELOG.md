@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+#### Google Play API v2 Features
+- **Edit Commit Review Behavior**: Added `inProgressReviewBehaviour` parameter to edit commit operations
+  - Supports `THROW_ERROR_IF_IN_PROGRESS` - fails if changes already in review
+  - Supports `CANCEL_IN_PROGRESS_AND_SUBMIT` - cancels in-progress review and submits new changes
+  - Available on: `gpd publish upload`, `gpd publish release`, `gpd bulk upload`
+  - Useful for CI/CD pipelines that need to force-cancel stuck reviews
+
+### Changed
+- Updated dependencies to maintain compatibility with Go 1.24
+
 ## [0.4.8] - 2026-02-24
 
 ### Added

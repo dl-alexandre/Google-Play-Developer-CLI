@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"google.golang.org/api/androidpublisher/v3"
+	"google.golang.org/api/googleapi"
 
 	"github.com/dl-alexandre/gpd/internal/api"
 	"github.com/dl-alexandre/gpd/internal/errors"
@@ -28,12 +29,13 @@ type BulkCmd struct {
 
 // BulkUploadCmd uploads multiple APK/AAB files in parallel.
 type BulkUploadCmd struct {
-	Files        []string `arg:"" help:"APK/AAB files to upload" type:"existingfile"`
-	Track        string   `help:"Target track" default:"internal" enum:"internal,alpha,beta,production"`
-	EditID       string   `help:"Explicit edit transaction ID"`
-	NoAutoCommit bool     `help:"Keep edit open for manual commit"`
-	DryRun       bool     `help:"Show intended actions without executing"`
-	MaxParallel  int      `help:"Maximum parallel uploads" default:"3"`
+	Files                     []string `arg:"" help:"APK/AAB files to upload" type:"existingfile"`
+	Track                     string   `help:"Target track" default:"internal" enum:"internal,alpha,beta,production"`
+	EditID                    string   `help:"Explicit edit transaction ID"`
+	NoAutoCommit              bool     `help:"Keep edit open for manual commit"`
+	InProgressReviewBehaviour string   `help:"Behavior when committing while review in progress: THROW_ERROR_IF_IN_PROGRESS, CANCEL_IN_PROGRESS_AND_SUBMIT, or IN_PROGRESS_REVIEW_BEHAVIOUR_UNSPECIFIED" enum:"THROW_ERROR_IF_IN_PROGRESS,CANCEL_IN_PROGRESS_AND_SUBMIT,IN_PROGRESS_REVIEW_BEHAVIOUR_UNSPECIFIED," default:""`
+	DryRun                    bool     `help:"Show intended actions without executing"`
+	MaxParallel               int      `help:"Maximum parallel uploads" default:"3"`
 }
 
 // bulkUploadResult represents the result of a bulk upload operation.
@@ -213,6 +215,10 @@ func (cmd *BulkUploadCmd) commitEdit(ctx context.Context, client *api.Client, pk
 	}
 
 	return client.DoWithRetry(ctx, func() error {
+		if cmd.InProgressReviewBehaviour != "" {
+			_, err := svc.Edits.Commit(pkg, editID).Context(ctx).Do(googleapi.QueryParameter("inProgressReviewBehaviour", cmd.InProgressReviewBehaviour))
+			return err
+		}
 		_, err := svc.Edits.Commit(pkg, editID).Context(ctx).Do()
 		return err
 	})

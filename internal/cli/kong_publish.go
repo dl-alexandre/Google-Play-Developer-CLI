@@ -42,15 +42,16 @@ type PublishCmd struct {
 
 // PublishUploadCmd uploads APK or AAB.
 type PublishUploadCmd struct {
-	File               string `arg:"" help:"File to upload (APK or AAB)" type:"existingfile"`
-	Track              string `help:"Target track" default:"internal" enum:"internal,alpha,beta,production"`
-	EditID             string `help:"Explicit edit transaction ID"`
-	ObbMain            string `help:"Main expansion file path"`
-	ObbPatch           string `help:"Patch expansion file path"`
-	ObbMainRefVersion  int64  `help:"Reference version code for main expansion file"`
-	ObbPatchRefVersion int64  `help:"Reference version code for patch expansion file"`
-	NoAutoCommit       bool   `help:"Keep edit open for manual commit"`
-	DryRun             bool   `help:"Show intended actions without executing"`
+	File                      string `arg:"" help:"File to upload (APK or AAB)" type:"existingfile"`
+	Track                     string `help:"Target track" default:"internal" enum:"internal,alpha,beta,production"`
+	EditID                    string `help:"Explicit edit transaction ID"`
+	ObbMain                   string `help:"Main expansion file path"`
+	ObbPatch                  string `help:"Patch expansion file path"`
+	ObbMainRefVersion         int64  `help:"Reference version code for main expansion file"`
+	ObbPatchRefVersion        int64  `help:"Reference version code for patch expansion file"`
+	NoAutoCommit              bool   `help:"Keep edit open for manual commit"`
+	InProgressReviewBehaviour string `help:"Behavior when committing while review in progress: THROW_ERROR_IF_IN_PROGRESS, CANCEL_IN_PROGRESS_AND_SUBMIT, or IN_PROGRESS_REVIEW_BEHAVIOUR_UNSPECIFIED" enum:"THROW_ERROR_IF_IN_PROGRESS,CANCEL_IN_PROGRESS_AND_SUBMIT,IN_PROGRESS_REVIEW_BEHAVIOUR_UNSPECIFIED," default:""`
+	DryRun                    bool   `help:"Show intended actions without executing"`
 }
 
 const fileTypeAAB = "aab"
@@ -303,6 +304,10 @@ func (cmd *PublishUploadCmd) commitUploadEdit(ctx context.Context, client *api.C
 	}
 
 	err := client.DoWithRetry(ctx, func() error {
+		if cmd.InProgressReviewBehaviour != "" {
+			_, cerr := svc.Edits.Commit(packageName, editID).Context(ctx).Do(googleapi.QueryParameter("inProgressReviewBehaviour", cmd.InProgressReviewBehaviour))
+			return cerr
+		}
 		_, cerr := svc.Edits.Commit(packageName, editID).Context(ctx).Do()
 		return cerr
 	})
@@ -366,18 +371,19 @@ func (cmd *PublishUploadCmd) uploadExpansionFile(ctx context.Context, client *ap
 
 // PublishReleaseCmd creates or updates a release.
 type PublishReleaseCmd struct {
-	Track               string   `help:"Release track" default:"internal" enum:"internal,alpha,beta,production"`
-	Name                string   `help:"Release name"`
-	Status              string   `help:"Release status" default:"draft" enum:"draft,completed,halted,inProgress"`
-	VersionCodes        []string `help:"Version codes to include (repeatable)"`
-	RetainVersionCodes  []string `help:"Version codes to retain (repeatable)"`
-	InAppUpdatePriority int      `help:"In-app update priority (0-5)" default:"-1"`
-	ReleaseNotesFile    string   `help:"JSON file with localized release notes" type:"existingfile"`
-	EditID              string   `help:"Explicit edit transaction ID"`
-	NoAutoCommit        bool     `help:"Keep edit open for manual commit"`
-	DryRun              bool     `help:"Show intended actions without executing"`
-	Wait                bool     `help:"Wait for release to complete"`
-	WaitTimeout         string   `help:"Maximum time to wait" default:"30m"`
+	Track                     string   `help:"Release track" default:"internal" enum:"internal,alpha,beta,production"`
+	Name                      string   `help:"Release name"`
+	Status                    string   `help:"Release status" default:"draft" enum:"draft,completed,halted,inProgress"`
+	VersionCodes              []string `help:"Version codes to include (repeatable)"`
+	RetainVersionCodes        []string `help:"Version codes to retain (repeatable)"`
+	InAppUpdatePriority       int      `help:"In-app update priority (0-5)" default:"-1"`
+	ReleaseNotesFile          string   `help:"JSON file with localized release notes" type:"existingfile"`
+	EditID                    string   `help:"Explicit edit transaction ID"`
+	NoAutoCommit              bool     `help:"Keep edit open for manual commit"`
+	InProgressReviewBehaviour string   `help:"Behavior when committing while review in progress: THROW_ERROR_IF_IN_PROGRESS, CANCEL_IN_PROGRESS_AND_SUBMIT, or IN_PROGRESS_REVIEW_BEHAVIOUR_UNSPECIFIED" enum:"THROW_ERROR_IF_IN_PROGRESS,CANCEL_IN_PROGRESS_AND_SUBMIT,IN_PROGRESS_REVIEW_BEHAVIOUR_UNSPECIFIED," default:""`
+	DryRun                    bool     `help:"Show intended actions without executing"`
+	Wait                      bool     `help:"Wait for release to complete"`
+	WaitTimeout               string   `help:"Maximum time to wait" default:"30m"`
 }
 
 // releaseResult represents the result of a release operation.
@@ -620,6 +626,10 @@ func (cmd *PublishReleaseCmd) commitReleaseEdit(ctx context.Context, client *api
 	}
 
 	err := client.DoWithRetry(ctx, func() error {
+		if cmd.InProgressReviewBehaviour != "" {
+			_, cerr := svc.Edits.Commit(packageName, editID).Context(ctx).Do(googleapi.QueryParameter("inProgressReviewBehaviour", cmd.InProgressReviewBehaviour))
+			return cerr
+		}
 		_, cerr := svc.Edits.Commit(packageName, editID).Context(ctx).Do()
 		return cerr
 	})

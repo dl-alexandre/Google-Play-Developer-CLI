@@ -1138,7 +1138,8 @@ func TestAutomationCommands_RequireAuth(t *testing.T) {
 				Track:            "production",
 				StartPercentage:  1,
 				TargetPercentage: 10,
-				DryRun:           false,
+				StepSize:         10,   // Added to prevent infinite loop
+				DryRun:           true, // Set to true to avoid blocking in tests
 				Wait:             false,
 			},
 		},
@@ -1165,7 +1166,7 @@ func TestAutomationCommands_RequireAuth(t *testing.T) {
 				Track:         "production",
 				Duration:      10 * time.Minute,
 				CheckInterval: 5 * time.Minute,
-				DryRun:        false,
+				DryRun:        true, // Set to true to avoid blocking in tests
 			},
 		},
 	}

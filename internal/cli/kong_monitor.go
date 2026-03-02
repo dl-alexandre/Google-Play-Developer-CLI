@@ -1696,7 +1696,7 @@ func (cmd *MonitorWebhooksListCmd) Run(globals *Globals) error {
 
 // parseDecimalValue parses a decimal value from the API response.
 func parseDecimalValue(m *playdeveloperreporting.GooglePlayDeveloperReportingV1beta1MetricValue) float64 {
-	if m.DecimalValue == nil || m.DecimalValue.Value == "" {
+	if m == nil || m.DecimalValue == nil || m.DecimalValue.Value == "" {
 		return 0
 	}
 	val, _ := strconv.ParseFloat(m.DecimalValue.Value, 64)

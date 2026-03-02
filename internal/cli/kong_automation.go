@@ -300,6 +300,13 @@ func (cmd *AutomationRolloutCmd) Run(globals *Globals) error {
 func calculateRolloutSteps(start, target, stepSize float64) []float64 {
 	var steps []float64
 	current := start
+
+	// Prevent infinite loop if stepSize is 0 or negative
+	if stepSize <= 0 {
+		steps = append(steps, target)
+		return steps
+	}
+
 	for current < target {
 		current += stepSize
 		if current > target {

@@ -413,6 +413,7 @@ func TestKongCheckDoctorCredentials(t *testing.T) {
 			name:         "valid serviceAccountKeyPath in config",
 			envKey:       "",
 			gacPath:      "",
+			parsedConfig: &config.Config{},
 			configLoaded: true,
 			setup: func(t *testing.T) string {
 				tmpDir := t.TempDir()
@@ -429,6 +430,7 @@ func TestKongCheckDoctorCredentials(t *testing.T) {
 			name:         "missing serviceAccountKeyPath in config",
 			envKey:       "",
 			gacPath:      "",
+			parsedConfig: &config.Config{},
 			configLoaded: true,
 			setup: func(t *testing.T) string {
 				return "/nonexistent/key.json"

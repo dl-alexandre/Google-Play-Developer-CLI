@@ -94,6 +94,7 @@ linters:
       - path: cmd/
         linters:
           - forbidigo
+          - gosec
 
 formatters:
   enable:
@@ -102,7 +103,7 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/dl-alexandre/gpd
+        - github.com/dl-alexandre/Google-Play-Developer-CLI
 
 issues:
   max-issues-per-linter: 0

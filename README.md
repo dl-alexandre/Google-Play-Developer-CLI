@@ -1,21 +1,175 @@
-# gpd - Google Play Developer CLI
+# gpd – Google Play Developer CLI
 
-A fast, lightweight command-line interface for the Google Play Developer Console. The Google Play equivalent to the App Store Connect CLI.
+**The fast, lightweight, zero-Ruby alternative to Fastlane for Google Play Console.**
 
+[![Go Report Card](https://goreportcard.com/badge/github.com/dl-alexandre/Google-Play-Developer-CLI)](https://goreportcard.com/report/github.com/dl-alexandre/Google-Play-Developer-CLI)
+[![Release](https://img.shields.io/github/v/release/dl-alexandre/Google-Play-Developer-CLI?color=green)](https://github.com/dl-alexandre/Google-Play-Developer-CLI/releases)
 [![CI](https://github.com/dl-alexandre/Google-Play-Developer-CLI/actions/workflows/ci.yml/badge.svg)](https://github.com/dl-alexandre/Google-Play-Developer-CLI/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/badge/Go-1.24.0-00ADD8?style=flat&logo=go)](https://go.dev/)
-[![Release](https://img.shields.io/github/v/release/dl-alexandre/Google-Play-Developer-CLI)](https://github.com/dl-alexandre/Google-Play-Developer-CLI/releases/latest)
 [![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Linux%20%7C%20Windows-blue)](https://github.com/dl-alexandre/Google-Play-Developer-CLI/releases)
 [![Downloads](https://img.shields.io/github/downloads/dl-alexandre/Google-Play-Developer-CLI/total)](https://github.com/dl-alexandre/Google-Play-Developer-CLI/releases)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/dl-alexandre/Google-Play-Developer-CLI?style=social)](https://github.com/dl-alexandre/Google-Play-Developer-CLI)
+
+- ⚡ **Sub-200ms cold start** — no Ruby VM bloat, instant even on slow CI runners
+- 🖥️ **JSON-first output** — built for AI agents, scripts, and automation (predictable exit codes, no parsing HTML)
+- 🔒 **Secure by default** — platform keystore + PII redaction, never leak service account keys
+- ✅ **Full Play Console coverage** — publishing, reviews, analytics, vitals, monetization, integrity + 61+ commands
+- 🛠️ **Cross-platform** — macOS, Linux, Windows via Homebrew, curl, or Go install
+
+If Fastlane feels heavy/slow, gpd gives you the same power with a tiny footprint and modern DX.
+
+**[Quick Install →](#quick-install)**
+
+---
+
+## gpd vs Fastlane
+
+| Feature | gpd (Google-Play-Developer-CLI) | Fastlane (supply) |
+|---------|----------------------------------|-------------------|
+| Cold start time | <200ms | 2–10s+ (Ruby boot) |
+| Runtime footprint | ~10–20 MB | 100+ MB + gems |
+| Language / Deps | Go – single binary | Ruby + heavy dependencies |
+| Output format | JSON-first, machine-readable | Human text + plugins |
+| AI/Script friendliness | Designed for agents (exit codes, structured) | Requires parsing plugins |
+| Credential security | Platform store + redaction | Manual JSON key handling |
+| Play API coverage | Full (publishing, reviews, analytics, monetization, integrity…) | Good, but fragmented actions |
+| Install size / ease | Homebrew / curl / go install | gem install + bundle |
+| Windows support | Native | WSL or painful |
+
+**Choose gpd when you want speed, security, and scriptability without the Ruby tax.**
+
+---
+
+## Quick Install
+
+```bash
+# macOS/Linux via Homebrew (10 seconds)
+brew tap dl-alexandre/tap && brew install gpd
+
+# OR macOS/Linux via curl
+curl -fsSL https://raw.githubusercontent.com/dl-alexandre/Google-Play-Developer-CLI/main/install.sh | bash
+
+# OR via Go
+go install github.com/dl-alexandre/Google-Play-Developer-CLI/cmd/gpd@latest
+```
+
+**[View all installation options →](#installation)**
+
+---
+
+## Quick Start
+
+```bash
+# 1. Authenticate once (service account JSON)
+gpd auth login --key service-account.json
+
+# 2. Verify setup
+gpd auth check --package com.example.app
+
+# 3. Upload AAB to internal track – JSON output ready for scripts
+gpd publish upload myapp.aab --package com.example.app --track internal --json
+```
+
+**[Full auth guide →](#authentication)**
+
+---
+
+## Why gpd Over Fastlane?
+
+<details>
+<summary><b>Click to see why developers are switching</b></summary>
+
+### Speed That Matters
+- Cold start in <200ms vs Ruby's 2–10s boot time
+- CI pipelines finish faster, saving compute costs
+- Instant feedback during development
+
+### Built for Modern Workflows
+- JSON-first output designed for AI agents and automation
+- Predictable exit codes for reliable scripting
+- No browser-based auth interruptions
+
+### Security-First Design
+- Credentials stored in platform keychain (macOS Keychain, Linux Secret Service, Windows Credential Manager)
+- Automatic PII redaction from all logs
+- Service account keys never touch disk unencrypted
+
+### Zero Dependencies
+- Single static binary—no gemfile nightmares
+- Works on Windows natively (no WSL required)
+- Same behavior everywhere
+
+### Full API Coverage
+61+ commands covering:
+- App publishing and release management
+- Review monitoring and replies
+- Android Vitals (crashes, ANRs)
+- Monetization (IAPs, subscriptions)
+- Play Integrity API
+- Play Games Services
+- Custom app publishing
+- User permissions management
+
+</details>
+
+---
+
+## AI Agent Integration
+
+gpd is purpose-built for programmatic access by AI agents and automation:
+
+```bash
+# Get the AI agent quickstart guide
+gpd help agent
+
+# Example: Query reviews and get structured JSON for processing
+gpd reviews list --package com.example.app --min-rating 1 --output json --pretty
+```
+
+**Key features for automation:**
+
+- **Minified JSON by default** — single-line output for easy parsing
+- **Predictable exit codes** — 0=success, 1-8=specific error types
+- **Explicit flags** — no interactive prompts to hang scripts
+- **No browser auth** — fully headless operation
+- **Dry-run mode** — plan operations safely with `--dry-run`
+
+### Sample JSON Output
+
+```json
+{
+  "data": {
+    "reviews": [
+      {
+        "reviewId": "12345",
+        "authorName": "Jane D.",
+        "comments": [{"text": "Great app!"}],
+        "starRating": 5
+      }
+    ]
+  },
+  "error": null,
+  "meta": {
+    "durationMs": 145,
+    "services": ["androidpublisher"],
+    "nextPageToken": null,
+    "warnings": []
+  }
+}
+```
+
+---
 
 ## Features
 
 - **Fast**: Sub-200ms cold start, minimal memory usage
 - **AI-Agent Friendly**: JSON-first output, predictable exit codes, explicit flags
 - **Secure**: Platform-specific credential storage, comprehensive PII redaction
-- **Cross-Platform**: macOS, Linux, and Windows support
+- **Cross-Platform**: Native macOS, Linux, and Windows support
 - **Comprehensive**: Full API coverage for publishing, reviews, analytics, and monetization
+
+---
 
 ## Installation
 
@@ -23,7 +177,7 @@ A fast, lightweight command-line interface for the Google Play Developer Console
 
 ```bash
 # One-liner for macOS/Linux
-brew install gpd
+brew tap dl-alexandre/tap && brew install gpd
 ```
 
 ### Homebrew (macOS/Linux)
@@ -53,13 +207,13 @@ Download the latest release from the [Releases](https://github.com/dl-alexandre/
 
 ```bash
 git clone https://github.com/dl-alexandre/Google-Play-Developer-CLI.git
-cd gpd
+cd Google-Play-Developer-CLI
 make build
 ```
 
-## Quick Start
+---
 
-### 1. Set Up Authentication
+## Authentication
 
 Create a service account in Google Cloud Console with the Google Play Android Publisher API enabled, then:
 
@@ -75,7 +229,7 @@ export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
 gpd auth status
 ```
 
-### 2. Verify Setup
+### Verify Setup
 
 ```bash
 # Check authentication status
@@ -88,18 +242,7 @@ gpd auth check --package com.example.app
 gpd config doctor
 ```
 
-### 3. Start Using
-
-```bash
-# Upload an app bundle
-gpd publish upload app.aab --package com.example.app
-
-# Create a release
-gpd publish release --package com.example.app --track internal --status draft
-
-# List reviews
-gpd reviews list --package com.example.app --min-rating 1 --max-rating 3
-```
+---
 
 ## Command Reference
 
@@ -386,6 +529,8 @@ gpd recovery add-targeting action123 --package ... --country us
 gpd recovery capabilities
 ```
 
+---
+
 ## Output Format
 
 All commands output JSON with a consistent envelope structure:
@@ -418,6 +563,8 @@ All commands output JSON with a consistent envelope structure:
 | 7 | Not found |
 | 8 | Conflict |
 
+---
+
 ## Configuration
 
 Configuration files are stored in OS-appropriate locations:
@@ -437,21 +584,7 @@ Configuration files are stored in OS-appropriate locations:
 | `GPD_TIMEOUT` | Network timeout |
 | `GOOGLE_APPLICATION_CREDENTIALS` | Path to service account key file |
 
-## AI Agent Integration
-
-gpd is designed for programmatic access by AI agents:
-
-```bash
-# Get the AI agent quickstart guide
-gpd help agent
-```
-
-Key features for automation:
-- Minified JSON output by default (single-line)
-- Predictable exit codes for error handling
-- Explicit flags over interactive prompts
-- No browser-based authentication
-- `--dry-run` flag for safe operation planning
+---
 
 ## Shell Completion
 
@@ -468,6 +601,8 @@ gpd config completion zsh > "${fpath[1]}/_gpd"
 gpd config completion fish > ~/.config/fish/completions/gpd.fish
 ```
 
+---
+
 ## Security
 
 - Credentials are stored in platform-specific secure storage (Keychain, Secret Service, Credential Manager)
@@ -475,20 +610,23 @@ gpd config completion fish > ~/.config/fish/completions/gpd.fish
 - Service account keys are never stored in configuration files
 - All API communications use HTTPS with certificate validation
 
+---
+
 ## Contributing
 
 Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-## License
-
-MIT License - see [LICENSE](LICENSE) for details.
+---
 
 ## Support
 
-If you find gpd useful, please consider:
-- Starring the [GitHub repository](https://github.com/dl-alexandre/Google-Play-Developer-CLI)
-- Contributing improvements
-- Reporting bugs
+**⭐ Star this repo** if it saves you time in CI/CD pipelines.
+
+**🐛 Open an issue** for bugs or feature requests.
+
+**💙 Sponsor** if gpd helps your business—sponsors get priority support.
+
+---
 
 ## Related Projects
 
@@ -496,6 +634,14 @@ If you find gpd useful, please consider:
 - [fastlane](https://fastlane.tools/) - Automation for iOS and Android
 - [gradle-play-publisher](https://github.com/Triple-T/gradle-play-publisher) - Gradle plugin for Android publishing
 
+---
+
 ## App Store Connect CLI Parity
 
 See the parity matrix in [docs/asc-parity.md](docs/asc-parity.md).
+
+---
+
+## License
+
+MIT License - see [LICENSE](LICENSE) for details.

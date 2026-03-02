@@ -46,7 +46,7 @@ jobs:
           DATE: ${{ github.event.head_commit.timestamp }}
         run: |
           mkdir -p dist
-          LDFLAGS="-s -w -X github.com/dl-alexandre/gpd/pkg/version.Version=${VERSION} -X github.com/dl-alexandre/gpd/pkg/version.GitCommit=${COMMIT} -X github.com/dl-alexandre/gpd/pkg/version.BuildTime=${DATE}"
+          LDFLAGS="-s -w -X github.com/dl-alexandre/Google-Play-Developer-CLI/pkg/version.Version=${VERSION} -X github.com/dl-alexandre/Google-Play-Developer-CLI/pkg/version.GitCommit=${COMMIT} -X github.com/dl-alexandre/Google-Play-Developer-CLI/pkg/version.BuildTime=${DATE}"
           if [ "${{ matrix.os }}" = "windows" ]; then
             go build -ldflags="${LDFLAGS}" -o dist/gpd-${{ matrix.os }}-${{ matrix.arch }}.exe ./cmd/gpd
           else

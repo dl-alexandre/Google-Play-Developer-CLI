@@ -11,7 +11,7 @@ import (
 
 	"github.com/alecthomas/kong"
 
-	"github.com/dl-alexandre/gpd/internal/errors"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/errors"
 )
 
 // TestGlobalsDefaults verifies that Globals struct has proper default values

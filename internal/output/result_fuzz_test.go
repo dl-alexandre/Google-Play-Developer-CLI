@@ -6,7 +6,7 @@ package output
 import (
 	"testing"
 
-	"github.com/dl-alexandre/gpd/internal/errors"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/errors"
 )
 
 // FuzzNewResult fuzz tests result creation with various data types

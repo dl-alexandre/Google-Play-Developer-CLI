@@ -12,10 +12,10 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/dl-alexandre/gpd/internal/config"
-	"github.com/dl-alexandre/gpd/internal/errors"
-	"github.com/dl-alexandre/gpd/internal/output"
-	"github.com/dl-alexandre/gpd/internal/storage"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/config"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/errors"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/output"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/storage"
 )
 
 // Note: ConfigCmd is declared in kong_commands.go as a placeholder.

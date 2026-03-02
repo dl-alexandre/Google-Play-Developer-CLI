@@ -16,8 +16,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/dl-alexandre/gpd/internal/auth"
-	gpdErrors "github.com/dl-alexandre/gpd/internal/errors"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/auth"
+	gpdErrors "github.com/dl-alexandre/Google-Play-Developer-CLI/internal/errors"
 )
 
 // generateServiceAccountKey generates a valid service account key for testing

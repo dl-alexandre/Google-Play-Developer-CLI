@@ -6,7 +6,7 @@ import (
 
 	"golang.org/x/oauth2"
 
-	gpdErrors "github.com/dl-alexandre/gpd/internal/errors"
+	gpdErrors "github.com/dl-alexandre/Google-Play-Developer-CLI/internal/errors"
 )
 
 type PersistedTokenSource struct {

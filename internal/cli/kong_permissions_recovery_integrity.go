@@ -11,8 +11,8 @@ import (
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/playintegrity/v1"
 
-	"github.com/dl-alexandre/gpd/internal/errors"
-	"github.com/dl-alexandre/gpd/internal/output"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/errors"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/output"
 )
 
 // ============================================================================

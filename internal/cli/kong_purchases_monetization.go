@@ -10,8 +10,8 @@ import (
 
 	"google.golang.org/api/androidpublisher/v3"
 
-	"github.com/dl-alexandre/gpd/internal/errors"
-	"github.com/dl-alexandre/gpd/internal/output"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/errors"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/output"
 )
 
 const purchaseTypeSubscription = "subscription"

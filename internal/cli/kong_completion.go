@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/dl-alexandre/gpd/internal/config"
-	"github.com/dl-alexandre/gpd/internal/errors"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/config"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/errors"
 )
 
 // CompletionCmd generates shell completion scripts.

@@ -12,7 +12,7 @@ import (
 
 	"golang.org/x/oauth2"
 
-	"github.com/dl-alexandre/gpd/internal/config"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/config"
 )
 
 const (

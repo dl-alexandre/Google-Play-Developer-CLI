@@ -16,8 +16,8 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/dl-alexandre/gpd/internal/config"
-	"github.com/dl-alexandre/gpd/internal/errors"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/config"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/errors"
 )
 
 // Edit represents an edit transaction.

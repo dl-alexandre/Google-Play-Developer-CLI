@@ -1,4 +1,4 @@
-module github.com/dl-alexandre/gpd
+module github.com/dl-alexandre/Google-Play-Developer-CLI
 
 go 1.24.0
 

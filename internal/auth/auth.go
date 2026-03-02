@@ -15,8 +15,8 @@ import (
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 
-	"github.com/dl-alexandre/gpd/internal/config"
-	"github.com/dl-alexandre/gpd/internal/errors"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/config"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/errors"
 )
 
 func validatePath(path string) error {

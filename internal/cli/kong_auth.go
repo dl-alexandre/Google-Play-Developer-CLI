@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/dl-alexandre/gpd/internal/output"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/output"
 )
 
 // AuthCmd contains authentication commands.

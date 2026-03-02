@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	gpdErrors "github.com/dl-alexandre/gpd/internal/errors"
+	gpdErrors "github.com/dl-alexandre/Google-Play-Developer-CLI/internal/errors"
 )
 
 // ============================================================================

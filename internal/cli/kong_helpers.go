@@ -5,9 +5,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/dl-alexandre/gpd/internal/auth"
-	"github.com/dl-alexandre/gpd/internal/output"
-	"github.com/dl-alexandre/gpd/internal/storage"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/auth"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/output"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/storage"
 )
 
 const (

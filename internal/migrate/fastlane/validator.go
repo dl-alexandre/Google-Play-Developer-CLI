@@ -3,7 +3,7 @@ package fastlane
 import (
 	"fmt"
 
-	"github.com/dl-alexandre/gpd/internal/migrate"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/migrate"
 )
 
 // ValidateLocale validates fastlane metadata for a single locale.

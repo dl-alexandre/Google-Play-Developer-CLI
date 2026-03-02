@@ -12,7 +12,7 @@ import (
 
 	"github.com/xuri/excelize/v2"
 
-	"github.com/dl-alexandre/gpd/internal/errors"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/errors"
 )
 
 // Format represents the output format type.

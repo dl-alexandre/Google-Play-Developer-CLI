@@ -12,9 +12,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dl-alexandre/gpd/internal/config"
-	"github.com/dl-alexandre/gpd/internal/errors"
-	"github.com/dl-alexandre/gpd/internal/output"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/config"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/errors"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/output"
 )
 
 // ============================================================================

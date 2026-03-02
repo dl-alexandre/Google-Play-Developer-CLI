@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dl-alexandre/gpd/internal/api"
-	"github.com/dl-alexandre/gpd/internal/errors"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/api"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/errors"
 )
 
 // ============================================================================

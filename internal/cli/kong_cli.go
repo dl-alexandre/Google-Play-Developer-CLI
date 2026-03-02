@@ -9,8 +9,8 @@ import (
 
 	"github.com/alecthomas/kong"
 
-	"github.com/dl-alexandre/gpd/internal/errors"
-	"github.com/dl-alexandre/gpd/internal/logging"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/errors"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/logging"
 )
 
 // Globals contains all global flags shared across all commands.

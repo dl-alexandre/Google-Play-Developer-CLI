@@ -19,7 +19,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/dl-alexandre/gpd/internal/apitest/benchcheck"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/apitest/benchcheck"
 )
 
 func main() {

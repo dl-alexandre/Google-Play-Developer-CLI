@@ -12,9 +12,9 @@ import (
 	"golang.org/x/text/language"
 	playdeveloperreporting "google.golang.org/api/playdeveloperreporting/v1beta1"
 
-	"github.com/dl-alexandre/gpd/internal/api"
-	"github.com/dl-alexandre/gpd/internal/errors"
-	"github.com/dl-alexandre/gpd/internal/output"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/api"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/errors"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/output"
 )
 
 const (

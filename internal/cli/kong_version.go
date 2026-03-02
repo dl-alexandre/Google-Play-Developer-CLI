@@ -3,7 +3,7 @@ package cli
 import (
 	"fmt"
 
-	"github.com/dl-alexandre/gpd/pkg/version"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/pkg/version"
 )
 
 // VersionCmd shows version information.

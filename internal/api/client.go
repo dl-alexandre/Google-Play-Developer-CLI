@@ -20,7 +20,7 @@ import (
 	playdeveloperreporting "google.golang.org/api/playdeveloperreporting/v1beta1"
 	"google.golang.org/api/playintegrity/v1"
 
-	"github.com/dl-alexandre/gpd/internal/logging"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/logging"
 )
 
 // loggingTransport wraps an http.RoundTripper to log requests and responses.

@@ -4,7 +4,7 @@ package main
 import (
 	"os"
 
-	"github.com/dl-alexandre/gpd/internal/cli"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/cli"
 )
 
 func main() {

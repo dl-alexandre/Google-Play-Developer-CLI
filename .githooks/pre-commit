@@ -6,16 +6,34 @@ cd "$repo_root"
 
 export PATH="$(go env GOPATH)/bin:$PATH"
 
-echo "Running format checks..."
+echo "Running pre-commit checks..."
+
+# Run format checks
+echo "  → Running format checks..."
 make format
 if ! git diff --quiet; then
-  echo "Formatting changed files. Please review and re-stage:"
+  echo "Error: Formatting changed files. Please review and re-stage:"
   git --no-pager diff --name-only
   exit 1
 fi
 
-echo "Running lint checks..."
+# Run lint checks
+echo "  → Running lint checks..."
 make lint
 
-echo "Running short test suite..."
-go test -short ./...
+# Run security scan
+echo "  → Running security scan..."
+if ! make security; then
+  echo "Error: Security scan failed. Fix security issues before committing."
+  exit 1
+fi
+
+# Run tests
+echo "  → Running short test suite..."
+if ! go test -short ./...; then
+  echo "Error: Tests failed."
+  exit 1
+fi
+
+echo "All checks passed!"
+exit 0

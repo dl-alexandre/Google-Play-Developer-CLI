@@ -144,7 +144,5 @@ jobs:
           cache: true
           check-latest: true
 
-      - name: Run govulncheck
-        run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
-          govulncheck ./...
+      - name: Run security scan
+        run: make security

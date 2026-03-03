@@ -27,7 +27,7 @@ PLATFORMS = linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
 
 .PHONY: all build clean test deps tidy lint install help format install-hooks \
 	benchmark benchmark-compare benchmark-regression benchmark-baseline \
-	test-unit test-integration test-e2e test-coverage-threshold test-flaky
+	test-unit test-integration test-e2e test-coverage-threshold test-flaky security check vet
 
 # Default target
 all: deps build
@@ -48,10 +48,22 @@ build-all:
 		echo "Built $(BINARY_DIR)/$(BINARY_NAME)-$${platform%/*}-$${platform#*/}"; \
 	done
 
+# Run all checks (format, vet, lint, test)
+.PHONY: check
+check: format vet lint test
+	@echo "✓ All checks passed"
+
+# Run go vet
+.PHONY: vet
+vet:
+	@echo "Running go vet..."
+	$(GOCMD) vet ./...
+
 # Install dependencies
 deps:
 	@echo "Installing dependencies..."
 	$(GOMOD) download
+	$(GOMOD) verify
 
 # Tidy go modules
 tidy:
@@ -149,6 +161,12 @@ format:
 	else \
 		echo "goimports not installed. Install: go install golang.org/x/tools/cmd/goimports@latest"; \
 	fi
+
+# Run security scan with gosec
+security:
+	@echo "Running security scan..."
+	@which gosec > /dev/null || (echo "Installing gosec..." && go install github.com/securego/gosec/v2/cmd/gosec@latest)
+	gosec -quiet ./...
 
 # Install git hooks
 install-hooks:
@@ -255,6 +273,7 @@ help:
 	@echo "  deps         - Download dependencies"
 	@echo "  tidy         - Tidy go modules"
 	@echo "  format       - Format code with gofmt and goimports"
+	@echo "  security     - Run security scan with gosec"
 	@echo "  clean        - Clean build artifacts"
 	@echo "  install      - Install binary to GOPATH/bin"
 	@echo "  checksums    - Generate SHA256 checksums"

@@ -66,3 +66,4 @@ creds/
 
 # Build binaries
 benchcheck
+internal/cli/release-notes.json

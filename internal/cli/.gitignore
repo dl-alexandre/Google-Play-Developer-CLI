@@ -1,0 +1,4 @@
+# gpd sensitive files
+*.json.key
+service-account*.json
+.gpd/

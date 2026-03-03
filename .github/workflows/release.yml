@@ -1,98 +1,25 @@
 name: Release
-
 on:
   push:
     tags:
-      - 'v*'
-
+      - "v*"
 permissions:
   contents: write
-
 jobs:
-  build:
+  goreleaser:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: darwin
-            arch: arm64
-          - os: darwin
-            arch: amd64
-          - os: linux
-            arch: amd64
-          - os: linux
-            arch: arm64
-          - os: windows
-            arch: amd64
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
-          go-version-file: 'go.mod'
-          cache: true
-
-      - name: Build binaries
-        env:
-          GOOS: ${{ matrix.os }}
-          GOARCH: ${{ matrix.arch }}
-          VERSION: ${{ github.ref_name }}
-          COMMIT: ${{ github.sha }}
-          DATE: ${{ github.event.head_commit.timestamp }}
-        run: |
-          mkdir -p dist
-          LDFLAGS="-s -w -X github.com/dl-alexandre/Google-Play-Developer-CLI/pkg/version.Version=${VERSION} -X github.com/dl-alexandre/Google-Play-Developer-CLI/pkg/version.GitCommit=${COMMIT} -X github.com/dl-alexandre/Google-Play-Developer-CLI/pkg/version.BuildTime=${DATE}"
-          if [ "${{ matrix.os }}" = "windows" ]; then
-            go build -ldflags="${LDFLAGS}" -o dist/gpd-${{ matrix.os }}-${{ matrix.arch }}.exe ./cmd/gpd
-          else
-            go build -ldflags="${LDFLAGS}" -o dist/gpd-${{ matrix.os }}-${{ matrix.arch }} ./cmd/gpd
-          fi
-
-      - name: Package
-        run: |
-          cd dist
-          if [ "${{ matrix.os }}" = "windows" ]; then
-            mv gpd-${{ matrix.os }}-${{ matrix.arch }}.exe gpd.exe
-            zip gpd-${{ matrix.os }}-${{ matrix.arch }}.zip gpd.exe
-            rm gpd.exe
-          else
-            mv gpd-${{ matrix.os }}-${{ matrix.arch }} gpd
-            tar -czf gpd-${{ matrix.os }}-${{ matrix.arch }}.tar.gz gpd
-            rm gpd
-          fi
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+          go-version-file: go.mod
+      - uses: goreleaser/goreleaser-action@v6
         with:
-          name: gpd-${{ matrix.os }}-${{ matrix.arch }}
-          path: dist/*
-          retention-days: 1
-
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: dist
-          pattern: gpd-*
-          merge-multiple: true
-
-      - name: Generate checksums
-        run: |
-          cd dist
-          sha256sum gpd-* > checksums.txt
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*
-          generate_release_notes: true
+          distribution: goreleaser
+          version: latest
+          args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}

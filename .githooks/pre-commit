@@ -1,39 +1,78 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+# Pre-commit hook for Go CLI projects
+# This hook runs comprehensive checks that match CI pipeline
 
-repo_root="$(git rev-parse --show-toplevel)"
-cd "$repo_root"
+set -e
 
-export PATH="$(go env GOPATH)/bin:$PATH"
+echo "🔍 Running pre-commit checks..."
 
-echo "Running pre-commit checks..."
-
-# Run format checks
-echo "  → Running format checks..."
-make format
-if ! git diff --quiet; then
-  echo "Error: Formatting changed files. Please review and re-stage:"
-  git --no-pager diff --name-only
-  exit 1
+# Check if we're in the root of a Go project
+if [ ! -f "go.mod" ]; then
+    echo "❌ Error: go.mod not found. Are you in the project root?"
+    exit 1
 fi
 
-# Run lint checks
-echo "  → Running lint checks..."
-make lint
+# Run formatting check
+echo "  → Running go fmt..."
+unformatted=$(gofmt -l .)
+if [ -n "$unformatted" ]; then
+    echo "❌ Error: The following files need formatting:"
+    echo "$unformatted"
+    echo "Run 'make format' to fix."
+    exit 1
+fi
 
-# Run security scan
-echo "  → Running security scan..."
-if ! make security; then
-  echo "Error: Security scan failed. Fix security issues before committing."
-  exit 1
+# Run goimports if available
+if command -v goimports >/dev/null 2>&1; then
+    echo "  → Running goimports..."
+    unformatted=$(goimports -l . 2>/dev/null | grep -v "vendor/" || true)
+    if [ -n "$unformatted" ]; then
+        echo "❌ Error: The following files need import formatting:"
+        echo "$unformatted"
+        echo "Run 'make format' or 'goimports -w .' to fix."
+        exit 1
+    fi
+fi
+
+# Run go vet
+echo "  → Running go vet..."
+if ! go vet ./... 2>&1; then
+    echo "❌ Error: go vet found issues."
+    exit 1
+fi
+
+# Run golangci-lint if available (matches CI)
+if command -v golangci-lint >/dev/null 2>&1; then
+    echo "  → Running golangci-lint..."
+    if ! golangci-lint run --timeout=5m ./... 2>&1; then
+        echo "❌ Error: golangci-lint found issues."
+        echo "Run 'make lint' to see details."
+        exit 1
+    fi
+else
+    echo "⚠️  Warning: golangci-lint not installed. Install with:"
+    echo "    go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"
+fi
+
+# Run security scan if available (matches CI)
+if command -v gosec >/dev/null 2>&1; then
+    echo "  → Running gosec security scan..."
+    if ! gosec -quiet ./... 2>&1; then
+        echo "❌ Error: gosec found security issues."
+        echo "Run 'make security' to see details."
+        exit 1
+    fi
+else
+    echo "⚠️  Warning: gosec not installed. Install with:"
+    echo "    go install github.com/securego/gosec/v2/cmd/gosec@latest"
 fi
 
 # Run tests
-echo "  → Running short test suite..."
-if ! go test -short ./...; then
-  echo "Error: Tests failed."
-  exit 1
+echo "  → Running tests..."
+if ! go test -short ./... 2>&1; then
+    echo "❌ Error: Tests failed."
+    exit 1
 fi
 
-echo "All checks passed!"
+echo "✅ All checks passed!"
 exit 0

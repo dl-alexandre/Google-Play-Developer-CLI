@@ -5,10 +5,12 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/alecthomas/kong"
 
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/cache"
 	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/errors"
 	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/logging"
 )
@@ -25,9 +27,13 @@ type Globals struct {
 	Verbose     bool          `help:"Enable verbose logging" short:"v"`
 	KeyPath     string        `help:"Path to service account key file"`
 	Profile     string        `help:"Configuration profile to use"`
+	CacheDir    string        `help:"Cache directory for temporary data" env:"GPD_CACHE_DIR"`
 
 	// Context is set by RunKongCLI and propagated to commands
 	Context context.Context `kong:"-"`
+
+	// Cache is initialized by RunKongCLI
+	Cache *cache.Cache `kong:"-"`
 }
 
 // KongCLI represents the complete Kong CLI structure.
@@ -53,6 +59,7 @@ type KongCLI struct {
 	CustomApp    CustomAppCmd    `cmd:"" help:"Custom app publishing" aliases:"customapp"`
 	Grouping     GroupingCmd     `cmd:"" help:"App access grouping"`
 	Version      VersionCmd      `cmd:"" help:"Show version information"`
+	CheckUpdate  UpdateCheckCmd  `cmd:"" name:"check-update" help:"Check for available updates"`
 	Completion   CompletionCmd   `cmd:"" help:"Generate shell completion scripts"`
 
 	// New advanced commands
@@ -68,6 +75,22 @@ type KongCLI struct {
 // Run executes the Kong CLI and returns the exit code.
 func RunKongCLI() int {
 	var cli KongCLI
+
+	// Set default cache directory
+	if cli.CacheDir == "" {
+		homeDir, err := os.UserHomeDir()
+		if err == nil {
+			cli.CacheDir = filepath.Join(homeDir, ".gpd", "cache")
+		}
+	}
+
+	// Initialize cache
+	if cli.CacheDir != "" {
+		cli.Cache = cache.New(cli.CacheDir, 24*time.Hour)
+	}
+
+	// Perform automatic update check (non-blocking)
+	AutoUpdateCheck(cli.CacheDir)
 
 	parser, err := kong.New(&cli,
 		kong.Name("gpd"),

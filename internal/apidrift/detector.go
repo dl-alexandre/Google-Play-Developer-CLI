@@ -3,6 +3,7 @@
 package apidrift
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -164,11 +165,18 @@ func NewDetector(discoveryURL, goModPath, clientSourceDir string) *Detector {
 
 // FetchDiscoveryDocument retrieves and parses the discovery API document
 func (d *Detector) FetchDiscoveryDocument() (*DiscoveryDocument, error) {
-	resp, err := d.HTTPClient.Get(d.DiscoveryURL)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, d.DiscoveryURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := d.HTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch discovery document: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -191,7 +199,7 @@ func (d *Detector) ParseGoModVersion() (string, error) {
 	}
 
 	// Look for google.golang.org/api version
-	re := regexp.MustCompile(`google\.golang\.org/api\s+v([\d\.]+)`)
+	re := regexp.MustCompile(`google\.golang\.org/api\s+v([\d.]+)`)
 	matches := re.FindStringSubmatch(string(content))
 	if len(matches) < 2 {
 		return "", fmt.Errorf("could not find google.golang.org/api version in go.mod")
@@ -208,7 +216,8 @@ func (d *Detector) ExtractEndpointsFromDiscovery(doc *DiscoveryDocument) map[str
 }
 
 func (d *Detector) extractResources(prefix string, resources map[string]Resource, endpoints map[string]Method) {
-	for name, resource := range resources {
+	for name := range resources {
+		resource := resources[name]
 		fullName := name
 		if prefix != "" {
 			fullName = prefix + "." + name
@@ -399,7 +408,7 @@ func (d *Detector) generateSummary(report *DriftReport) string {
 
 	if len(report.Endpoints.MissingInClient) > 0 {
 		parts = append(parts, fmt.Sprintf("⚠️ %d endpoints missing from Go client:", len(report.Endpoints.MissingInClient)))
-		for _, ep := range report.Endpoints.MissingInClient[:min(5, len(report.Endpoints.MissingInClient))] {
+		for _, ep := range report.Endpoints.MissingInClient[:minInt(5, len(report.Endpoints.MissingInClient))] {
 			parts = append(parts, "  - "+ep)
 		}
 		if len(report.Endpoints.MissingInClient) > 5 {
@@ -409,7 +418,7 @@ func (d *Detector) generateSummary(report *DriftReport) string {
 
 	if len(report.Endpoints.Deprecated) > 0 {
 		parts = append(parts, fmt.Sprintf("⚠️ %d deprecated endpoints in client:", len(report.Endpoints.Deprecated)))
-		for _, ep := range report.Endpoints.Deprecated[:min(5, len(report.Endpoints.Deprecated))] {
+		for _, ep := range report.Endpoints.Deprecated[:minInt(5, len(report.Endpoints.Deprecated))] {
 			parts = append(parts, "  - "+ep)
 		}
 		if len(report.Endpoints.Deprecated) > 5 {
@@ -417,14 +426,12 @@ func (d *Detector) generateSummary(report *DriftReport) string {
 		}
 	}
 
-	parts = append(parts, "")
-	parts = append(parts, fmt.Sprintf("Discovery revision: %s", report.DiscoveryRevision))
-	parts = append(parts, fmt.Sprintf("Go module version: %s", report.GoModVersion))
+	parts = append(parts, "", fmt.Sprintf("Discovery revision: %s", report.DiscoveryRevision), fmt.Sprintf("Go module version: %s", report.GoModVersion))
 
 	return strings.Join(parts, "\n")
 }
 
-func min(a, b int) int {
+func minInt(a, b int) int {
 	if a < b {
 		return a
 	}

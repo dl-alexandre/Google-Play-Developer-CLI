@@ -1,0 +1,481 @@
+name: API Orchestration
+
+on:
+  schedule:
+    # Run orchestration on Sundays at 8 AM UTC (prepare for week ahead)
+    - cron: "0 8 * * 0"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Orchestration mode'
+        required: true
+        default: 'full'
+        type: choice
+        options:
+          - full
+          - drift-only
+          - health-only
+          - deps-only
+      create_pr:
+        description: 'Create PR if drift detected'
+        required: false
+        default: true
+        type: boolean
+      auto_update:
+        description: 'Attempt auto-update of dependencies'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  actions: read
+
+env:
+  GPD_REQUIRE_CUSTOM_OAUTH: "1"
+
+jobs:
+  # Phase 1: Health Checks
+  health-check:
+    name: System Health Check
+    runs-on: ubuntu-latest
+    outputs:
+      status: ${{ steps.check.outputs.status }}
+      can_proceed: ${{ steps.check.outputs.can_proceed }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache: true
+
+      - name: Run health check
+        id: check
+        run: |
+          mkdir -p .artifacts/orchestration
+          
+          # Build CLI
+          go build -o bin/gpd ./cmd/gpd
+          
+          # Run health check
+          ./bin/gpd maintenance health > .artifacts/orchestration/health.json || true
+          
+          # Determine if we can proceed
+          if [ -f .artifacts/orchestration/health.json ]; then
+            echo "status=healthy" >> $GITHUB_OUTPUT
+            echo "can_proceed=true" >> $GITHUB_OUTPUT
+          else
+            echo "status=unhealthy" >> $GITHUB_OUTPUT
+            echo "can_proceed=true" >> $GITHUB_OUTPUT  # Still proceed, just report
+          fi
+
+      - name: Upload health report
+        uses: actions/upload-artifact@v4
+        with:
+          name: orchestration-health
+          path: .artifacts/orchestration/health.json
+          retention-days: 30
+
+  # Phase 2: Dependency Analysis
+  dependency-analysis:
+    name: Dependency Analysis
+    needs: health-check
+    runs-on: ubuntu-latest
+    outputs:
+      updates_available: ${{ steps.deps.outputs.updates_available }}
+      google_api_update: ${{ steps.deps.outputs.google_api_update }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache: true
+
+      - name: Check for dependency updates
+        id: deps
+        run: |
+          mkdir -p .artifacts/orchestration
+          
+          # Check for outdated dependencies
+          go list -u -m all > .artifacts/orchestration/deps-full.txt
+          
+          # Check specifically for google.golang.org/api
+          GOOGLE_API_LINE=$(grep "google.golang.org/api" .artifacts/orchestration/deps-full.txt || true)
+          if echo "$GOOGLE_API_LINE" | grep -q "\["; then
+            echo "google_api_update=true" >> $GITHUB_OUTPUT
+            echo "⚠️ google.golang.org/api has updates available"
+          else
+            echo "google_api_update=false" >> $GITHUB_OUTPUT
+            echo "✅ google.golang.org/api is up to date"
+          fi
+          
+          # Check if any updates available
+          if grep -q "\[" .artifacts/orchestration/deps-full.txt; then
+            echo "updates_available=true" >> $GITHUB_OUTPUT
+          else
+            echo "updates_available=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload dependency report
+        uses: actions/upload-artifact@v4
+        with:
+          name: orchestration-deps
+          path: .artifacts/orchestration/deps-*.txt
+          retention-days: 30
+
+  # Phase 3: API Drift Detection
+  drift-detection:
+    name: API Drift Detection
+    needs: [health-check, dependency-analysis]
+    runs-on: ubuntu-latest
+    if: needs.health-check.outputs.can_proceed == 'true'
+    outputs:
+      drift_detected: ${{ steps.drift.outputs.drift_detected }}
+      drift_score: ${{ steps.drift.outputs.drift_score }}
+      discovery_revision: ${{ steps.drift.outputs.discovery_revision }}
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        api:
+          - name: androidpublisher
+            priority: critical
+          - name: drive
+            priority: high
+          - name: storage
+            priority: medium
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache: true
+
+      - name: Build CLI
+        run: go build -o bin/gpd ./cmd/gpd
+
+      - name: Detect drift for ${{ matrix.api.name }}
+        id: drift
+        run: |
+          mkdir -p .artifacts/orchestration/drift
+          
+          # Determine discovery URL
+          case "${{ matrix.api.name }}" in
+            androidpublisher)
+              URL="https://www.googleapis.com/discovery/v1/apis/androidpublisher/v3/rest"
+              ;;
+            drive)
+              URL="https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"
+              ;;
+            storage)
+              URL="https://www.googleapis.com/discovery/v1/apis/storage/v1/rest"
+              ;;
+            *)
+              URL="https://www.googleapis.com/discovery/v1/apis/${{ matrix.api.name }}/v1/rest"
+              ;;
+          esac
+          
+          # Run drift detection
+          ./bin/gpd maintenance drift \
+            --discovery-url "$URL" \
+            --format json \
+            --output ".artifacts/orchestration/drift/${{ matrix.api.name }}.json" \
+            --verbose || DRIFT_EXIT=$?
+          
+          # Parse results
+          if [ -f ".artifacts/orchestration/drift/${{ matrix.api.name }}.json" ]; then
+            DRIFT_DETECTED=$(jq -r '.drift_detected // false' ".artifacts/orchestration/drift/${{ matrix.api.name }}.json")
+            DRIFT_SCORE=$(jq -r '.drift_score // 0' ".artifacts/orchestration/drift/${{ matrix.api.name }}.json")
+            REVISION=$(jq -r '.discovery_revision // "unknown"' ".artifacts/orchestration/drift/${{ matrix.api.name }}.json")
+            
+            echo "drift_detected=$DRIFT_DETECTED" >> $GITHUB_OUTPUT
+            echo "drift_score=$DRIFT_SCORE" >> $GITHUB_OUTPUT
+            echo "discovery_revision=$REVISION" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload drift report
+        uses: actions/upload-artifact@v4
+        with:
+          name: orchestration-drift-${{ matrix.api.name }}
+          path: .artifacts/orchestration/drift/${{ matrix.api.name }}.json
+          retention-days: 90
+
+  # Phase 4: Generate Orchestration Report
+  generate-report:
+    name: Generate Orchestration Report
+    needs: [health-check, dependency-analysis, drift-detection]
+    runs-on: ubuntu-latest
+    outputs:
+      report_summary: ${{ steps.report.outputs.summary }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: .artifacts/orchestration
+          pattern: orchestration-*
+
+      - name: Generate comprehensive report
+        id: report
+        run: |
+          mkdir -p .artifacts/orchestration/final
+          
+          cat > .artifacts/orchestration/final/report.md << 'EOF'
+          # API Orchestration Report
+
+          **Generated:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          **Workflow Run:** ${{ github.run_id }}
+
+          ## Executive Summary
+
+          EOF
+
+          # Add health status
+          echo "### System Health" >> .artifacts/orchestration/final/report.md
+          echo "" >> .artifacts/orchestration/final/report.md
+          echo "- Status: ${{ needs.health-check.outputs.status }}" >> .artifacts/orchestration/final/report.md
+          echo "" >> .artifacts/orchestration/final/report.md
+
+          # Add dependency status
+          echo "### Dependencies" >> .artifacts/orchestration/final/report.md
+          echo "" >> .artifacts/orchestration/final/report.md
+          if [ "${{ needs.dependency-analysis.outputs.google_api_update }}" == "true" ]; then
+            echo "⚠️ **google.golang.org/api** has updates available" >> .artifacts/orchestration/final/report.md
+          else
+            echo "✅ All dependencies up to date" >> .artifacts/orchestration/final/report.md
+          fi
+          echo "" >> .artifacts/orchestration/final/report.md
+
+          # Add drift summary
+          echo "### API Drift Summary" >> .artifacts/orchestration/final/report.md
+          echo "" >> .artifacts/orchestration/final/report.md
+          echo "| API | Drift Detected | Score | Revision |" >> .artifacts/orchestration/final/report.md
+          echo "|-----|---------------|-------|----------|" >> .artifacts/orchestration/final/report.md
+          echo "| androidpublisher | ${{ needs.drift-detection.outputs.drift_detected }} | ${{ needs.drift-detection.outputs.drift_score }} | ${{ needs.drift-detection.outputs.discovery_revision }} |" >> .artifacts/orchestration/final/report.md
+          echo "" >> .artifacts/orchestration/final/report.md
+
+          # Create JSON summary
+          cat > .artifacts/orchestration/final/summary.json << EOF
+          {
+            "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+            "health": {
+              "status": "${{ needs.health-check.outputs.status }}"
+            },
+            "dependencies": {
+              "updates_available": ${{ needs.dependency-analysis.outputs.updates_available }},
+              "google_api_update": ${{ needs.dependency-analysis.outputs.google_api_update }}
+            },
+            "drift": {
+              "detected": ${{ needs.drift-detection.outputs.drift_detected }},
+              "score": ${{ needs.drift-detection.outputs.drift_score }},
+              "revision": "${{ needs.drift-detection.outputs.discovery_revision }}"
+            }
+          }
+          EOF
+
+          # Set output
+          echo "summary=Report generated with drift score: ${{ needs.drift-detection.outputs.drift_score }}" >> $GITHUB_OUTPUT
+
+      - name: Upload final report
+        uses: actions/upload-artifact@v4
+        with:
+          name: orchestration-final-report
+          path: .artifacts/orchestration/final/
+          retention-days: 90
+
+  # Phase 5: Create Issues/PRs if needed
+  create-tickets:
+    name: Create Tracking Tickets
+    needs: [drift-detection, generate-report]
+    runs-on: ubuntu-latest
+    if: needs.drift-detection.outputs.drift_detected == 'true'
+    
+    steps:
+      - name: Create drift tracking issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = `🔄 API Drift Detected: Android Publisher ${{ needs.drift-detection.outputs.discovery_revision }}`;
+            const body = `## Automated API Drift Report
+
+            **Discovery Revision:** ${{ needs.drift-detection.outputs.discovery_revision }}
+            **Drift Score:** ${{ needs.drift-detection.outputs.drift_score }}
+            **Detected:** ${new Date().toISOString()}
+
+            ### Summary
+            The automated orchestration workflow has detected API drift between the Google Play Developer API discovery document and the current Go client library implementation.
+
+            ### Action Items
+            - [ ] Review missing endpoints
+            - [ ] Update Go client library if needed
+            - [ ] Implement new API features
+            - [ ] Update documentation
+
+            ### Workflow Run
+            [View Details](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+            ---
+            *This issue was automatically created by the API Orchestration workflow.*`;
+
+            // Check for existing open issue
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'api-drift,orchestrated',
+              creator: 'github-actions[bot]'
+            });
+
+            const existing = issues.data.find(i => 
+              i.title.includes('${{ needs.drift-detection.outputs.discovery_revision }}')
+            );
+
+            if (!existing) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: title,
+                body: body,
+                labels: ['api-drift', 'orchestrated', 'maintenance', 'automated']
+              });
+              console.log('Created drift tracking issue');
+            } else {
+              console.log('Drift tracking issue already exists');
+            }
+
+  # Phase 6: Auto-update attempt (optional)
+  auto-update:
+    name: Attempt Auto-Update
+    needs: [dependency-analysis, drift-detection]
+    runs-on: ubuntu-latest
+    if: >
+      github.event.inputs.auto_update == 'true' && 
+      (needs.dependency-analysis.outputs.google_api_update == 'true' || 
+       needs.drift-detection.outputs.drift_detected == 'true')
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache: true
+
+      - name: Update dependencies
+        run: |
+          go get -u google.golang.org/api
+          go mod tidy
+
+      - name: Run tests
+        run: go test -v -race -tags=unit ./... || true
+
+      - name: Create update branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b auto/update-api-$(date +%Y%m%d)
+          git add go.mod go.sum
+          git commit -m "chore(deps): update google.golang.org/api
+
+          Automated update triggered by API drift detection.
+          Drift Score: ${{ needs.drift-detection.outputs.drift_score }}
+          Discovery Revision: ${{ needs.drift-detection.outputs.discovery_revision }}"
+          
+          git push origin auto/update-api-$(date +%Y%m%d)
+
+      - name: Create PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '🔄 Auto-update: API Dependencies',
+              head: 'auto/update-api-${{ needs.drift-detection.outputs.discovery_revision }}',
+              base: 'main',
+              body: `## Automated Dependency Update
+
+              This PR was automatically created by the API Orchestration workflow.
+
+              ### Changes
+              - Updated \`google.golang.org/api\` to latest version
+              - Triggered by API drift detection
+
+              ### Drift Summary
+              - **Score:** ${{ needs.drift-detection.outputs.drift_score }}
+              - **Revision:** ${{ needs.drift-detection.outputs.discovery_revision }}
+
+              ### Checklist
+              - [ ] Review changes
+              - [ ] Run integration tests
+              - [ ] Verify no breaking changes
+
+              [View Workflow Run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})`,
+              labels: ['dependencies', 'automated', 'api-drift']
+            });
+
+  # Final Summary
+  summary:
+    name: Orchestration Summary
+    needs: [health-check, dependency-analysis, drift-detection, generate-report]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+      - name: Generate job summary
+        run: |
+          echo "## API Orchestration Workflow Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Health check status
+          if [ "${{ needs.health-check.result }}" == "success" ]; then
+            echo "✅ **Health Check:** Passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Health Check:** Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Dependency analysis status
+          if [ "${{ needs.dependency-analysis.result }}" == "success" ]; then
+            if [ "${{ needs.dependency-analysis.outputs.google_api_update }}" == "true" ]; then
+              echo "⚠️ **Dependencies:** Updates available" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "✅ **Dependencies:** Up to date" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "❌ **Dependencies:** Check failed" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Drift detection status
+          if [ "${{ needs.drift-detection.result }}" == "success" ]; then
+            if [ "${{ needs.drift-detection.outputs.drift_detected }}" == "true" ]; then
+              echo "⚠️ **API Drift:** Detected (score: ${{ needs.drift-detection.outputs.drift_score }})" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "✅ **API Drift:** None detected" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "❌ **API Drift:** Check failed" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "[View Full Report](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY

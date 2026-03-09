@@ -61,6 +61,7 @@ type KongCLI struct {
 	Version      VersionCmd      `cmd:"" help:"Show version information"`
 	CheckUpdate  UpdateCheckCmd  `cmd:"" name:"check-update" help:"Check for available updates"`
 	Completion   CompletionCmd   `cmd:"" help:"Generate shell completion scripts"`
+	Maintenance  MaintenanceCmd  `cmd:"" help:"System maintenance and monitoring commands"`
 
 	// New advanced commands
 	Bulk        BulkCmd        `cmd:"" help:"Batch operations for uploads and updates"`

@@ -1586,3 +1586,115 @@ func TestComplexCommandInitialization(t *testing.T) {
 		}
 	})
 }
+
+// ============================================================================
+// MonetizationOneTimeProductsListCmd Tests
+// ============================================================================
+
+func TestMonetizationOneTimeProductsListCmd_Run_PackageRequired(t *testing.T) {
+	cmd := &MonetizationOneTimeProductsListCmd{}
+	globals := &Globals{} // No package set
+
+	err := cmd.Run(globals)
+	if err != errors.ErrPackageRequired {
+		t.Errorf("Expected ErrPackageRequired, got: %v", err)
+	}
+}
+
+// ============================================================================
+// MonetizationOneTimeProductsGetCmd Tests
+// ============================================================================
+
+func TestMonetizationOneTimeProductsGetCmd_Run_PackageRequired(t *testing.T) {
+	cmd := &MonetizationOneTimeProductsGetCmd{
+		ProductID: "product-123",
+	}
+	globals := &Globals{} // No package set
+
+	err := cmd.Run(globals)
+	if err != errors.ErrPackageRequired {
+		t.Errorf("Expected ErrPackageRequired, got: %v", err)
+	}
+}
+
+// ============================================================================
+// MonetizationOneTimeProductsCreateCmd Tests
+// ============================================================================
+
+func TestMonetizationOneTimeProductsCreateCmd_Run_PackageRequired(t *testing.T) {
+	cmd := &MonetizationOneTimeProductsCreateCmd{
+		ProductID: "product-123",
+		File:      "/tmp/onetimeproduct.json",
+	}
+	globals := &Globals{} // No package set
+
+	err := cmd.Run(globals)
+	if err != errors.ErrPackageRequired {
+		t.Errorf("Expected ErrPackageRequired, got: %v", err)
+	}
+}
+
+// ============================================================================
+// MonetizationOneTimeProductsUpdateCmd Tests
+// ============================================================================
+
+func TestMonetizationOneTimeProductsUpdateCmd_Run_PackageRequired(t *testing.T) {
+	cmd := &MonetizationOneTimeProductsUpdateCmd{
+		ProductID: "product-123",
+		File:      "/tmp/onetimeproduct.json",
+	}
+	globals := &Globals{} // No package set
+
+	err := cmd.Run(globals)
+	if err != errors.ErrPackageRequired {
+		t.Errorf("Expected ErrPackageRequired, got: %v", err)
+	}
+}
+
+// ============================================================================
+// MonetizationOneTimeProductsDeleteCmd Tests
+// ============================================================================
+
+func TestMonetizationOneTimeProductsDeleteCmd_Run_PackageRequired(t *testing.T) {
+	cmd := &MonetizationOneTimeProductsDeleteCmd{
+		ProductID: "product-123",
+	}
+	globals := &Globals{} // No package set
+
+	err := cmd.Run(globals)
+	if err != errors.ErrPackageRequired {
+		t.Errorf("Expected ErrPackageRequired, got: %v", err)
+	}
+}
+
+// ============================================================================
+// MonetizationOneTimeProductsBatchGetCmd Tests
+// ============================================================================
+
+func TestMonetizationOneTimeProductsBatchGetCmd_Run_PackageRequired(t *testing.T) {
+	cmd := &MonetizationOneTimeProductsBatchGetCmd{
+		IDs: []string{"product-1", "product-2"},
+	}
+	globals := &Globals{} // No package set
+
+	err := cmd.Run(globals)
+	if err != errors.ErrPackageRequired {
+		t.Errorf("Expected ErrPackageRequired, got: %v", err)
+	}
+}
+
+// ============================================================================
+// MonetizationOneTimeProductsBatchUpdateCmd Tests
+// ============================================================================
+
+func TestMonetizationOneTimeProductsBatchUpdateCmd_Run_PackageRequired(t *testing.T) {
+	cmd := &MonetizationOneTimeProductsBatchUpdateCmd{
+		File: "/tmp/batch.json",
+	}
+	globals := &Globals{} // No package set
+
+	err := cmd.Run(globals)
+	if err != errors.ErrPackageRequired {
+		t.Errorf("Expected ErrPackageRequired, got: %v", err)
+	}
+}

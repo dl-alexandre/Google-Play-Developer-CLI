@@ -825,11 +825,12 @@ func (cmd *PurchasesCapabilitiesCmd) Run(globals *Globals) error {
 
 // MonetizationCmd contains monetization commands.
 type MonetizationCmd struct {
-	Products      MonetizationProductsCmd      `cmd:"" help:"Manage products"`
-	Subscriptions MonetizationSubscriptionsCmd `cmd:"" help:"Manage subscriptions"`
-	BasePlans     MonetizationBasePlansCmd     `cmd:"" help:"Manage base plans"`
-	Offers        MonetizationOffersCmd        `cmd:"" help:"Manage offers"`
-	Capabilities  MonetizationCapabilitiesCmd  `cmd:"" help:"List monetization capabilities"`
+	Products        MonetizationProductsCmd        `cmd:"" help:"Manage products"`
+	Subscriptions   MonetizationSubscriptionsCmd   `cmd:"" help:"Manage subscriptions"`
+	OneTimeProducts MonetizationOneTimeProductsCmd `cmd:"" help:"Manage one-time products"`
+	BasePlans       MonetizationBasePlansCmd       `cmd:"" help:"Manage base plans"`
+	Offers          MonetizationOffersCmd          `cmd:"" help:"Manage offers"`
+	Capabilities    MonetizationCapabilitiesCmd    `cmd:"" help:"List monetization capabilities"`
 }
 
 // ============================================================================
@@ -1705,6 +1706,427 @@ func (cmd *MonetizationSubscriptionsBatchUpdateCmd) Run(globals *Globals) error 
 	})
 	if err != nil {
 		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to batch update subscriptions: %v", err))
+	}
+
+	return outputResult(
+		output.NewResult(resp).WithDuration(time.Since(start)).WithServices("androidpublisher"),
+		globals.Output, globals.Pretty,
+	)
+}
+
+// ============================================================================
+// Monetization OneTimeProducts Commands
+// ============================================================================
+
+// MonetizationOneTimeProductsCmd contains one-time product management commands.
+type MonetizationOneTimeProductsCmd struct {
+	List        MonetizationOneTimeProductsListCmd        `cmd:"" help:"List one-time products"`
+	Get         MonetizationOneTimeProductsGetCmd         `cmd:"" help:"Get a one-time product"`
+	Create      MonetizationOneTimeProductsCreateCmd      `cmd:"" help:"Create a one-time product"`
+	Update      MonetizationOneTimeProductsUpdateCmd      `cmd:"" help:"Update a one-time product"`
+	Delete      MonetizationOneTimeProductsDeleteCmd      `cmd:"" help:"Delete a one-time product"`
+	BatchGet    MonetizationOneTimeProductsBatchGetCmd    `cmd:"" help:"Batch get one-time products"`
+	BatchUpdate MonetizationOneTimeProductsBatchUpdateCmd `cmd:"" help:"Batch update one-time products"`
+}
+
+// MonetizationOneTimeProductsListCmd lists one-time products.
+type MonetizationOneTimeProductsListCmd struct {
+	PageSize  int64  `help:"Results per page" default:"100"`
+	PageToken string `help:"Pagination token"`
+	All       bool   `help:"Fetch all pages"`
+}
+
+// oneTimeProductsPageResponse wraps the one-time products list response for pagination.
+type oneTimeProductsPageResponse struct {
+	resp *androidpublisher.ListOneTimeProductsResponse
+}
+
+func (r oneTimeProductsPageResponse) GetNextPageToken() string {
+	return r.resp.NextPageToken
+}
+
+func (r oneTimeProductsPageResponse) GetItems() []*androidpublisher.OneTimeProduct {
+	return r.resp.OneTimeProducts
+}
+
+// Run executes the list one-time products command.
+func (cmd *MonetizationOneTimeProductsListCmd) Run(globals *Globals) error {
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if globals.Package == "" {
+		return errors.ErrPackageRequired
+	}
+	start := time.Now()
+
+	client, err := createAPIClient(ctx, globals)
+	if err != nil {
+		return err
+	}
+
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, "failed to initialize publisher service").
+			WithHint("Ensure authentication is configured correctly")
+	}
+
+	var allProducts []*androidpublisher.OneTimeProduct
+	var nextPageToken string
+
+	err = client.DoWithRetry(ctx, func() error {
+		call := svc.Monetization.Onetimeproducts.List(globals.Package).Context(ctx)
+		if cmd.PageSize > 0 {
+			call = call.PageSize(cmd.PageSize)
+		}
+		if cmd.PageToken != "" {
+			call = call.PageToken(cmd.PageToken)
+		}
+
+		resp, callErr := call.Do()
+		if callErr != nil {
+			return callErr
+		}
+
+		allProducts = append(allProducts, resp.OneTimeProducts...)
+		nextPageToken = resp.NextPageToken
+
+		if cmd.All && nextPageToken != "" {
+			query := func(pageToken string) (oneTimeProductsPageResponse, error) {
+				pageCall := svc.Monetization.Onetimeproducts.List(globals.Package).
+					PageToken(pageToken).Context(ctx)
+				if cmd.PageSize > 0 {
+					pageCall = pageCall.PageSize(cmd.PageSize)
+				}
+				pageResp, pageErr := pageCall.Do()
+				return oneTimeProductsPageResponse{resp: pageResp}, pageErr
+			}
+
+			additionalItems, remainingToken, fetchErr := fetchAllPages(ctx, query, nextPageToken, 0)
+			if fetchErr != nil {
+				return fetchErr
+			}
+			allProducts = append(allProducts, additionalItems...)
+			nextPageToken = remainingToken
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to list one-time products: %v", err))
+	}
+
+	data := map[string]interface{}{
+		"oneTimeProducts": allProducts,
+		"totalCount":      len(allProducts),
+	}
+
+	result := output.NewResult(data).WithDuration(time.Since(start)).WithServices("androidpublisher")
+	if nextPageToken != "" {
+		result = result.WithPagination(cmd.PageToken, nextPageToken)
+	}
+
+	return outputResult(result, globals.Output, globals.Pretty)
+}
+
+// MonetizationOneTimeProductsGetCmd gets a one-time product.
+type MonetizationOneTimeProductsGetCmd struct {
+	ProductID string `arg:"" help:"Product ID" required:""`
+}
+
+// Run executes the get one-time product command.
+func (cmd *MonetizationOneTimeProductsGetCmd) Run(globals *Globals) error {
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if globals.Package == "" {
+		return errors.ErrPackageRequired
+	}
+	start := time.Now()
+
+	client, err := createAPIClient(ctx, globals)
+	if err != nil {
+		return err
+	}
+
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, "failed to initialize publisher service").
+			WithHint("Ensure authentication is configured correctly")
+	}
+
+	var product *androidpublisher.OneTimeProduct
+	err = client.DoWithRetry(ctx, func() error {
+		var callErr error
+		product, callErr = svc.Monetization.Onetimeproducts.Get(globals.Package, cmd.ProductID).Context(ctx).Do()
+		return callErr
+	})
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to get one-time product: %v", err))
+	}
+
+	return outputResult(
+		output.NewResult(product).WithDuration(time.Since(start)).WithServices("androidpublisher"),
+		globals.Output, globals.Pretty,
+	)
+}
+
+// MonetizationOneTimeProductsCreateCmd creates a one-time product.
+type MonetizationOneTimeProductsCreateCmd struct {
+	ProductID string `help:"Product ID" required:""`
+	File      string `help:"One-time product JSON file" required:"" type:"existingfile"`
+}
+
+// Run executes the create one-time product command.
+func (cmd *MonetizationOneTimeProductsCreateCmd) Run(globals *Globals) error {
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if globals.Package == "" {
+		return errors.ErrPackageRequired
+	}
+	start := time.Now()
+
+	fileData, err := os.ReadFile(cmd.File)
+	if err != nil {
+		return errors.NewAPIError(errors.CodeValidationError, fmt.Sprintf("failed to read file: %v", err))
+	}
+
+	var product androidpublisher.OneTimeProduct
+	if err := json.Unmarshal(fileData, &product); err != nil {
+		return errors.NewAPIError(errors.CodeValidationError, fmt.Sprintf("failed to parse one-time product JSON: %v", err)).
+			WithHint("Ensure the file contains valid OneTimeProduct JSON")
+	}
+
+	product.PackageName = globals.Package
+	product.ProductId = cmd.ProductID
+
+	client, err := createAPIClient(ctx, globals)
+	if err != nil {
+		return err
+	}
+
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, "failed to initialize publisher service").
+			WithHint("Ensure authentication is configured correctly")
+	}
+
+	var created *androidpublisher.OneTimeProduct
+	err = client.DoWithRetry(ctx, func() error {
+		var callErr error
+		created, callErr = svc.Monetization.Onetimeproducts.Patch(globals.Package, cmd.ProductID, &product).
+			Context(ctx).Do()
+		return callErr
+	})
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to create one-time product: %v", err))
+	}
+
+	return outputResult(
+		output.NewResult(created).WithDuration(time.Since(start)).WithServices("androidpublisher"),
+		globals.Output, globals.Pretty,
+	)
+}
+
+// MonetizationOneTimeProductsUpdateCmd updates a one-time product.
+type MonetizationOneTimeProductsUpdateCmd struct {
+	ProductID string `arg:"" help:"Product ID" required:""`
+	File      string `help:"One-time product JSON file" required:"" type:"existingfile"`
+}
+
+// Run executes the update one-time product command.
+func (cmd *MonetizationOneTimeProductsUpdateCmd) Run(globals *Globals) error {
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if globals.Package == "" {
+		return errors.ErrPackageRequired
+	}
+	start := time.Now()
+
+	fileData, err := os.ReadFile(cmd.File)
+	if err != nil {
+		return errors.NewAPIError(errors.CodeValidationError, fmt.Sprintf("failed to read file: %v", err))
+	}
+
+	var product androidpublisher.OneTimeProduct
+	if err := json.Unmarshal(fileData, &product); err != nil {
+		return errors.NewAPIError(errors.CodeValidationError, fmt.Sprintf("failed to parse one-time product JSON: %v", err)).
+			WithHint("Ensure the file contains valid OneTimeProduct JSON")
+	}
+
+	product.PackageName = globals.Package
+	product.ProductId = cmd.ProductID
+
+	client, err := createAPIClient(ctx, globals)
+	if err != nil {
+		return err
+	}
+
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, "failed to initialize publisher service").
+			WithHint("Ensure authentication is configured correctly")
+	}
+
+	var updated *androidpublisher.OneTimeProduct
+	err = client.DoWithRetry(ctx, func() error {
+		var callErr error
+		updated, callErr = svc.Monetization.Onetimeproducts.Patch(globals.Package, cmd.ProductID, &product).
+			Context(ctx).Do()
+		return callErr
+	})
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to update one-time product: %v", err))
+	}
+
+	return outputResult(
+		output.NewResult(updated).WithDuration(time.Since(start)).WithServices("androidpublisher"),
+		globals.Output, globals.Pretty,
+	)
+}
+
+// MonetizationOneTimeProductsDeleteCmd deletes a one-time product.
+type MonetizationOneTimeProductsDeleteCmd struct {
+	ProductID string `arg:"" help:"Product ID" required:""`
+}
+
+// Run executes the delete one-time product command.
+func (cmd *MonetizationOneTimeProductsDeleteCmd) Run(globals *Globals) error {
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if globals.Package == "" {
+		return errors.ErrPackageRequired
+	}
+	start := time.Now()
+
+	client, err := createAPIClient(ctx, globals)
+	if err != nil {
+		return err
+	}
+
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, "failed to initialize publisher service").
+			WithHint("Ensure authentication is configured correctly")
+	}
+
+	err = client.DoWithRetry(ctx, func() error {
+		return svc.Monetization.Onetimeproducts.Delete(globals.Package, cmd.ProductID).Context(ctx).Do()
+	})
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to delete one-time product: %v", err))
+	}
+
+	data := map[string]interface{}{
+		"productId": cmd.ProductID,
+		"deleted":   true,
+	}
+
+	return outputResult(
+		output.NewResult(data).WithDuration(time.Since(start)).WithServices("androidpublisher"),
+		globals.Output, globals.Pretty,
+	)
+}
+
+// MonetizationOneTimeProductsBatchGetCmd batch gets one-time products.
+type MonetizationOneTimeProductsBatchGetCmd struct {
+	IDs []string `help:"Product IDs" required:""`
+}
+
+// Run executes the batch get one-time products command.
+func (cmd *MonetizationOneTimeProductsBatchGetCmd) Run(globals *Globals) error {
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if globals.Package == "" {
+		return errors.ErrPackageRequired
+	}
+	start := time.Now()
+
+	client, err := createAPIClient(ctx, globals)
+	if err != nil {
+		return err
+	}
+
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, "failed to initialize publisher service").
+			WithHint("Ensure authentication is configured correctly")
+	}
+
+	var resp *androidpublisher.BatchGetOneTimeProductsResponse
+	err = client.DoWithRetry(ctx, func() error {
+		var callErr error
+		resp, callErr = svc.Monetization.Onetimeproducts.BatchGet(globals.Package).
+			ProductIds(cmd.IDs...).Context(ctx).Do()
+		return callErr
+	})
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to batch get one-time products: %v", err))
+	}
+
+	return outputResult(
+		output.NewResult(resp).WithDuration(time.Since(start)).WithServices("androidpublisher"),
+		globals.Output, globals.Pretty,
+	)
+}
+
+// MonetizationOneTimeProductsBatchUpdateCmd batch updates one-time products.
+type MonetizationOneTimeProductsBatchUpdateCmd struct {
+	File string `help:"Batch update JSON file" required:"" type:"existingfile"`
+}
+
+// Run executes the batch update one-time products command.
+func (cmd *MonetizationOneTimeProductsBatchUpdateCmd) Run(globals *Globals) error {
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if globals.Package == "" {
+		return errors.ErrPackageRequired
+	}
+	start := time.Now()
+
+	fileData, err := os.ReadFile(cmd.File)
+	if err != nil {
+		return errors.NewAPIError(errors.CodeValidationError, fmt.Sprintf("failed to read file: %v", err))
+	}
+
+	var batchReq androidpublisher.BatchUpdateOneTimeProductsRequest
+	if err := json.Unmarshal(fileData, &batchReq); err != nil {
+		return errors.NewAPIError(errors.CodeValidationError, fmt.Sprintf("failed to parse batch update JSON: %v", err)).
+			WithHint("Ensure the file contains valid BatchUpdateOneTimeProductsRequest JSON")
+	}
+
+	client, err := createAPIClient(ctx, globals)
+	if err != nil {
+		return err
+	}
+
+	svc, err := client.AndroidPublisher()
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, "failed to initialize publisher service").
+			WithHint("Ensure authentication is configured correctly")
+	}
+
+	var resp *androidpublisher.BatchUpdateOneTimeProductsResponse
+	err = client.DoWithRetry(ctx, func() error {
+		var callErr error
+		resp, callErr = svc.Monetization.Onetimeproducts.BatchUpdate(globals.Package, &batchReq).
+			Context(ctx).Do()
+		return callErr
+	})
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to batch update one-time products: %v", err))
 	}
 
 	return outputResult(
@@ -2608,152 +3030,86 @@ func (cmd *MonetizationOffersBatchUpdateStatesCmd) Run(globals *Globals) error {
 // MonetizationCapabilitiesCmd lists monetization capabilities.
 type MonetizationCapabilitiesCmd struct{}
 
+// getProductCapabilities returns product management capabilities.
+func getProductCapabilities() []map[string]interface{} {
+	return []map[string]interface{}{
+		{"category": "products", "name": "inappproducts.list", "description": "List in-app products"},
+		{"category": "products", "name": "inappproducts.get", "description": "Get an in-app product"},
+		{"category": "products", "name": "inappproducts.insert", "description": "Create an in-app product"},
+		{"category": "products", "name": "inappproducts.update", "description": "Update an in-app product"},
+		{"category": "products", "name": "inappproducts.delete", "description": "Delete an in-app product"},
+	}
+}
+
+// getSubscriptionCapabilities returns subscription management capabilities.
+func getSubscriptionCapabilities() []map[string]interface{} {
+	return []map[string]interface{}{
+		{"category": "subscriptions", "name": "monetization.subscriptions.list", "description": "List subscription products"},
+		{"category": "subscriptions", "name": "monetization.subscriptions.get", "description": "Get a subscription product"},
+		{"category": "subscriptions", "name": "monetization.subscriptions.create", "description": "Create a subscription product"},
+		{"category": "subscriptions", "name": "monetization.subscriptions.patch", "description": "Update a subscription product"},
+		{"category": "subscriptions", "name": "monetization.subscriptions.delete", "description": "Delete a subscription product"},
+		{"category": "subscriptions", "name": "monetization.subscriptions.archive", "description": "Archive a subscription product"},
+		{"category": "subscriptions", "name": "monetization.subscriptions.batchGet", "description": "Batch get subscription products"},
+		{"category": "subscriptions", "name": "monetization.subscriptions.batchUpdate", "description": "Batch update subscription products"},
+	}
+}
+
+// getBasePlanCapabilities returns base plan management capabilities.
+func getBasePlanCapabilities() []map[string]interface{} {
+	return []map[string]interface{}{
+		{"category": "basePlans", "name": "monetization.subscriptions.basePlans.activate", "description": "Activate a base plan"},
+		{"category": "basePlans", "name": "monetization.subscriptions.basePlans.deactivate", "description": "Deactivate a base plan"},
+		{"category": "basePlans", "name": "monetization.subscriptions.basePlans.delete", "description": "Delete a base plan"},
+		{"category": "basePlans", "name": "monetization.subscriptions.basePlans.migratePrices", "description": "Migrate base plan prices"},
+		{"category": "basePlans", "name": "monetization.subscriptions.basePlans.batchMigratePrices", "description": "Batch migrate base plan prices"},
+		{"category": "basePlans", "name": "monetization.subscriptions.basePlans.batchUpdateStates", "description": "Batch update base plan states"},
+	}
+}
+
+// getOfferCapabilities returns subscription offer management capabilities.
+func getOfferCapabilities() []map[string]interface{} {
+	return []map[string]interface{}{
+		{"category": "offers", "name": "monetization.subscriptions.basePlans.offers.create", "description": "Create a subscription offer"},
+		{"category": "offers", "name": "monetization.subscriptions.basePlans.offers.get", "description": "Get a subscription offer"},
+		{"category": "offers", "name": "monetization.subscriptions.basePlans.offers.list", "description": "List subscription offers"},
+		{"category": "offers", "name": "monetization.subscriptions.basePlans.offers.delete", "description": "Delete a subscription offer"},
+		{"category": "offers", "name": "monetization.subscriptions.basePlans.offers.activate", "description": "Activate a subscription offer"},
+		{"category": "offers", "name": "monetization.subscriptions.basePlans.offers.deactivate", "description": "Deactivate a subscription offer"},
+		{"category": "offers", "name": "monetization.subscriptions.basePlans.offers.batchGet", "description": "Batch get subscription offers"},
+		{"category": "offers", "name": "monetization.subscriptions.basePlans.offers.batchUpdate", "description": "Batch update subscription offers"},
+		{"category": "offers", "name": "monetization.subscriptions.basePlans.offers.batchUpdateStates", "description": "Batch update subscription offer states"},
+	}
+}
+
+// getOneTimeProductCapabilities returns one-time product management capabilities.
+func getOneTimeProductCapabilities() []map[string]interface{} {
+	return []map[string]interface{}{
+		{"category": "oneTimeProducts", "name": "monetization.onetimeproducts.list", "description": "List one-time products"},
+		{"category": "oneTimeProducts", "name": "monetization.onetimeproducts.get", "description": "Get a one-time product"},
+		{"category": "oneTimeProducts", "name": "monetization.onetimeproducts.patch", "description": "Create or update a one-time product"},
+		{"category": "oneTimeProducts", "name": "monetization.onetimeproducts.delete", "description": "Delete a one-time product"},
+		{"category": "oneTimeProducts", "name": "monetization.onetimeproducts.batchGet", "description": "Batch get one-time products"},
+		{"category": "oneTimeProducts", "name": "monetization.onetimeproducts.batchUpdate", "description": "Batch update one-time products"},
+	}
+}
+
+// getMonetizationCapabilities returns the list of monetization API capabilities.
+func getMonetizationCapabilities() []map[string]interface{} {
+	var capabilities []map[string]interface{}
+	capabilities = append(capabilities, getProductCapabilities()...)
+	capabilities = append(capabilities, getSubscriptionCapabilities()...)
+	capabilities = append(capabilities, getBasePlanCapabilities()...)
+	capabilities = append(capabilities, getOfferCapabilities()...)
+	capabilities = append(capabilities, getOneTimeProductCapabilities()...)
+	return capabilities
+}
+
 // Run executes the capabilities command.
 func (cmd *MonetizationCapabilitiesCmd) Run(globals *Globals) error {
 	start := time.Now()
 	data := map[string]interface{}{
-		"capabilities": []map[string]interface{}{
-			{
-				"category":    "products",
-				"name":        "inappproducts.list",
-				"description": "List in-app products",
-			},
-			{
-				"category":    "products",
-				"name":        "inappproducts.get",
-				"description": "Get an in-app product",
-			},
-			{
-				"category":    "products",
-				"name":        "inappproducts.insert",
-				"description": "Create an in-app product",
-			},
-			{
-				"category":    "products",
-				"name":        "inappproducts.update",
-				"description": "Update an in-app product",
-			},
-			{
-				"category":    "products",
-				"name":        "inappproducts.delete",
-				"description": "Delete an in-app product",
-			},
-			{
-				"category":    "subscriptions",
-				"name":        "monetization.subscriptions.list",
-				"description": "List subscription products",
-			},
-			{
-				"category":    "subscriptions",
-				"name":        "monetization.subscriptions.get",
-				"description": "Get a subscription product",
-			},
-			{
-				"category":    "subscriptions",
-				"name":        "monetization.subscriptions.create",
-				"description": "Create a subscription product",
-			},
-			{
-				"category":    "subscriptions",
-				"name":        "monetization.subscriptions.patch",
-				"description": "Update a subscription product",
-			},
-			{
-				"category":    "subscriptions",
-				"name":        "monetization.subscriptions.delete",
-				"description": "Delete a subscription product",
-			},
-			{
-				"category":    "subscriptions",
-				"name":        "monetization.subscriptions.archive",
-				"description": "Archive a subscription product",
-			},
-			{
-				"category":    "subscriptions",
-				"name":        "monetization.subscriptions.batchGet",
-				"description": "Batch get subscription products",
-			},
-			{
-				"category":    "subscriptions",
-				"name":        "monetization.subscriptions.batchUpdate",
-				"description": "Batch update subscription products",
-			},
-			{
-				"category":    "basePlans",
-				"name":        "monetization.subscriptions.basePlans.activate",
-				"description": "Activate a base plan",
-			},
-			{
-				"category":    "basePlans",
-				"name":        "monetization.subscriptions.basePlans.deactivate",
-				"description": "Deactivate a base plan",
-			},
-			{
-				"category":    "basePlans",
-				"name":        "monetization.subscriptions.basePlans.delete",
-				"description": "Delete a base plan",
-			},
-			{
-				"category":    "basePlans",
-				"name":        "monetization.subscriptions.basePlans.migratePrices",
-				"description": "Migrate base plan prices",
-			},
-			{
-				"category":    "basePlans",
-				"name":        "monetization.subscriptions.basePlans.batchMigratePrices",
-				"description": "Batch migrate base plan prices",
-			},
-			{
-				"category":    "basePlans",
-				"name":        "monetization.subscriptions.basePlans.batchUpdateStates",
-				"description": "Batch update base plan states",
-			},
-			{
-				"category":    "offers",
-				"name":        "monetization.subscriptions.basePlans.offers.create",
-				"description": "Create a subscription offer",
-			},
-			{
-				"category":    "offers",
-				"name":        "monetization.subscriptions.basePlans.offers.get",
-				"description": "Get a subscription offer",
-			},
-			{
-				"category":    "offers",
-				"name":        "monetization.subscriptions.basePlans.offers.list",
-				"description": "List subscription offers",
-			},
-			{
-				"category":    "offers",
-				"name":        "monetization.subscriptions.basePlans.offers.delete",
-				"description": "Delete a subscription offer",
-			},
-			{
-				"category":    "offers",
-				"name":        "monetization.subscriptions.basePlans.offers.activate",
-				"description": "Activate a subscription offer",
-			},
-			{
-				"category":    "offers",
-				"name":        "monetization.subscriptions.basePlans.offers.deactivate",
-				"description": "Deactivate a subscription offer",
-			},
-			{
-				"category":    "offers",
-				"name":        "monetization.subscriptions.basePlans.offers.batchGet",
-				"description": "Batch get subscription offers",
-			},
-			{
-				"category":    "offers",
-				"name":        "monetization.subscriptions.basePlans.offers.batchUpdate",
-				"description": "Batch update subscription offers",
-			},
-			{
-				"category":    "offers",
-				"name":        "monetization.subscriptions.basePlans.offers.batchUpdateStates",
-				"description": "Batch update subscription offer states",
-			},
-		},
+		"capabilities": getMonetizationCapabilities(),
 	}
 	result := output.NewResult(data).WithDuration(time.Since(start)).WithServices("androidpublisher")
 	return outputResult(result, globals.Output, globals.Pretty)

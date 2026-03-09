@@ -27,7 +27,8 @@ PLATFORMS = linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
 
 .PHONY: all build clean test deps tidy lint install help format install-hooks \
 	benchmark benchmark-compare benchmark-regression benchmark-baseline \
-	test-unit test-integration test-e2e test-coverage-threshold test-flaky security check vet
+	test-unit test-integration test-e2e test-coverage-threshold test-flaky security check vet \
+	apidrift apidrift-check apidrift-json apidrift-markdown apidrift-build apidrift-verbose apidrift-multi
 
 # Default target
 all: deps build
@@ -279,6 +280,7 @@ help:
 	@echo "  checksums    - Generate SHA256 checksums"
 	@echo "  completions  - Generate shell completions"
 	@echo "  install-hooks - Install git hooks"
+	@echo "  apidrift     - Check for API drift"
 	@echo ""
 	@echo "Development:"
 	@echo "  run          - Build and run (use ARGS=... for arguments)"
@@ -293,3 +295,66 @@ help:
 	@echo "  make benchmark-regression"
 	@echo "  make run ARGS='version'"
 	@echo "  make build-all"
+	@echo "  make apidrift"
+	@echo "  make apidrift-check"
+	@echo ""
+	@echo "API Drift Detection:"
+	@echo "  apidrift           - Detect API drift (text output)"
+	@echo "  apidrift-check     - Check drift with threshold (fails if > 10)"
+	@echo "  apidrift-json      - Output drift report as JSON"
+	@echo "  apidrift-markdown  - Output drift report as Markdown"
+	@echo "  apidrift-verbose   - Run with verbose output"
+
+# API Drift Detection Targets
+# Build the apidrift tool
+apidrift-build:
+	@echo "Building apidrift tool..."
+	@mkdir -p $(BINARY_DIR)
+	$(GOBUILD) -o $(BINARY_DIR)/apidrift ./cmd/apidrift
+
+# Run drift detection with text output
+apidrift: apidrift-build
+	@echo "Running API drift detection..."
+	./$(BINARY_DIR)/apidrift
+
+# Run drift detection with verbose output
+apidrift-verbose: apidrift-build
+	@echo "Running API drift detection (verbose)..."
+	./$(BINARY_DIR)/apidrift -verbose
+
+# Run drift detection and fail if score exceeds threshold
+apidrift-check: apidrift-build
+	@echo "Checking API drift with threshold..."
+	./$(BINARY_DIR)/apidrift -threshold 10 -verbose
+
+# Run drift detection and output JSON
+apidrift-json: apidrift-build
+	@echo "Running API drift detection (JSON output)..."
+	@mkdir -p .artifacts/drift
+	./$(BINARY_DIR)/apidrift -output .artifacts/drift/report.json -format json
+	@echo "Report saved to .artifacts/drift/report.json"
+
+# Run drift detection and output Markdown
+apidrift-markdown: apidrift-build
+	@echo "Running API drift detection (Markdown output)..."
+	@mkdir -p .artifacts/drift
+	./$(BINARY_DIR)/apidrift -output .artifacts/drift/report.md -format markdown
+	@echo "Report saved to .artifacts/drift/report.md"
+
+# Check multiple Google APIs (similar to CI)
+apidrift-multi: apidrift-build
+	@echo "Checking multiple Google APIs..."
+	@mkdir -p .artifacts/multi-api
+	@for api in androidpublisher drive gmail calendar sheets; do \
+		echo "Checking $$api..."; \
+		url="https://www.googleapis.com/discovery/v1/apis/$$api/v3/rest"; \
+		if [ "$$api" = "androidpublisher" ]; then \
+			url="https://www.googleapis.com/discovery/v1/apis/$$api/v3/rest"; \
+		elif [ "$$api" = "gmail" ]; then \
+			url="https://www.googleapis.com/discovery/v1/apis/$$api/v1/rest"; \
+		elif [ "$$api" = "calendar" ] || [ "$$api" = "sheets" ]; then \
+			url="https://www.googleapis.com/discovery/v1/apis/$$api/v3/rest"; \
+		fi; \
+		./$(BINARY_DIR)/apidrift -discovery-url "$$url" -output ".artifacts/multi-api/$$api.json" || true; \
+	done
+	@echo "Multi-API reports saved to .artifacts/multi-api/"

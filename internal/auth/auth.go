@@ -212,6 +212,7 @@ func (m *Manager) Authenticate(ctx context.Context, keyPath string) (*Credential
 }
 
 func (m *Manager) authenticateFromKeyfile(ctx context.Context, path string, scopes []string) (*Credentials, error) {
+	// #nosec G703 -- Path is provided by user for their service account key file, validated before use
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, errors.NewAPIError(errors.CodeAuthFailure, fmt.Sprintf("failed to read key file: %v", err)).

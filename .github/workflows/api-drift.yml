@@ -1,0 +1,255 @@
+name: API Drift Detection
+
+on:
+  schedule:
+    # Run weekly on Mondays at 9 AM UTC
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+    inputs:
+      threshold:
+        description: 'Drift score threshold (fail if exceeded)'
+        required: false
+        default: '10'
+        type: string
+      create_issue:
+        description: 'Create GitHub issue if drift detected'
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  GPD_REQUIRE_CUSTOM_OAUTH: "1"
+
+jobs:
+  detect-drift:
+    name: Detect API Drift
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache: true
+          check-latest: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build apidrift tool
+        run: go build -o bin/apidrift ./cmd/apidrift
+
+      - name: Run drift detection
+        id: drift
+        run: |
+          mkdir -p .artifacts/drift
+          ./bin/apidrift -output .artifacts/drift/report.json -format markdown -verbose > .artifacts/drift/report.md || true
+          echo "exit_code=$?" >> $GITHUB_OUTPUT
+          
+          # Check if drift was detected
+          if [ -f .artifacts/drift/report.json ]; then
+            DRIFT_SCORE=$(jq -r '.drift_score // 0' .artifacts/drift/report.json)
+            echo "drift_score=$DRIFT_SCORE" >> $GITHUB_OUTPUT
+            
+            DRIFT_DETECTED=$(jq -r '.drift_detected // false' .artifacts/drift/report.json)
+            echo "drift_detected=$DRIFT_DETECTED" >> $GITHUB_OUTPUT
+            
+            DISCOVERY_REVISION=$(jq -r '.discovery_revision // "unknown"' .artifacts/drift/report.json)
+            echo "discovery_revision=$DISCOVERY_REVISION" >> $GITHUB_OUTPUT
+            
+            GO_MOD_VERSION=$(jq -r '.go_mod_version // "unknown"' .artifacts/drift/report.json)
+            echo "go_mod_version=$GO_MOD_VERSION" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload drift report
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-drift-report
+          path: .artifacts/drift/
+          retention-days: 90
+
+      - name: Comment on PR (if triggered by PR)
+        if: github.event_name == 'pull_request' && steps.drift.outputs.drift_detected == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('.artifacts/drift/report.md', 'utf8');
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## ⚠️ API Drift Detected\n\n${report.substring(0, 65000)}`
+            });
+
+      - name: Create drift issue
+        if: >
+          github.event_name == 'workflow_dispatch' && 
+          github.event.inputs.create_issue == 'true' && 
+          steps.drift.outputs.drift_detected == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('.artifacts/drift/report.md', 'utf8');
+            
+            const title = `API Drift Detected: ${process.env.DISCOVERY_REVISION}`;
+            const body = `## Google Play Developer API Drift Report\n\n${report}\n\n---\n\n*This issue was automatically created by the API Drift Detection workflow.*`;
+            
+            // Check for existing open drift issues
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'api-drift',
+              creator: 'github-actions[bot]'
+            });
+            
+            const existingIssue = issues.data.find(i => i.title.includes(process.env.DISCOVERY_REVISION));
+            
+            if (!existingIssue) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: title,
+                body: body,
+                labels: ['api-drift', 'maintenance']
+              });
+              console.log('Created new drift issue');
+            } else {
+              console.log('Drift issue already exists for this revision');
+            }
+        env:
+          DISCOVERY_REVISION: ${{ steps.drift.outputs.discovery_revision }}
+
+      - name: Check threshold
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.threshold
+        run: |
+          THRESHOLD="${{ github.event.inputs.threshold }}"
+          DRIFT_SCORE="${{ steps.drift.outputs.drift_score }}"
+          
+          if [ "$DRIFT_SCORE" -gt "$THRESHOLD" ]; then
+            echo "❌ Drift score $DRIFT_SCORE exceeds threshold $THRESHOLD"
+            exit 2
+          else
+            echo "✅ Drift score $DRIFT_SCORE is within threshold $THRESHOLD"
+          fi
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## API Drift Detection Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ steps.drift.outputs.drift_detected }}" == "true" ]; then
+            echo "⚠️ **Drift Detected**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+            echo "| Drift Score | ${{ steps.drift.outputs.drift_score }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| Discovery Revision | ${{ steps.drift.outputs.discovery_revision }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| Go Module Version | ${{ steps.drift.outputs.go_mod_version }} |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ **No Drift Detected**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "API is up to date with discovery revision ${{ steps.drift.outputs.discovery_revision }}" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # Multi-API monitoring (similar to Drive project)
+  monitor-all-apis:
+    name: Monitor Google APIs
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.monitor_all == 'true')
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        api:
+          - name: androidpublisher
+            url: https://www.googleapis.com/discovery/v1/apis/androidpublisher/v3/rest
+          - name: drive
+            url: https://www.googleapis.com/discovery/v1/apis/drive/v3/rest
+          - name: gmail
+            url: https://www.googleapis.com/discovery/v1/apis/gmail/v1/rest
+          - name: calendar
+            url: https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest
+          - name: sheets
+            url: https://www.googleapis.com/discovery/v1/apis/sheets/v4/rest
+          - name: docs
+            url: https://www.googleapis.com/discovery/v1/apis/docs/v1/rest
+          - name: slides
+            url: https://www.googleapis.com/discovery/v1/apis/slides/v1/rest
+          - name: people
+            url: https://www.googleapis.com/discovery/v1/apis/people/v1/rest
+          - name: tasks
+            url: https://www.googleapis.com/discovery/v1/apis/tasks/v1/rest
+          - name: youtube
+            url: https://www.googleapis.com/discovery/v1/apis/youtube/v3/rest
+          - name: analytics
+            url: https://www.googleapis.com/discovery/v1/apis/analytics/v3/rest
+          - name: bigquery
+            url: https://www.googleapis.com/discovery/v1/apis/bigquery/v2/rest
+          - name: storage
+            url: https://www.googleapis.com/discovery/v1/apis/storage/v1/rest
+          - name: compute
+            url: https://www.googleapis.com/discovery/v1/apis/compute/v1/rest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache: true
+
+      - name: Build apidrift tool
+        run: go build -o bin/apidrift ./cmd/apidrift
+
+      - name: Check ${{ matrix.api.name }} API
+        run: |
+          mkdir -p .artifacts/multi-api
+          ./bin/apidrift \
+            -discovery-url "${{ matrix.api.url }}" \
+            -output ".artifacts/multi-api/${{ matrix.api.name }}.json" \
+            -format text || true
+          
+          # Extract summary
+          if [ -f ".artifacts/multi-api/${{ matrix.api.name }}.json" ]; then
+            DRIFT=$(jq -r '.drift_detected // false' ".artifacts/multi-api/${{ matrix.api.name }}.json")
+            SCORE=$(jq -r '.drift_score // 0' ".artifacts/multi-api/${{ matrix.api.name }}.json")
+            REVISION=$(jq -r '.discovery_revision // "unknown"' ".artifacts/multi-api/${{ matrix.api.name }}.json")
+            
+            echo "${{ matrix.api.name }}|$DRIFT|$SCORE|$REVISION" >> .artifacts/multi-api/summary.txt
+          fi
+
+      - name: Upload multi-API reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: multi-api-drift-reports
+          path: .artifacts/multi-api/
+          retention-days: 30
+
+      - name: Generate summary
+        if: matrix.api.name == 'compute'  # Last one in matrix
+        run: |
+          echo "## Multi-API Drift Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| API | Drift | Score | Revision |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|-------|-------|----------|" >> $GITHUB_STEP_SUMMARY
+          
+          while IFS='|' read -r api drift score revision; do
+            STATUS=$([ "$drift" == "true" ] && echo "⚠️" || echo "✅")
+            echo "| $api | $STATUS | $score | $revision |" >> $GITHUB_STEP_SUMMARY
+          done < .artifacts/multi-api/summary.txt

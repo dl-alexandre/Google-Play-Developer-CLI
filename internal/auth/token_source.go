@@ -49,6 +49,7 @@ func (s *PersistedTokenSource) Token() (*oauth2.Token, error) {
 		stored.Email = s.metadata.Email
 		stored.Scopes = s.metadata.Scopes
 	}
+	// #nosec G117 -- Token is being stored in secure storage (keychain/Secret Service)
 	data, err := json.Marshal(stored)
 	if err == nil {
 		_ = s.storage.Store(s.storageKey, data)

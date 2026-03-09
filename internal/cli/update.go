@@ -100,7 +100,6 @@ func (c *UpdateCheckCmd) fetchLatestRelease(currentVersion string) (*UpdateInfo,
 	req.Header.Set("User-Agent", fmt.Sprintf("%s/%s", BinaryName, currentVersion))
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
 
-	//nolint:gosec // URL is constructed from build-time constants, not user input
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err

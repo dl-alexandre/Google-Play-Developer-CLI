@@ -131,6 +131,7 @@ func (c *Cache) Cleanup() error {
 			return nil
 		}
 
+		// #nosec G122 -- Cache directory is application-controlled, paths are validated
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return nil
@@ -138,12 +139,14 @@ func (c *Cache) Cleanup() error {
 
 		var entry CacheEntry
 		if err := json.Unmarshal(data, &entry); err != nil {
+			// #nosec G122 -- Cache directory is application-controlled
 			_ = os.Remove(path)
 			return nil
 		}
 
 		ttl := time.Duration(entry.TTL) * time.Second
 		if time.Since(entry.CreatedAt) > ttl {
+			// #nosec G122 -- Cache directory is application-controlled
 			_ = os.Remove(path)
 		}
 

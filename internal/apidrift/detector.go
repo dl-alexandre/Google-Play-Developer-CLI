@@ -258,7 +258,7 @@ func (d *Detector) AnalyzeClientCode() (map[string]bool, error) {
 			return nil
 		}
 
-		//nolint:gosec // Path is validated above with strings.HasPrefix check
+		//nolint:gosec // Path traversal handled by strings.HasPrefix check above
 		content, err := os.ReadFile(path)
 		if err != nil {
 			return err

@@ -57,7 +57,6 @@ linters:
     gosec:
       excludes:
         - G104
-        - G122
         - G301
         - G304
         - G306
@@ -95,6 +94,9 @@ linters:
       - path: cmd/
         linters:
           - forbidigo
+          - gosec
+      - path: internal/apidrift/
+        linters:
           - gosec
 
 formatters:

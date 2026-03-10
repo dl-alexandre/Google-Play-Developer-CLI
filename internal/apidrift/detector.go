@@ -258,7 +258,7 @@ func (d *Detector) AnalyzeClientCode() (map[string]bool, error) {
 			return nil
 		}
 
-		content, err := os.ReadFile(path) //nolint:gosec // Path validated above
+		content, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}

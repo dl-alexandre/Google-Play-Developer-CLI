@@ -162,7 +162,7 @@ func (d *ImplementationDriftDetector) ExtractCLIEndpoints() (map[string]Endpoint
 			return nil
 		}
 
-		content, err := os.ReadFile(path) //nolint:gosec // Path validated above
+		content, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}

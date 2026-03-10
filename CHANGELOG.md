@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.4] - 2026-03-10
+
+### Changes
+
+- fix: use correct secret name TAP_GITHUB_TOKEN for homebrew tap
+
 ## [0.5.3] - 2026-03-10
 
 ### Changes
@@ -206,7 +212,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docker image support
 - Homebrew formula for macOS/Linux
 
-[Unreleased]: https://github.com/dl-alexandre/Google-Play-Developer-CLI/compare/v0.5.3...HEAD
+[Unreleased]: https://github.com/dl-alexandre/Google-Play-Developer-CLI/compare/v0.5.4...HEAD
+[0.5.4]: https://github.com/dl-alexandre/Google-Play-Developer-CLI/compare/v0.5.3...v0.5.4
 [0.5.3]: https://github.com/dl-alexandre/Google-Play-Developer-CLI/compare/v0.5.2...v0.5.3
 [0.4.8]: https://github.com/dl-alexandre/Google-Play-Developer-CLI/compare/v0.4.7...v0.4.8
 [0.4.7]: https://github.com/dl-alexandre/Google-Play-Developer-CLI/compare/v0.4.6...v0.4.7

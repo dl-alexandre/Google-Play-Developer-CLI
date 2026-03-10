@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-03-10
+
+### Changes
+
+- ci: exclude internal/apidrift from gosec linting
+- fix: exclude G122 from gosec and remove nolint directives
+- ci: add gosec config and make security scan tolerant
+- fix: inline nolint:gosec directives to suppress unused warning
+- ci: fix workflow to tolerate CLI test failures
+- fix: correct nolint:gosec directives for path traversal
+- feat: Complete 100% Google Play Developer API coverage with optimized builds
+
 ## [0.5.0] - 2026-03-01
 
 ### Added
@@ -194,7 +206,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docker image support
 - Homebrew formula for macOS/Linux
 
-[Unreleased]: https://github.com/dl-alexandre/Google-Play-Developer-CLI/compare/v0.4.8...HEAD
+[Unreleased]: https://github.com/dl-alexandre/Google-Play-Developer-CLI/compare/v0.5.3...HEAD
+[0.5.3]: https://github.com/dl-alexandre/Google-Play-Developer-CLI/compare/v0.5.2...v0.5.3
 [0.4.8]: https://github.com/dl-alexandre/Google-Play-Developer-CLI/compare/v0.4.7...v0.4.8
 [0.4.7]: https://github.com/dl-alexandre/Google-Play-Developer-CLI/compare/v0.4.6...v0.4.7
 [0.4.6]: https://github.com/dl-alexandre/Google-Play-Developer-CLI/compare/v0.4.5...v0.4.6

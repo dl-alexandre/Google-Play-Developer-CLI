@@ -534,7 +534,7 @@ func (cmd *TestingCompatibilityCmd) populateDeviceSupport(result *testingCompati
 	result.DeviceCount = totalDevices
 	result.SupportedCount = supported
 	result.BlockedCount = blocked
-	result.Compatible = blocked == 0 || supportedPct > 0.5
+	result.Compatible = supportedPct > 0
 
 	// Build device groups with approximate distribution
 	type deviceCategory struct {
@@ -552,7 +552,7 @@ func (cmd *TestingCompatibilityCmd) populateDeviceSupport(result *testingCompati
 		result.DeviceGroups = append(result.DeviceGroups, testingCompatibilityGroup{
 			Name:    cat.name,
 			Count:   int(float64(supported) * cat.pct),
-			Percent: cat.pct * 100 * supportedPct,
+			Percent: cat.pct * 100,
 		})
 	}
 }

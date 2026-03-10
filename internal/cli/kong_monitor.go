@@ -179,7 +179,7 @@ finish:
 
 func (cmd *MonitorWatchCmd) normalizeMetrics() []string {
 	if len(cmd.Metrics) == 0 {
-		return []string{checkAll}
+		return []string{metricCrashes, metricAnrs, metricErrors}
 	}
 
 	var result []string
@@ -419,6 +419,14 @@ func (cmd *MonitorAnomaliesCmd) Run(globals *Globals) error {
 		return err
 	}
 
+	// Validate date format before authentication
+	if cmd.Since != "" {
+		_, err := time.Parse("2006-01-02", cmd.Since)
+		if err != nil {
+			return errors.NewAPIError(errors.CodeValidationError, fmt.Sprintf("invalid since date: %v", err))
+		}
+	}
+
 	ctx := globals.Context
 	if ctx == nil {
 		ctx = context.Background()
@@ -455,10 +463,7 @@ func (cmd *MonitorAnomaliesCmd) Run(globals *Globals) error {
 	// Calculate date ranges
 	var currentStart, currentEnd time.Time
 	if cmd.Since != "" {
-		currentStart, err = time.Parse("2006-01-02", cmd.Since)
-		if err != nil {
-			return errors.NewAPIError(errors.CodeValidationError, fmt.Sprintf("invalid since date: %v", err))
-		}
+		currentStart, _ = time.Parse("2006-01-02", cmd.Since)
 	} else {
 		currentStart = time.Now().UTC().AddDate(0, 0, -7)
 	}
@@ -491,7 +496,7 @@ func (cmd *MonitorAnomaliesCmd) Run(globals *Globals) error {
 
 func (cmd *MonitorAnomaliesCmd) normalizeMetrics() []string {
 	if len(cmd.Metrics) == 0 {
-		return []string{checkAll}
+		return []string{metricCrashes, metricAnrs, metricErrors}
 	}
 
 	var result []string
@@ -878,7 +883,7 @@ func (cmd *MonitorDashboardCmd) Run(globals *Globals) error {
 
 func (cmd *MonitorDashboardCmd) normalizeDashboardMetrics() []string {
 	if len(cmd.Metrics) == 0 {
-		return []string{checkAll}
+		return []string{metricCrashes, metricAnrs, metricErrors, "slow-rendering", "slow-start", "wakeups", "wakelocks"}
 	}
 
 	var result []string
@@ -1182,15 +1187,17 @@ func (cmd *MonitorDashboardCmd) calculateTrends(result *dashboardResult) {
 	result.Trends.AnrTrend = trendStable
 	result.Trends.ErrorTrend = trendStable
 
+	// Crash trend: stable at 0 or between 0.005 and 0.02, increasing above 0.02, decreasing between 0 and 0.005
 	if result.Summary.AvgCrashRate > 0.02 {
 		result.Trends.CrashTrend = "increasing"
-	} else if result.Summary.AvgCrashRate < 0.005 {
+	} else if result.Summary.AvgCrashRate > 0 && result.Summary.AvgCrashRate <= 0.005 {
 		result.Trends.CrashTrend = "decreasing"
 	}
 
+	// ANR trend: stable at 0 or between 0.001 and 0.01, increasing above 0.01, decreasing between 0 and 0.001 (inclusive)
 	if result.Summary.AvgAnrRate > 0.01 {
 		result.Trends.AnrTrend = "increasing"
-	} else if result.Summary.AvgAnrRate < 0.001 {
+	} else if result.Summary.AvgAnrRate > 0 && result.Summary.AvgAnrRate <= 0.001 {
 		result.Trends.AnrTrend = "decreasing"
 	}
 }

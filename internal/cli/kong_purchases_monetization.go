@@ -15,6 +15,10 @@ import (
 )
 
 const purchaseTypeSubscription = "subscription"
+const purchaseTypeProduct = "product"
+const revokeTypeFullRefund = "fullRefund"
+const revokeTypePartialRefund = "partialRefund"
+const revokeTypeProratedRefund = "proratedRefund"
 
 // ============================================================================
 // Purchases Commands
@@ -381,6 +385,22 @@ func (cmd *PurchasesSubscriptionsRevokeCmd) Run(globals *Globals) error {
 	}
 	start := time.Now()
 
+	// Validate inputs before creating API client
+	if cmd.RevokeType != "" {
+		// Validate revoke type for v2 API
+		switch cmd.RevokeType {
+		case revokeTypeFullRefund, revokeTypePartialRefund, revokeTypeProratedRefund:
+			// Valid types
+		default:
+			return errors.NewAPIError(errors.CodeValidationError, fmt.Sprintf("invalid revoke type: %s", cmd.RevokeType)).
+				WithHint("Valid types: fullRefund, partialRefund")
+		}
+	} else if cmd.SubscriptionID == "" {
+		// v1 API requires SubscriptionID
+		return errors.NewAPIError(errors.CodeValidationError, "subscription ID is required for v1 revoke").
+			WithHint("Provide --subscription-id or use --revoke-type for v2 API")
+	}
+
 	client, err := createAPIClient(ctx, globals)
 	if err != nil {
 		return err
@@ -396,17 +416,14 @@ func (cmd *PurchasesSubscriptionsRevokeCmd) Run(globals *Globals) error {
 	if cmd.RevokeType != "" {
 		revokeReq := &androidpublisher.RevokeSubscriptionPurchaseRequest{}
 		switch cmd.RevokeType {
-		case "fullRefund":
+		case revokeTypeFullRefund:
 			revokeReq.RevocationContext = &androidpublisher.RevocationContext{
 				FullRefund: &androidpublisher.RevocationContextFullRefund{},
 			}
-		case "partialRefund", "proratedRefund":
+		case revokeTypePartialRefund, revokeTypeProratedRefund:
 			revokeReq.RevocationContext = &androidpublisher.RevocationContext{
 				ProratedRefund: &androidpublisher.RevocationContextProratedRefund{},
 			}
-		default:
-			return errors.NewAPIError(errors.CodeValidationError, fmt.Sprintf("invalid revoke type: %s", cmd.RevokeType)).
-				WithHint("Valid types: fullRefund, partialRefund")
 		}
 
 		var resp *androidpublisher.RevokeSubscriptionPurchaseResponse
@@ -430,12 +447,6 @@ func (cmd *PurchasesSubscriptionsRevokeCmd) Run(globals *Globals) error {
 			output.NewResult(data).WithDuration(time.Since(start)).WithServices("androidpublisher"),
 			globals.Output, globals.Pretty,
 		)
-	}
-
-	// v1 API requires SubscriptionID
-	if cmd.SubscriptionID == "" {
-		return errors.NewAPIError(errors.CodeValidationError, "subscription ID is required for v1 revoke").
-			WithHint("Provide --subscription-id or use --revoke-type for v2 API")
 	}
 
 	err = client.DoWithRetry(ctx, func() error {
@@ -480,6 +491,21 @@ func (cmd *PurchasesVerifyCmd) Run(globals *Globals) error {
 	}
 	start := time.Now()
 
+	// Validate type before creating API client
+	switch cmd.Type {
+	case purchaseTypeProduct, purchaseTypeSubscription, "auto", "":
+		// Valid types - will validate further after client creation if needed
+	default:
+		return errors.NewAPIError(errors.CodeValidationError, fmt.Sprintf("invalid type: %s", cmd.Type)).
+			WithHint("Valid types: product, subscription, auto")
+	}
+
+	// Validate product ID requirement for product type
+	if cmd.Type == purchaseTypeProduct && cmd.ProductID == "" {
+		return errors.NewAPIError(errors.CodeValidationError, "product ID is required when type is 'product'").
+			WithHint("Provide --product-id flag")
+	}
+
 	client, err := createAPIClient(ctx, globals)
 	if err != nil {
 		return err
@@ -493,10 +519,6 @@ func (cmd *PurchasesVerifyCmd) Run(globals *Globals) error {
 
 	switch cmd.Type {
 	case "product":
-		if cmd.ProductID == "" {
-			return errors.NewAPIError(errors.CodeValidationError, "product ID is required when type is 'product'").
-				WithHint("Provide --product-id flag")
-		}
 		return cmd.verifyProduct(ctx, client, svc, globals, start)
 
 	case purchaseTypeSubscription:
@@ -512,11 +534,9 @@ func (cmd *PurchasesVerifyCmd) Run(globals *Globals) error {
 		}
 		// Try subscription v2
 		return cmd.verifySubscription(ctx, client, svc, globals, start)
-
-	default:
-		return errors.NewAPIError(errors.CodeValidationError, fmt.Sprintf("invalid type: %s", cmd.Type)).
-			WithHint("Valid types: product, subscription, auto")
 	}
+
+	return nil
 }
 
 func (cmd *PurchasesVerifyCmd) verifyProduct(ctx context.Context, client interface {
@@ -533,7 +553,7 @@ func (cmd *PurchasesVerifyCmd) verifyProduct(ctx context.Context, client interfa
 	}
 
 	data := map[string]interface{}{
-		"type":                 "product",
+		"type":                 purchaseTypeProduct,
 		"productId":            cmd.ProductID,
 		"purchaseState":        purchase.PurchaseState,
 		"consumptionState":     purchase.ConsumptionState,
@@ -633,6 +653,17 @@ func (cmd *PurchasesVoidedListCmd) Run(globals *Globals) error {
 	}
 	start := time.Now()
 
+	// Validate type before creating API client
+	if cmd.Type != "" {
+		switch cmd.Type {
+		case purchaseTypeProduct, purchaseTypeSubscription:
+			// Valid types
+		default:
+			return errors.NewAPIError(errors.CodeValidationError, fmt.Sprintf("invalid type: %s", cmd.Type)).
+				WithHint("Valid types: product, subscription")
+		}
+	}
+
 	client, err := createAPIClient(ctx, globals)
 	if err != nil {
 		return err
@@ -673,13 +704,10 @@ func (cmd *PurchasesVoidedListCmd) Run(globals *Globals) error {
 		if cmd.Type != "" {
 			var typeVal int64
 			switch cmd.Type {
-			case "product":
+			case purchaseTypeProduct:
 				typeVal = 0
 			case purchaseTypeSubscription:
 				typeVal = 1
-			default:
-				return errors.NewAPIError(errors.CodeValidationError, fmt.Sprintf("invalid type: %s", cmd.Type)).
-					WithHint("Valid types: product, subscription")
 			}
 			call = call.Type(typeVal)
 		}

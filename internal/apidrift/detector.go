@@ -164,8 +164,10 @@ func NewDetector(discoveryURL, goModPath, clientSourceDir string) *Detector {
 }
 
 // FetchDiscoveryDocument retrieves and parses the discovery API document
+//
+//nolint:dupl // Similar to implementation.go but kept separate for clarity
 func (d *Detector) FetchDiscoveryDocument() (*DiscoveryDocument, error) {
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, d.DiscoveryURL, nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, d.DiscoveryURL, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -224,7 +226,8 @@ func (d *Detector) extractResources(prefix string, resources map[string]Resource
 		}
 
 		// Extract methods at this level
-		for methodName, method := range resource.Methods {
+		for methodName := range resource.Methods {
+			method := resource.Methods[methodName]
 			endpointID := fullName + "." + methodName
 			endpoints[endpointID] = method
 		}
@@ -250,6 +253,12 @@ func (d *Detector) AnalyzeClientCode() (map[string]bool, error) {
 			return nil
 		}
 
+		// Validate path is within expected directory
+		if !strings.HasPrefix(filepath.Clean(path), filepath.Clean(d.ClientSourceDir)) {
+			return nil
+		}
+
+		//nolint:gosec // Path is validated above with strings.HasPrefix check
 		content, err := os.ReadFile(path)
 		if err != nil {
 			return err

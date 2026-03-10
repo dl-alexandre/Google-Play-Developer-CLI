@@ -88,13 +88,25 @@ jobs:
           cache: true
           check-latest: true
 
-      - name: Build for all platforms
+      - name: Build optimized binaries for all platforms
         run: |
-          GOOS=linux GOARCH=amd64 go build -o bin/gpd-linux-amd64 ./cmd/gpd
-          GOOS=linux GOARCH=arm64 go build -o bin/gpd-linux-arm64 ./cmd/gpd
-          GOOS=darwin GOARCH=amd64 go build -o bin/gpd-darwin-amd64 ./cmd/gpd
-          GOOS=darwin GOARCH=arm64 go build -o bin/gpd-darwin-arm64 ./cmd/gpd
-          GOOS=windows GOARCH=amd64 go build -o bin/gpd-windows-amd64.exe ./cmd/gpd
+          # Optimization flags (~30% size reduction):
+          # -trimpath: remove file system paths from binary
+          # -s: strip symbol table
+          # -w: strip DWARF debug info  
+          # CGO_ENABLED=0: static linking (no C dependencies)
+          
+          echo "Building optimized binaries..."
+          
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/gpd-linux-amd64 ./cmd/gpd
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/gpd-linux-arm64 ./cmd/gpd
+          GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/gpd-darwin-amd64 ./cmd/gpd
+          GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/gpd-darwin-arm64 ./cmd/gpd
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/gpd-windows-amd64.exe ./cmd/gpd
+          
+          echo ""
+          echo "Binary sizes after optimization (~30% smaller):"
+          ls -lh bin/gpd-* | awk '{print $5, $9}'
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4

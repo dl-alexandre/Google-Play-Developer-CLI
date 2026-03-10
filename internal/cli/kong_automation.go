@@ -327,8 +327,8 @@ func (cmd *AutomationRolloutCmd) performRollback(globals *Globals, toPercentage 
 
 // AutomationPromoteCmd performs smart promote with optional verification.
 type AutomationPromoteCmd struct {
-	FromTrack     string        `help:"Source track" enum:"internal,alpha,beta,production" required:""`
-	ToTrack       string        `help:"Destination track" enum:"internal,alpha,beta,production" required:""`
+	FromTrack     string        `help:"Source track" enum:"internal,alpha,beta,production" required:"true"`
+	ToTrack       string        `help:"Destination track" enum:"internal,alpha,beta,production" required:"true"`
 	VersionCodes  []int64       `help:"Specific version codes to promote"`
 	Verify        bool          `help:"Verify promoted version after promotion"`
 	VerifyTimeout time.Duration `help:"Maximum time to wait for verification" default:"15m"`

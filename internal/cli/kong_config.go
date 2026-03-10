@@ -342,9 +342,44 @@ func kongValidateServiceAccountJSON(data []byte) (valid bool, email string, scop
 }
 
 func kongValidatePath(path string) error {
+	// First check for traversal patterns in the original path
+	// Check for ".." as a path component (preceded by / or \ or at start)
+	if strings.Contains(path, "..") {
+		// Check if it's actually a traversal (not just "..." or similar)
+		// ".." should be preceded by path separator or start, and followed by separator or end
+		for i := 0; i <= len(path)-2; i++ {
+			if path[i:i+2] != ".." {
+				continue
+			}
+			// Check if this is a valid ".." component
+			isAtStart := i == 0
+			isPrecededBySep := i > 0 && (path[i-1] == '/' || path[i-1] == '\\')
+			isFollowedBySep := i+2 < len(path) && (path[i+2] == '/' || path[i+2] == '\\' || path[i+2] == ':')
+			isAtEnd := i+2 == len(path)
+
+			if (isAtStart || isPrecededBySep) && (isAtEnd || isFollowedBySep) {
+				return fmt.Errorf("path contains directory traversal")
+			}
+		}
+	}
+
+	// Also check cleaned path for any remaining traversal
 	cleanPath := filepath.Clean(path)
 	if strings.Contains(cleanPath, "..") {
-		return fmt.Errorf("path contains directory traversal")
+		// Verify it's a true traversal component, not just a substring like in "..."
+		for i := 0; i <= len(cleanPath)-2; i++ {
+			if cleanPath[i:i+2] != ".." {
+				continue
+			}
+			isAtStart := i == 0
+			isPrecededBySep := i > 0 && (cleanPath[i-1] == '/' || cleanPath[i-1] == '\\')
+			isFollowedBySep := i+2 < len(cleanPath) && (cleanPath[i+2] == '/' || cleanPath[i+2] == '\\' || cleanPath[i+2] == ':')
+			isAtEnd := i+2 == len(cleanPath)
+
+			if (isAtStart || isPrecededBySep) && (isAtEnd || isFollowedBySep) {
+				return fmt.Errorf("path contains directory traversal")
+			}
+		}
 	}
 	return nil
 }
@@ -717,6 +752,27 @@ type configExport struct {
 	Metadata   map[string]interface{} `json:"metadata"`
 }
 
+// MarshalYAML implements custom YAML marshaling to avoid quoting string values.
+func (c configExport) MarshalYAML() (interface{}, error) {
+	// Create a map for YAML output
+	result := make(map[string]interface{})
+	result["version"] = &yaml.Node{
+		Kind:  yaml.ScalarNode,
+		Value: c.Version,
+	}
+	result["exportedAt"] = &yaml.Node{
+		Kind:  yaml.ScalarNode,
+		Value: c.ExportedAt,
+	}
+	if len(c.Config) > 0 {
+		result["config"] = c.Config
+	}
+	if len(c.Metadata) > 0 {
+		result["metadata"] = c.Metadata
+	}
+	return result, nil
+}
+
 func marshalConfigExport(outputPath string, export configExport) ([]byte, error) {
 	ext := strings.ToLower(filepath.Ext(outputPath))
 	if ext == ".yaml" || ext == ".yml" {
@@ -839,10 +895,10 @@ func unmarshalConfigExport(inputPath string, data []byte, out *configExport) err
 	if ext == ".yaml" || ext == ".yml" {
 		return yaml.Unmarshal(data, out)
 	}
-	if ext == "" || ext == ".json" {
+	if ext == ".json" {
 		return json.Unmarshal(data, out)
 	}
-
+	// For no extension or unsupported extensions, try JSON first, then YAML
 	if err := json.Unmarshal(data, out); err == nil {
 		return nil
 	}

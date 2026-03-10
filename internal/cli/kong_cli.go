@@ -41,27 +41,29 @@ type KongCLI struct {
 	Globals
 
 	// Top-level commands
-	Auth         AuthCmd         `cmd:"" help:"Authentication commands"`
-	Config       ConfigCmd       `cmd:"" help:"Configuration commands"`
-	Publish      PublishCmd      `cmd:"" help:"Publishing commands"`
-	Reviews      ReviewsCmd      `cmd:"" help:"Review management commands"`
-	Vitals       VitalsCmd       `cmd:"" help:"Android vitals commands"`
-	Monitor      MonitorCmd      `cmd:"" help:"Monitoring and alerting commands"`
-	Analytics    AnalyticsCmd    `cmd:"" help:"Analytics commands"`
-	Purchases    PurchasesCmd    `cmd:"" help:"Purchase verification commands"`
-	Monetization MonetizationCmd `cmd:"" help:"Monetization commands"`
-	Permissions  PermissionsCmd  `cmd:"" help:"Permissions management"`
-	Recovery     RecoveryCmd     `cmd:"" help:"App recovery commands"`
-	Apps         AppsCmd         `cmd:"" help:"App discovery commands"`
-	Games        GamesCmd        `cmd:"" help:"Google Play Games services"`
-	Integrity    IntegrityCmd    `cmd:"" help:"Play Integrity API commands"`
-	Migrate      MigrateCmd      `cmd:"" help:"Migration commands"`
-	CustomApp    CustomAppCmd    `cmd:"" help:"Custom app publishing" aliases:"customapp"`
-	Grouping     GroupingCmd     `cmd:"" help:"App access grouping"`
-	Version      VersionCmd      `cmd:"" help:"Show version information"`
-	CheckUpdate  UpdateCheckCmd  `cmd:"" name:"check-update" help:"Check for available updates"`
-	Completion   CompletionCmd   `cmd:"" help:"Generate shell completion scripts"`
-	Maintenance  MaintenanceCmd  `cmd:"" help:"System maintenance and monitoring commands"`
+	Auth          AuthCmd          `cmd:"" help:"Authentication commands"`
+	Config        ConfigCmd        `cmd:"" help:"Configuration commands"`
+	Publish       PublishCmd       `cmd:"" help:"Publishing commands"`
+	Reviews       ReviewsCmd       `cmd:"" help:"Review management commands"`
+	Vitals        VitalsCmd        `cmd:"" help:"Android vitals commands"`
+	Monitor       MonitorCmd       `cmd:"" help:"Monitoring and alerting commands"`
+	Analytics     AnalyticsCmd     `cmd:"" help:"Analytics commands"`
+	Purchases     PurchasesCmd     `cmd:"" help:"Purchase verification commands"`
+	Monetization  MonetizationCmd  `cmd:"" help:"Monetization commands"`
+	Permissions   PermissionsCmd   `cmd:"" help:"Permissions management"`
+	Recovery      RecoveryCmd      `cmd:"" help:"App recovery commands"`
+	Apps          AppsCmd          `cmd:"" help:"App discovery commands"`
+	Games         GamesCmd         `cmd:"" help:"Google Play Games services"`
+	Integrity     IntegrityCmd     `cmd:"" help:"Play Integrity API commands"`
+	Migrate       MigrateCmd       `cmd:"" help:"Migration commands"`
+	CustomApp     CustomAppCmd     `cmd:"" help:"Custom app publishing" aliases:"customapp"`
+	GeneratedApks GeneratedApksCmd `cmd:"" help:"Generated APKs management"`
+	SystemApks    SystemApksCmd    `cmd:"" help:"System APKs management"`
+	Grouping      GroupingCmd      `cmd:"" help:"App access grouping"`
+	Version       VersionCmd       `cmd:"" help:"Show version information"`
+	CheckUpdate   UpdateCheckCmd   `cmd:"" name:"check-update" help:"Check for available updates"`
+	Completion    CompletionCmd    `cmd:"" help:"Generate shell completion scripts"`
+	Maintenance   MaintenanceCmd   `cmd:"" help:"System maintenance and monitoring commands"`
 
 	// New advanced commands
 	Bulk        BulkCmd        `cmd:"" help:"Batch operations for uploads and updates"`

@@ -366,7 +366,6 @@ func TestKongCheckDoctorCredentials(t *testing.T) {
 		{
 			name:         "valid GAC path with valid key",
 			envKey:       "",
-			gacPath:      "valid_gac",
 			parsedConfig: &config.Config{},
 			configLoaded: false,
 			setup: func(t *testing.T) string {
@@ -442,20 +441,21 @@ func TestKongCheckDoctorCredentials(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var keyPath string
+			var setupPath string
 			if tt.setup != nil {
-				keyPath = tt.setup(t)
+				setupPath = tt.setup(t)
 			}
 
 			cfg := tt.parsedConfig
-			if keyPath != "" {
-				cfg.ServiceAccountKeyPath = keyPath
-			}
 
-			// If GAC path is set but doesn't look like absolute path, use temp file
+			// Determine which path to use for what
 			gacPath := tt.gacPath
-			if gacPath != "" && !strings.HasPrefix(gacPath, "/") && gacPath != "/nonexistent/path.json" {
-				// Already handled by setup
+			if tt.wantGacSet && gacPath == "" && setupPath != "" {
+				// Use setup path for GAC
+				gacPath = setupPath
+			}
+			if tt.wantKeyPathSet && setupPath != "" {
+				cfg.ServiceAccountKeyPath = setupPath
 			}
 
 			result := kongCheckDoctorCredentials(tt.envKey, gacPath, cfg, tt.configLoaded)
@@ -568,14 +568,23 @@ func TestKongFindGPDBinaries(t *testing.T) {
 			name: "PATH with empty directory components",
 			setup: func(t *testing.T) string {
 				tmpDir := t.TempDir()
-				_ = "gpd"
+				// Create gpd binary in the temp dir
+				binaryName := "gpd"
 				if runtime.GOOS == "windows" {
-					_ = "gpd.exe"
-					return tmpDir + ";;" + tmpDir
+					binaryName = "gpd.exe"
 				}
-				return tmpDir + "::" + tmpDir
+				path := filepath.Join(tmpDir, binaryName)
+				if err := os.WriteFile(path, []byte("binary"), 0755); err != nil {
+					t.Fatalf("failed to create binary: %v", err)
+				}
+				// Return path with empty components (current dir) followed by the actual dir
+				// This tests that empty components don't crash, and we still find the binary
+				if runtime.GOOS == "windows" {
+					return ";" + tmpDir
+				}
+				return ":" + tmpDir
 			},
-			wantBinaries: 1, // Empty dirs are skipped, same dir should only appear once
+			wantBinaries: 1, // Empty dir is skipped, but actual dir finds the binary
 		},
 		{
 			name: "PATH with directory traversal attempt",
@@ -1832,12 +1841,16 @@ func Example_kongValidateServiceAccountJSON() {
 	valid, reason, fields := kongValidateServiceAccountJSON(validKey)
 
 	fmt.Printf("Valid: %v\n", valid)
-	fmt.Printf("Reason: %s\n", reason)
+	if reason != "" {
+		fmt.Printf("Reason: %s\n", reason)
+	} else {
+		fmt.Println("Reason: (none)")
+	}
 	fmt.Printf("Missing fields: %v\n", fields)
 
 	// Output:
 	// Valid: true
-	// Reason:
+	// Reason: (none)
 	// Missing fields: []
 }
 

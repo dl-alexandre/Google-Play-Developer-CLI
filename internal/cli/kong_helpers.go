@@ -11,9 +11,10 @@ import (
 )
 
 const (
-	formatJSON  = "json"
-	formatTable = "table"
-	formatExcel = "excel"
+	formatJSON     = "json"
+	formatMarkdown = "markdown"
+	formatTable    = "table"
+	formatExcel    = "excel"
 )
 
 // newAuthManager creates a new auth manager instance.

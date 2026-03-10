@@ -54,12 +54,12 @@ func (cmd *DriftCmd) Run(globals *Globals) error {
 	// Output based on format
 	var outputData []byte
 	switch cmd.Format {
-	case "json":
+	case formatJSON:
 		outputData, err = json.MarshalIndent(report, "", "  ")
 		if err != nil {
 			return fmt.Errorf("failed to marshal report: %w", err)
 		}
-	case "markdown":
+	case formatMarkdown:
 		outputData = []byte(generateMarkdownReport(report))
 	default:
 		report.PrintReport()
@@ -165,7 +165,7 @@ func (cmd *MultiDriftCmd) Run(globals *Globals) error {
 	switch cmd.Format {
 	case "json":
 		return outputMultiDriftJSON(results)
-	case "markdown":
+	case formatMarkdown:
 		return outputMultiDriftMarkdown(results)
 	default:
 		return outputMultiDriftTable(results)
@@ -284,7 +284,7 @@ func outputMultiDriftMarkdown(results map[string]*apidrift.DriftReport) error {
 			fmt.Printf("- **Deprecated Endpoints:** %d\n", len(report.Endpoints.Deprecated))
 			if len(report.Endpoints.MissingInClient) > 0 {
 				fmt.Println("\nMissing:")
-				for _, ep := range report.Endpoints.MissingInClient[:min(10, len(report.Endpoints.MissingInClient))] {
+				for _, ep := range report.Endpoints.MissingInClient[:minInt(10, len(report.Endpoints.MissingInClient))] {
 					fmt.Printf("- `%s`\n", ep)
 				}
 				if len(report.Endpoints.MissingInClient) > 10 {
@@ -300,13 +300,13 @@ func outputMultiDriftMarkdown(results map[string]*apidrift.DriftReport) error {
 func generateMarkdownReport(report *apidrift.DriftReport) string {
 	var b strings.Builder
 
-	b.WriteString("# Google Play Developer API Drift Report\n\n")
-	b.WriteString(fmt.Sprintf("**Generated:** %s\n\n", report.Timestamp.Format("2006-01-02 15:04:05 UTC")))
+	fmt.Fprintf(&b, "# Google Play Developer API Drift Report\n\n")
+	fmt.Fprintf(&b, "**Generated:** %s\n\n", report.Timestamp.Format("2006-01-02 15:04:05 UTC"))
 
 	b.WriteString("## Summary\n\n")
-	b.WriteString(fmt.Sprintf("- **Discovery Revision:** %s\n", report.DiscoveryRevision))
-	b.WriteString(fmt.Sprintf("- **Go Module Version:** %s\n", report.GoModVersion))
-	b.WriteString(fmt.Sprintf("- **Drift Score:** %d\n", report.DriftScore))
+	fmt.Fprintf(&b, "- **Discovery Revision:** %s\n", report.DiscoveryRevision)
+	fmt.Fprintf(&b, "- **Go Module Version:** %s\n", report.GoModVersion)
+	fmt.Fprintf(&b, "- **Drift Score:** %d\n", report.DriftScore)
 	if report.DriftDetected {
 		b.WriteString("- **Status:** ⚠️ DRIFT DETECTED\n")
 	} else {
@@ -316,16 +316,16 @@ func generateMarkdownReport(report *apidrift.DriftReport) string {
 	b.WriteString("\n## Endpoint Analysis\n\n")
 	b.WriteString("| Metric | Count |\n")
 	b.WriteString("|--------|-------|\n")
-	b.WriteString(fmt.Sprintf("| Discovery Total | %d |\n", report.Endpoints.DiscoveryTotal))
-	b.WriteString(fmt.Sprintf("| Implemented | %d |\n", report.Endpoints.ImplementedTotal))
-	b.WriteString(fmt.Sprintf("| Missing | %d |\n", len(report.Endpoints.MissingInClient)))
-	b.WriteString(fmt.Sprintf("| Deprecated | %d |\n\n", len(report.Endpoints.Deprecated)))
+	fmt.Fprintf(&b, "| Discovery Total | %d |\n", report.Endpoints.DiscoveryTotal)
+	fmt.Fprintf(&b, "| Implemented | %d |\n", report.Endpoints.ImplementedTotal)
+	fmt.Fprintf(&b, "| Missing | %d |\n", len(report.Endpoints.MissingInClient))
+	fmt.Fprintf(&b, "| Deprecated | %d |\n\n", len(report.Endpoints.Deprecated))
 
 	if len(report.Endpoints.MissingInClient) > 0 {
 		b.WriteString("## Missing Endpoints\n\n")
 		sort.Strings(report.Endpoints.MissingInClient)
 		for _, ep := range report.Endpoints.MissingInClient {
-			b.WriteString(fmt.Sprintf("- `%s`\n", ep))
+			fmt.Fprintf(&b, "- `%s`\n", ep)
 		}
 		b.WriteString("\n")
 	}
@@ -334,7 +334,7 @@ func generateMarkdownReport(report *apidrift.DriftReport) string {
 		b.WriteString("## Deprecated Endpoints\n\n")
 		sort.Strings(report.Endpoints.Deprecated)
 		for _, ep := range report.Endpoints.Deprecated {
-			b.WriteString(fmt.Sprintf("- `%s`\n", ep))
+			fmt.Fprintf(&b, "- `%s`\n", ep)
 		}
 		b.WriteString("\n")
 	}
@@ -351,7 +351,7 @@ func generateMarkdownReport(report *apidrift.DriftReport) string {
 	return b.String()
 }
 
-func min(a, b int) int {
+func minInt(a, b int) int {
 	if a < b {
 		return a
 	}

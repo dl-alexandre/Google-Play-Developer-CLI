@@ -395,7 +395,7 @@ func (cmd *VitalsErrorsIssuesCmd) intervalToDateRange() string {
 		startDate = time.Now().UTC().AddDate(0, 0, -30).Format("2006-01-02")
 	}
 
-	return fmt.Sprintf("\"%sT00:00:00Z\", \"%sT00:00:00Z\"", startDate, endDate)
+	return fmt.Sprintf("\"%sT00:00:00Z\",\"%sT00:00:00Z\"", startDate, endDate)
 }
 
 // errorIssuesPageResponse wraps the error issues search response to implement PageResponse.

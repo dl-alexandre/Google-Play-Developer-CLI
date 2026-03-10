@@ -22,10 +22,16 @@ LDFLAGS = -ldflags "-X github.com/dl-alexandre/gpd/pkg/version.Version=$(VERSION
 	-X github.com/dl-alexandre/gpd/pkg/version.GitCommit=$(GIT_COMMIT) \
 	-X github.com/dl-alexandre/gpd/pkg/version.BuildTime=$(BUILD_TIME)"
 
+# Optimized build flags (strip debug info, trim paths)
+LDFLAGS_OPTIMIZED = -ldflags "-s -w \
+	-X github.com/dl-alexandre/gpd/pkg/version.Version=$(VERSION) \
+	-X github.com/dl-alexandre/gpd/pkg/version.GitCommit=$(GIT_COMMIT) \
+	-X github.com/dl-alexandre/gpd/pkg/version.BuildTime=$(BUILD_TIME)"
+
 # Platforms
 PLATFORMS = linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
 
-.PHONY: all build clean test deps tidy lint install help format install-hooks \
+.PHONY: all build build-optimized build-small build-optimized-all build-all clean test deps tidy lint install help format install-hooks \
 	benchmark benchmark-compare benchmark-regression benchmark-baseline \
 	test-unit test-integration test-e2e test-coverage-threshold test-flaky security check vet \
 	apidrift apidrift-check apidrift-json apidrift-markdown apidrift-build apidrift-verbose apidrift-multi
@@ -48,6 +54,40 @@ build-all:
 		$(GOBUILD) $(LDFLAGS) -o $(BINARY_DIR)/$(BINARY_NAME)-$${platform%/*}-$${platform#*/}$(if $(findstring windows,$${platform}),.exe,) ./cmd/gpd; \
 		echo "Built $(BINARY_DIR)/$(BINARY_NAME)-$${platform%/*}-$${platform#*/}"; \
 	done
+
+# Build optimized binary (strip debug info, trim paths)
+build-optimized:
+	@echo "Building optimized $(BINARY_NAME)..."
+	@mkdir -p $(BINARY_DIR)
+	CGO_ENABLED=0 $(GOBUILD) -trimpath $(LDFLAGS_OPTIMIZED) -o $(BINARY_DIR)/$(BINARY_NAME) ./cmd/gpd
+	@echo "✓ Optimized binary built: $(BINARY_DIR)/$(BINARY_NAME)"
+	@echo "  Size: $$(ls -lh $(BINARY_DIR)/$(BINARY_NAME) | awk '{print $$5}')"
+	@echo ""
+	@echo "Testing binary..."
+	@./$(BINARY_DIR)/$(BINARY_NAME) version
+
+# Build small binary (fully optimized, static, compressed)
+build-small:
+	@echo "Building small $(BINARY_NAME)..."
+	@mkdir -p $(BINARY_DIR)
+	CGO_ENABLED=0 $(GOBUILD) -trimpath $(LDFLAGS_OPTIMIZED) -o $(BINARY_DIR)/$(BINARY_NAME) ./cmd/gpd
+	@echo "✓ Optimized binary: $$(ls -lh $(BINARY_DIR)/$(BINARY_NAME) | awk '{print $$5}')"
+	@if command -v upx >/dev/null 2>&1; then \
+		echo "Compressing with UPX..."; \
+		upx --best --lzma $(BINARY_DIR)/$(BINARY_NAME) 2>/dev/null || echo "⚠ UPX compression failed (may not be supported)"; \
+		echo "✓ Final binary: $$(ls -lh $(BINARY_DIR)/$(BINARY_NAME) | awk '{print $$5}')"; \
+	else \
+		echo "⚠ upx not installed. Binary not compressed."; \
+		echo "  Install: brew install upx (macOS) or apt-get install upx (Linux)"; \
+	fi
+	@echo ""
+	@echo "Testing binary..."
+	@./$(BINARY_DIR)/$(BINARY_NAME) version
+
+# Run full optimization script
+build-optimized-all:
+	@echo "Running full optimization build..."
+	@bash ./scripts/build-optimized.sh all
 
 # Run all checks (format, vet, lint, test)
 .PHONY: check
@@ -257,9 +297,12 @@ help:
 	@echo "Google Play Developer CLI (gpd) Makefile"
 	@echo ""
 	@echo "Build Targets:"
-	@echo "  all          - Build the binary (default)"
-	@echo "  build        - Build for current platform"
-	@echo "  build-all    - Build for all platforms"
+	@echo "  all                   - Build the binary (default)"
+	@echo "  build                 - Build for current platform"
+	@echo "  build-optimized       - Build optimized binary (strip debug, ~20MB)"
+	@echo "  build-small           - Build smallest binary (UPX compressed, ~10-15MB)"
+	@echo "  build-optimized-all   - Build all optimization levels with size comparison"
+	@echo "  build-all             - Build for all platforms"
 	@echo ""
 	@echo "Test & Quality:"
 	@echo "  test              - Run tests"

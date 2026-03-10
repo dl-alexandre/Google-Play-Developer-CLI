@@ -629,7 +629,7 @@ func TestPermissionsCommands_ContextHandling(t *testing.T) {
 
 func TestPermissionsCommands_WithCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel() // Cancel immediately
+	cancel() // Cancel immediately
 
 	globals := &Globals{
 		Package: "com.example.app",

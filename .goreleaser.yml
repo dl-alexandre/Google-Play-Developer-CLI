@@ -20,6 +20,13 @@ builds:
     goarch:
       - amd64
       - arm64
+    # Optimization flags for smaller binaries (~30% reduction):
+    # -trimpath: remove file system paths from binary
+    # -s: strip symbol table (smaller binary, no debugging)
+    # -w: strip DWARF debug info (smaller binary)
+    # -X: inject version info at build time
+    flags:
+      - -trimpath
     ldflags:
       - -s -w
       - -X github.com/dl-alexandre/gpd/pkg/version.Version={{.Version}}

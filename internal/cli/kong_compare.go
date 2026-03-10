@@ -530,8 +530,12 @@ func (cmd *CompareReleasesCmd) Run(globals *Globals) error {
 				}
 
 				releaseName := release.Name
-				if releaseName == "" && len(versionCodes) > 0 {
-					releaseName = "v" + versionCodes[0]
+				if releaseName == "" {
+					if len(versionCodes) > 0 {
+						releaseName = "v" + versionCodes[0]
+					} else {
+						releaseName = "v"
+					}
 				}
 
 				result.Timeline = append(result.Timeline, compareReleaseEvent{

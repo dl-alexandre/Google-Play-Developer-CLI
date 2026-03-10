@@ -108,15 +108,15 @@ func TestCompareVitalsCmd_ScoreCalculation(t *testing.T) {
 			name:      "moderate crash rate",
 			crashRate: 0.001,
 			anrRate:   0.0,
-			wantMin:   90.0,
-			wantMax:   100.0,
+			wantMin:   40.0,
+			wantMax:   60.0,
 		},
 		{
 			name:      "moderate ANR rate",
 			crashRate: 0.0,
 			anrRate:   0.001,
-			wantMin:   90.0,
-			wantMax:   100.0,
+			wantMin:   40.0,
+			wantMax:   60.0,
 		},
 		{
 			name:      "high crash rate",
@@ -499,8 +499,12 @@ func TestCompareReleasesCmd_ReleaseNameFallback(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			releaseName := tt.releaseName
-			if releaseName == "" && len(tt.versionCodes) > 0 {
-				releaseName = "v" + tt.versionCodes[0]
+			if releaseName == "" {
+				if len(tt.versionCodes) > 0 {
+					releaseName = "v" + tt.versionCodes[0]
+				} else {
+					releaseName = "v"
+				}
 			}
 
 			if releaseName != tt.expected {

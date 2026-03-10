@@ -5,6 +5,7 @@ package cli
 
 import (
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -616,7 +617,7 @@ func TestCalculateRolloutSteps(t *testing.T) {
 			}
 
 			for i, expected := range tc.expected {
-				if result[i] != expected {
+				if math.Abs(result[i]-expected) > 1e-9 {
 					t.Errorf("Step %d: expected %v, got %v", i, expected, result[i])
 				}
 			}

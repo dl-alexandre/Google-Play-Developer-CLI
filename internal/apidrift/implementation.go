@@ -6,6 +6,7 @@
 package apidrift
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,6 +18,8 @@ import (
 	"strings"
 	"time"
 )
+
+const unknownStatus = "unknown"
 
 // ImplementationDriftReport shows what the CLI implements vs what's available
 type ImplementationDriftReport struct {
@@ -78,12 +81,20 @@ func NewImplementationDriftDetector(discoveryURL, cliSourceDir, goModPath string
 }
 
 // FetchDiscoveryDocument retrieves the discovery API document
+//
+//nolint:dupl // Similar to detector.go but kept separate for clarity
 func (d *ImplementationDriftDetector) FetchDiscoveryDocument() (*DiscoveryDocument, error) {
-	resp, err := d.HTTPClient.Get(d.DiscoveryURL)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, d.DiscoveryURL, http.NoBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	resp, err := d.HTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch discovery document: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -112,7 +123,8 @@ func (d *ImplementationDriftDetector) extractResources(prefix string, resources 
 			fullName = prefix + "." + name
 		}
 
-		for methodName, method := range resource.Methods {
+		for methodName := range resource.Methods {
+			method := resource.Methods[methodName]
 			endpointID := fullName + "." + methodName
 			endpoints[endpointID] = EndpointInfo{
 				ID:          endpointID,
@@ -145,6 +157,12 @@ func (d *ImplementationDriftDetector) ExtractCLIEndpoints() (map[string]Endpoint
 			return nil
 		}
 
+		// Validate path is within expected directory
+		if !strings.HasPrefix(filepath.Clean(path), filepath.Clean(d.CLISourceDir)) {
+			return nil
+		}
+
+		//nolint:gosec // Path is validated above with strings.HasPrefix check
 		content, err := os.ReadFile(path)
 		if err != nil {
 			return err
@@ -152,18 +170,19 @@ func (d *ImplementationDriftDetector) ExtractCLIEndpoints() (map[string]Endpoint
 
 		matches := apiCallPattern.FindAllStringSubmatch(string(content), -1)
 		for _, match := range matches {
-			if len(match) >= 4 {
-				service := match[1]
-				subServices := match[2] // e.g., ".Subscriptions.BasePlans"
-				method := match[3]
+			if len(match) < 4 {
+				continue
+			}
+			service := match[1]
+			subServices := match[2] // e.g., ".Subscriptions.BasePlans"
+			method := match[3]
 
-				// Map to discovery endpoint ID
-				endpointID := d.mapServiceToEndpoint(service, subServices, method)
-				if endpointID != "" {
-					endpoints[endpointID] = EndpointInfo{
-						ID:          endpointID,
-						CLILocation: filepath.Base(path),
-					}
+			// Map to discovery endpoint ID
+			endpointID := d.mapServiceToEndpoint(service, subServices, method)
+			if endpointID != "" {
+				endpoints[endpointID] = EndpointInfo{
+					ID:          endpointID,
+					CLILocation: filepath.Base(path),
 				}
 			}
 		}
@@ -198,11 +217,11 @@ func (d *ImplementationDriftDetector) mapServiceToEndpoint(service, subServices,
 }
 
 // CheckGoClientAvailability checks if types exist in the Go client
-func (d *ImplementationDriftDetector) CheckGoClientAvailability(endpointID string) (bool, string) {
+func (d *ImplementationDriftDetector) CheckGoClientAvailability(endpointID string) (available bool, reason string) {
 	// Parse endpoint to determine what types are needed
 	parts := strings.Split(endpointID, ".")
 	if len(parts) < 2 {
-		return false, "unknown"
+		return false, unknownStatus
 	}
 
 	// Extract potential type names from endpoint
@@ -332,7 +351,7 @@ func (d *ImplementationDriftDetector) extractGoModVersion() string {
 		return "unknown"
 	}
 
-	re := regexp.MustCompile(`google\.golang\.org/api\s+v([\d\.]+)`)
+	re := regexp.MustCompile(`google\.golang\.org/api\s+v([\d.]+)`)
 	matches := re.FindStringSubmatch(string(content))
 	if len(matches) >= 2 {
 		return matches[1]
@@ -360,7 +379,8 @@ func (r *ImplementationDriftReport) PrintReport() {
 	if len(r.MissingInClient) > 0 {
 		fmt.Println("🚨 CRITICAL: Endpoints CLI Uses But Missing from Go Client")
 		fmt.Println(strings.Repeat("-", 70))
-		for _, drift := range r.MissingInClient {
+		for i := range r.MissingInClient {
+			drift := r.MissingInClient[i]
 			fmt.Printf("\n   %s\n", drift.ID)
 			fmt.Printf("   Location: %s\n", drift.CLILocation)
 			fmt.Printf("   Issue: %s\n", drift.Issue)

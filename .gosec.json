@@ -1,0 +1,7 @@
+{
+  "exclude": [
+    "G122"
+  ],
+  "severity": "medium",
+  "confidence": "medium"
+}

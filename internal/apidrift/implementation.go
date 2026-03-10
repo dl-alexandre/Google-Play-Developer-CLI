@@ -162,8 +162,7 @@ func (d *ImplementationDriftDetector) ExtractCLIEndpoints() (map[string]Endpoint
 			return nil
 		}
 
-		//nolint:gosec // Path traversal handled by strings.HasPrefix check above
-		content, err := os.ReadFile(path)
+		content, err := os.ReadFile(path) //nolint:gosec // Path validated above
 		if err != nil {
 			return err
 		}

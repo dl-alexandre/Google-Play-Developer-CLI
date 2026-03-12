@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,11 @@ import (
 
 // TestEndToEndWorkflowExecution tests complete workflow execution with all features
 func TestEndToEndWorkflowExecution(t *testing.T) {
+	// Skip on Windows CI - shell commands won't work properly
+	if os.Getenv("CI") == "true" && runtime.GOOS == "windows" {
+		t.Skip("Skipping integration tests on Windows CI")
+	}
+
 	tempDir := t.TempDir()
 	stateManager := NewStateManager(tempDir)
 

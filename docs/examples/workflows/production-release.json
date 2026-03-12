@@ -1,0 +1,43 @@
+{
+  "name": "production-release",
+  "description": "Complete production release with validation and staged rollout",
+  "env": {
+    "PACKAGE": "com.example.app"
+  },
+  "steps": [
+    {
+      "name": "validate",
+      "command": "gpd automation validate --package ${env.PACKAGE} --checks all --strict",
+      "retryCount": 2,
+      "retryDelay": "5s",
+      "retryBackoff": "linear"
+    },
+    {
+      "name": "upload",
+      "command": "gpd publish upload app.aab --package ${env.PACKAGE} --output json",
+      "dependsOn": ["validate"],
+      "captureOutputs": ["versionCode"],
+      "retryCount": 3,
+      "retryDelay": "10s",
+      "retryBackoff": "exponential"
+    },
+    {
+      "name": "internal",
+      "command": "gpd publish release --package ${env.PACKAGE} --track internal --version-code ${steps.upload.versionCode} --status completed",
+      "dependsOn": ["upload"],
+      "retryCount": 2,
+      "retryDelay": "5s"
+    },
+    {
+      "name": "promote_beta",
+      "command": "gpd automation promote --package ${env.PACKAGE} --from-track internal --to-track beta --verify",
+      "dependsOn": ["internal"]
+    },
+    {
+      "name": "rollout",
+      "command": "gpd automation rollout --package ${env.PACKAGE} --track production --start-percentage 1 --target-percentage 100 --step-size 10 --step-interval 2h --auto-rollback",
+      "dependsOn": ["promote_beta"],
+      "timeout": "24h"
+    }
+  ]
+}

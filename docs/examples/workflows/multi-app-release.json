@@ -1,0 +1,50 @@
+{
+  "name": "multi-app-release",
+  "description": "Release multiple apps in parallel",
+  "env": {
+    "APP1_PACKAGE": "com.example.app1",
+    "APP2_PACKAGE": "com.example.app2"
+  },
+  "steps": [
+    {
+      "name": "upload_app1",
+      "command": "gpd publish upload app1.aab --package ${env.APP1_PACKAGE} --output json",
+      "captureOutputs": ["versionCode"]
+    },
+    {
+      "name": "upload_app2",
+      "command": "gpd publish upload app2.aab --package ${env.APP2_PACKAGE} --output json",
+      "captureOutputs": ["versionCode"]
+    },
+    {
+      "name": "release_app1",
+      "command": "gpd publish release --package ${env.APP1_PACKAGE} --track internal --version-code ${steps.upload_app1.versionCode}",
+      "dependsOn": ["upload_app1"]
+    },
+    {
+      "name": "release_app2",
+      "command": "gpd publish release --package ${env.APP2_PACKAGE} --track internal --version-code ${steps.upload_app2.versionCode}",
+      "dependsOn": ["upload_app2"]
+    },
+    {
+      "name": "validate_app1",
+      "command": "gpd testing validate --package ${env.APP1_PACKAGE} --comprehensive",
+      "dependsOn": ["release_app1"]
+    },
+    {
+      "name": "validate_app2",
+      "command": "gpd testing validate --package ${env.APP2_PACKAGE} --comprehensive",
+      "dependsOn": ["release_app2"]
+    },
+    {
+      "name": "promote_app1",
+      "command": "gpd publish promote --package ${env.APP1_PACKAGE} --from-track internal --to-track production",
+      "dependsOn": ["validate_app1", "validate_app2"]
+    },
+    {
+      "name": "promote_app2",
+      "command": "gpd publish promote --package ${env.APP2_PACKAGE} --from-track internal --to-track production",
+      "dependsOn": ["validate_app1", "validate_app2"]
+    }
+  ]
+}

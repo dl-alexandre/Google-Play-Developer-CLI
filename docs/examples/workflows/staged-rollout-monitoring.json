@@ -1,0 +1,214 @@
+{
+  "name": "staged-rollout-monitoring",
+  "description": "Production rollout with automated monitoring and rollback. Implements 5% → 25% → 50% → 100% staged rollout with health monitoring at each stage.",
+  "env": {
+    "PACKAGE": "${PACKAGE:-com.example.app}",
+    "AAB_PATH": "${AAB_PATH:-app/build/outputs/bundle/release/app-release.aab}",
+    "START_PERCENTAGE": "${START_PERCENTAGE:-5}",
+    "TARGET_PERCENTAGE": "${TARGET_PERCENTAGE:-100}",
+    "STEP_SIZE": "${STEP_SIZE:-20}",
+    "STEP_INTERVAL": "${STEP_INTERVAL:-2h}",
+    "CRASH_THRESHOLD": "${CRASH_THRESHOLD:-0.01}",
+    "ANR_THRESHOLD": "${ANR_THRESHOLD:-0.005}",
+    "MONITOR_DURATION": "${MONITOR_DURATION:-30m}",
+    "AUTO_ROLLBACK": "${AUTO_ROLLBACK:-true}",
+    "NOTIFICATION_WEBHOOK": "${NOTIFICATION_WEBHOOK:-}"
+  },
+  "steps": [
+    {
+      "name": "pre_release_validation",
+      "description": "Validate app configuration before upload",
+      "command": "gpd automation validate --package ${env.PACKAGE} --checks all --strict --format json",
+      "captureOutputs": ["passed", "failed", "warnings"]
+    },
+    {
+      "name": "upload_bundle",
+      "description": "Upload AAB to Google Play",
+      "command": "gpd publish upload ${env.AAB_PATH} --package ${env.PACKAGE} --track internal --output json",
+      "dependsOn": ["pre_release_validation"],
+      "captureOutputs": ["versionCode", "editId", "sha256"]
+    },
+    {
+      "name": "release_internal",
+      "description": "Release to internal track for initial validation",
+      "command": "gpd publish release --package ${env.PACKAGE} --track internal --version-code ${steps.upload_bundle.versionCode} --status completed",
+      "dependsOn": ["upload_bundle"],
+      "captureOutputs": ["status"]
+    },
+    {
+      "name": "promote_to_beta",
+      "description": "Promote from internal to beta track",
+      "command": "gpd automation promote --package ${env.PACKAGE} --from-track internal --to-track beta --verify --verify-timeout 30m",
+      "dependsOn": ["release_internal"],
+      "timeout": "45m"
+    },
+    {
+      "name": "monitor_beta",
+      "description": "Monitor beta release for stability before production rollout",
+      "command": "gpd automation monitor --package ${env.PACKAGE} --track beta --duration ${env.MONITOR_DURATION} --crash-threshold ${env.CRASH_THRESHOLD} --anr-threshold ${env.ANR_THRESHOLD} --exit-on-degradation",
+      "dependsOn": ["promote_to_beta"],
+      "timeout": "1h",
+      "continueOnError": false
+    },
+    {
+      "name": "check_beta_health",
+      "description": "Verify beta health before proceeding to production",
+      "type": "shell",
+      "command": "echo 'Beta health verified - proceeding to production rollout'",
+      "dependsOn": ["monitor_beta"]
+    },
+    {
+      "name": "start_production_rollout",
+      "description": "Begin staged rollout to production at START_PERCENTAGE",
+      "command": "gpd publish release --package ${env.PACKAGE} --track production --version-code ${steps.upload_bundle.versionCode} --status inProgress --user-fraction ${env.START_PERCENTAGE}",
+      "dependsOn": ["check_beta_health"],
+      "captureOutputs": ["status", "userFraction"]
+    },
+    {
+      "name": "stage_1_monitor",
+      "description": "Monitor stage 1 (5%) rollout health",
+      "command": "gpd automation monitor --package ${env.PACKAGE} --track production --duration ${env.MONITOR_DURATION} --crash-threshold ${env.CRASH_THRESHOLD} --anr-threshold ${env.ANR_THRESHOLD} --check-interval 5m --exit-on-degradation",
+      "dependsOn": ["start_production_rollout"],
+      "timeout": "45m",
+      "continueOnError": true
+    },
+    {
+      "name": "check_stage_1_health",
+      "description": "Check if stage 1 passed health checks",
+      "type": "shell",
+      "command": "if [ ${steps.stage_1_monitor.exitCode} -eq 0 ]; then echo 'Stage 1 passed - proceeding to stage 2'; else echo 'Stage 1 failed - health checks did not pass'; fi",
+      "dependsOn": ["stage_1_monitor"],
+      "captureOutputs": []
+    },
+    {
+      "name": "auto_rollback_stage_1",
+      "description": "Auto-rollback if stage 1 health checks failed",
+      "command": "gpd publish rollback --package ${env.PACKAGE} --track production --confirm",
+      "dependsOn": ["check_stage_1_health"],
+      "condition": "${steps.stage_1_monitor.exitCode} != 0 && ${env.AUTO_ROLLBACK}",
+      "continueOnError": false
+    },
+    {
+      "name": "halt_on_stage_1_failure",
+      "description": "Stop workflow if stage 1 failed and no auto-rollback",
+      "type": "shell",
+      "command": "echo 'Stage 1 rollout failed health checks. Manual intervention required.' && exit 1",
+      "dependsOn": ["check_stage_1_health"],
+      "condition": "${steps.stage_1_monitor.exitCode} != 0 && !${env.AUTO_ROLLBACK}"
+    },
+    {
+      "name": "advance_to_25_percent",
+      "description": "Advance rollout to 25% if stage 1 passed",
+      "command": "gpd publish rollout --package ${env.PACKAGE} --track production --user-fraction 0.25",
+      "dependsOn": ["check_stage_1_health"],
+      "condition": "${steps.stage_1_monitor.exitCode} == 0",
+      "captureOutputs": ["userFraction"]
+    },
+    {
+      "name": "stage_2_monitor",
+      "description": "Monitor stage 2 (25%) rollout health",
+      "command": "gpd automation monitor --package ${env.PACKAGE} --track production --duration ${env.MONITOR_DURATION} --crash-threshold ${env.CRASH_THRESHOLD} --anr-threshold ${env.ANR_THRESHOLD} --check-interval 5m --exit-on-degradation",
+      "dependsOn": ["advance_to_25_percent"],
+      "timeout": "45m",
+      "continueOnError": true
+    },
+    {
+      "name": "check_stage_2_health",
+      "description": "Check if stage 2 passed health checks",
+      "type": "shell",
+      "command": "if [ ${steps.stage_2_monitor.exitCode} -eq 0 ]; then echo 'Stage 2 passed - proceeding to stage 3'; else echo 'Stage 2 failed - health checks did not pass'; fi",
+      "dependsOn": ["stage_2_monitor"],
+      "captureOutputs": []
+    },
+    {
+      "name": "auto_rollback_stage_2",
+      "description": "Auto-rollback if stage 2 health checks failed",
+      "command": "gpd publish rollback --package ${env.PACKAGE} --track production --confirm",
+      "dependsOn": ["check_stage_2_health"],
+      "condition": "${steps.stage_2_monitor.exitCode} != 0 && ${env.AUTO_ROLLBACK}",
+      "continueOnError": false
+    },
+    {
+      "name": "halt_on_stage_2_failure",
+      "description": "Stop workflow if stage 2 failed and no auto-rollback",
+      "type": "shell",
+      "command": "echo 'Stage 2 rollout failed health checks. Manual intervention required.' && exit 1",
+      "dependsOn": ["check_stage_2_health"],
+      "condition": "${steps.stage_2_monitor.exitCode} != 0 && !${env.AUTO_ROLLBACK}"
+    },
+    {
+      "name": "advance_to_50_percent",
+      "description": "Advance rollout to 50% if stage 2 passed",
+      "command": "gpd publish rollout --package ${env.PACKAGE} --track production --user-fraction 0.50",
+      "dependsOn": ["check_stage_2_health"],
+      "condition": "${steps.stage_2_monitor.exitCode} == 0",
+      "captureOutputs": ["userFraction"]
+    },
+    {
+      "name": "stage_3_monitor",
+      "description": "Monitor stage 3 (50%) rollout health",
+      "command": "gpd automation monitor --package ${env.PACKAGE} --track production --duration ${env.MONITOR_DURATION} --crash-threshold ${env.CRASH_THRESHOLD} --anr-threshold ${env.ANR_THRESHOLD} --check-interval 5m --exit-on-degradation",
+      "dependsOn": ["advance_to_50_percent"],
+      "timeout": "45m",
+      "continueOnError": true
+    },
+    {
+      "name": "check_stage_3_health",
+      "description": "Check if stage 3 passed health checks",
+      "type": "shell",
+      "command": "if [ ${steps.stage_3_monitor.exitCode} -eq 0 ]; then echo 'Stage 3 passed - proceeding to full rollout'; else echo 'Stage 3 failed - health checks did not pass'; fi",
+      "dependsOn": ["stage_3_monitor"],
+      "captureOutputs": []
+    },
+    {
+      "name": "auto_rollback_stage_3",
+      "description": "Auto-rollback if stage 3 health checks failed",
+      "command": "gpd publish rollback --package ${env.PACKAGE} --track production --confirm",
+      "dependsOn": ["check_stage_3_health"],
+      "condition": "${steps.stage_3_monitor.exitCode} != 0 && ${env.AUTO_ROLLBACK}",
+      "continueOnError": false
+    },
+    {
+      "name": "halt_on_stage_3_failure",
+      "description": "Stop workflow if stage 3 failed and no auto-rollback",
+      "type": "shell",
+      "command": "echo 'Stage 3 rollout failed health checks. Manual intervention required.' && exit 1",
+      "dependsOn": ["check_stage_3_health"],
+      "condition": "${steps.stage_3_monitor.exitCode} != 0 && !${env.AUTO_ROLLBACK}"
+    },
+    {
+      "name": "complete_100_percent_rollout",
+      "description": "Complete rollout to 100% if all stages passed",
+      "command": "gpd publish rollout --package ${env.PACKAGE} --track production --user-fraction 1.0 --complete",
+      "dependsOn": ["check_stage_3_health"],
+      "condition": "${steps.stage_3_monitor.exitCode} == 0",
+      "captureOutputs": ["status", "userFraction"]
+    },
+    {
+      "name": "final_monitor",
+      "description": "Final monitoring after complete rollout",
+      "command": "gpd automation monitor --package ${env.PACKAGE} --track production --duration ${env.MONITOR_DURATION} --crash-threshold ${env.CRASH_THRESHOLD} --anr-threshold ${env.ANR_THRESHOLD}",
+      "dependsOn": ["complete_100_percent_rollout"],
+      "timeout": "45m"
+    },
+    {
+      "name": "generate_release_notes",
+      "description": "Generate release notes from git history",
+      "command": "gpd automation release-notes --source git --format markdown --output-file release-notes.md",
+      "dependsOn": ["complete_100_percent_rollout"]
+    },
+    {
+      "name": "update_listing_with_notes",
+      "description": "Update store listing with release notes",
+      "command": "gpd publish listing update --package ${env.PACKAGE} --release-notes release-notes.md --locale en-US",
+      "dependsOn": ["generate_release_notes"]
+    },
+    {
+      "name": "notify_completion",
+      "description": "Send notification about successful rollout",
+      "type": "shell",
+      "command": "echo 'Production rollout completed successfully to 100%' && echo 'Version: ${steps.upload_bundle.versionCode}' && echo 'Package: ${env.PACKAGE}'",
+      "dependsOn": ["final_monitor"]
+    }
+  ]
+}

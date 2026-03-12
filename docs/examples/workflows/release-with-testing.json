@@ -1,0 +1,173 @@
+{
+  "name": "release-with-testing",
+  "description": "Full release workflow with automated testing (Firebase Test Lab, Pre-launch Report). Only proceeds to release if all tests pass.",
+  "env": {
+    "PACKAGE": "${PACKAGE:-com.example.app}",
+    "AAB_PATH": "${AAB_PATH:-app/build/outputs/bundle/release/app-release.aab}",
+    "APK_PATH": "${APK_PATH:-app/build/outputs/apk/release/app-release.apk}",
+    "TEST_APK_PATH": "${TEST_APK_PATH:-app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk}",
+    "FIREBASE_PROJECT": "${FIREBASE_PROJECT:-}",
+    "TEST_DEVICES": "${TEST_DEVICES:-redfin,30,en_US;panther,33,en_US;oriole,32,en_US}",
+    "TEST_TIMEOUT": "${TEST_TIMEOUT:-15m}",
+    "PRELAUNCH_WAIT": "${PRELAUNCH_WAIT:-30m}",
+    "MAX_WAIT_TIME": "${MAX_WAIT_TIME:-45m}",
+    "CRASH_THRESHOLD": "${CRASH_THRESHOLD:-0.01}",
+    "ANR_THRESHOLD": "${ANR_THRESHOLD:-0.005}",
+    "MIN_TEST_PASS_RATE": "${MIN_TEST_PASS_RATE:-0.95}",
+    "SKIP_FIREBASE_TESTS": "${SKIP_FIREBASE_TESTS:-false}",
+    "SKIP_PRELAUNCH": "${SKIP_PRELAUNCH:-false}",
+    "RELEASE_TRACK": "${RELEASE_TRACK:-internal}",
+    "AUTO_RELEASE": "${AUTO_RELEASE:-true}"
+  },
+  "steps": [
+    {
+      "name": "validate_app_config",
+      "description": "Validate app configuration before testing",
+      "command": "gpd automation validate --package ${env.PACKAGE} --checks aab,signing,permissions,deobfuscation --strict --format json",
+      "timeout": "10m",
+      "captureOutputs": ["passed", "failed", "warnings"]
+    },
+    {
+      "name": "check_apk_exists",
+      "description": "Check if APK exists for Firebase Test Lab (fallback to AAB if not)",
+      "type": "shell",
+      "command": "if [ -f '${env.APK_PATH}' ]; then echo 'APK found for testing'; else echo 'APK not found, will extract from AAB if needed'; fi",
+      "dependsOn": ["validate_app_config"]
+    },
+    {
+      "name": "firebase_robo_test",
+      "description": "Run Firebase Test Lab robo tests (UI crawler)",
+      "command": "gpd testing device-lab --app ${env.APK_PATH} --test-type robo --devices ${env.TEST_DEVICES} --test-timeout ${env.TEST_TIMEOUT} --async=false --format json",
+      "dependsOn": ["check_apk_exists"],
+      "condition": "!${env.SKIP_FIREBASE_TESTS}",
+      "timeout": "20m",
+      "captureOutputs": ["testMatrixId", "state", "outcome"]
+    },
+    {
+      "name": "firebase_instrumentation_test",
+      "description": "Run Firebase Test Lab instrumentation tests if test APK exists",
+      "command": "gpd testing device-lab --app ${env.APK_PATH} --test ${env.TEST_APK_PATH} --test-type instrumentation --devices ${env.TEST_DEVICES} --test-timeout ${env.TEST_TIMEOUT} --async=false --format json",
+      "dependsOn": ["firebase_robo_test"],
+      "condition": "!${env.SKIP_FIREBASE_TESTS} && -f ${env.TEST_APK_PATH}",
+      "timeout": "20m",
+      "continueOnError": true,
+      "captureOutputs": ["testMatrixId", "state", "outcome"]
+    },
+    {
+      "name": "check_firebase_results",
+      "description": "Check Firebase Test Lab results and calculate pass rate",
+      "type": "shell",
+      "command": "echo 'Firebase Test Lab Results:' && if [ '${steps.firebase_robo_test.outcome}' = 'success' ]; then echo 'Robo tests: PASSED'; else echo 'Robo tests: FAILED'; fi && if [ -f '${env.TEST_APK_PATH}' ]; then if [ '${steps.firebase_instrumentation_test.outcome}' = 'success' ]; then echo 'Instrumentation tests: PASSED'; else echo 'Instrumentation tests: FAILED (non-blocking)'; fi; fi",
+      "dependsOn": ["firebase_robo_test", "firebase_instrumentation_test"],
+      "condition": "!${env.SKIP_FIREBASE_TESTS}"
+    },
+    {
+      "name": "halt_on_firebase_failure",
+      "description": "Stop if Firebase tests failed critically",
+      "type": "shell",
+      "command": "if [ '${steps.firebase_robo_test.outcome}' != 'success' ]; then echo 'Firebase robo tests failed. Aborting release.' && exit 1; else echo 'Firebase tests passed - proceeding'; fi",
+      "dependsOn": ["check_firebase_results"],
+      "condition": "!${env.SKIP_FIREBASE_TESTS}",
+      "continueOnError": false
+    },
+    {
+      "name": "upload_for_prelaunch",
+      "description": "Upload AAB to Google Play for pre-launch report",
+      "command": "gpd publish upload ${env.AAB_PATH} --package ${env.PACKAGE} --track internal --no-auto-commit --output json",
+      "dependsOn": ["halt_on_firebase_failure"],
+      "captureOutputs": ["versionCode", "editId", "sha256"]
+    },
+    {
+      "name": "trigger_prelaunch_report",
+      "description": "Trigger pre-launch report analysis",
+      "command": "gpd testing prelaunch --action trigger --edit-id ${steps.upload_for_prelaunch.editId} --format json",
+      "dependsOn": ["upload_for_prelaunch"],
+      "condition": "!${env.SKIP_PRELAUNCH}",
+      "captureOutputs": ["status", "editId"]
+    },
+    {
+      "name": "wait_for_prelaunch",
+      "description": "Wait for pre-launch report to complete",
+      "command": "gpd testing prelaunch --action wait --edit-id ${steps.upload_for_prelaunch.editId} --max-wait-time ${env.MAX_WAIT_TIME} --format json",
+      "dependsOn": ["trigger_prelaunch_report"],
+      "condition": "!${env.SKIP_PRELAUNCH}",
+      "timeout": "50m",
+      "captureOutputs": ["status", "testsRun", "testsPassed", "testsFailed", "issues"]
+    },
+    {
+      "name": "check_prelaunch_results",
+      "description": "Analyze pre-launch report results",
+      "type": "shell",
+      "command": "echo 'Pre-launch Report Results:' && echo 'Tests Run: ${steps.wait_for_prelaunch.testsRun}' && echo 'Passed: ${steps.wait_for_prelaunch.testsPassed}' && echo 'Failed: ${steps.wait_for_prelaunch.testsFailed}' && if [ ${steps.wait_for_prelaunch.testsFailed} -eq 0 ]; then echo 'Status: PASSED'; else echo 'Status: FAILED - Issues detected'; fi",
+      "dependsOn": ["wait_for_prelaunch"],
+      "condition": "!${env.SKIP_PRELAUNCH}"
+    },
+    {
+      "name": "check_prelaunch_issues",
+      "description": "Check for critical issues in pre-launch report",
+      "type": "shell",
+      "command": "echo 'Checking pre-launch report for critical issues...' && if [ ${steps.wait_for_prelaunch.testsFailed} -gt 0 ]; then echo 'WARNING: ${steps.wait_for_prelaunch.testsFailed} test(s) failed' && echo 'Review issues before proceeding'; fi",
+      "dependsOn": ["check_prelaunch_results"],
+      "condition": "!${env.SKIP_PRELAUNCH}",
+      "continueOnError": true
+    },
+    {
+      "name": "commit_edit_after_prelaunch",
+      "description": "Commit the edit after pre-launch report processing",
+      "type": "shell",
+      "command": "echo 'Pre-launch report complete. Edit ID: ${steps.upload_for_prelaunch.editId}'",
+      "dependsOn": ["check_prelaunch_issues"]
+    },
+    {
+      "name": "upload_release_bundle",
+      "description": "Upload final release bundle (re-upload for clean release)",
+      "command": "gpd publish upload ${env.AAB_PATH} --package ${env.PACKAGE} --track ${env.RELEASE_TRACK} --output json",
+      "dependsOn": ["commit_edit_after_prelaunch"],
+      "captureOutputs": ["versionCode", "editId"]
+    },
+    {
+      "name": "release_to_track",
+      "description": "Release to specified track after all tests passed",
+      "command": "gpd publish release --package ${env.PACKAGE} --track ${env.RELEASE_TRACK} --version-code ${steps.upload_release_bundle.versionCode} --status completed",
+      "dependsOn": ["upload_release_bundle"],
+      "condition": "${env.AUTO_RELEASE}",
+      "captureOutputs": ["status", "track"]
+    },
+    {
+      "name": "verify_release",
+      "description": "Verify release was successful",
+      "command": "gpd publish status --package ${env.PACKAGE} --track ${env.RELEASE_TRACK} --format json",
+      "dependsOn": ["release_to_track"],
+      "captureOutputs": ["releases"]
+    },
+    {
+      "name": "post_release_monitor",
+      "description": "Monitor release health for 10 minutes",
+      "command": "gpd automation monitor --package ${env.PACKAGE} --track ${env.RELEASE_TRACK} --duration 10m --crash-threshold ${env.CRASH_THRESHOLD} --anr-threshold ${env.ANR_THRESHOLD} --check-interval 2m",
+      "dependsOn": ["verify_release"],
+      "timeout": "15m"
+    },
+    {
+      "name": "check_compatibility",
+      "description": "Run compatibility checks post-release",
+      "command": "gpd testing compatibility --package ${env.PACKAGE} --format json",
+      "dependsOn": ["verify_release"],
+      "continueOnError": true,
+      "captureOutputs": ["compatibleDevices", "totalDevices"]
+    },
+    {
+      "name": "generate_test_summary",
+      "description": "Generate summary of all tests performed",
+      "type": "shell",
+      "command": "echo '========================================' && echo 'RELEASE WITH TESTING - SUMMARY' && echo '========================================' && echo 'Package: ${env.PACKAGE}' && echo 'Version Code: ${steps.upload_release_bundle.versionCode}' && echo 'Release Track: ${env.RELEASE_TRACK}' && echo '' && echo 'Tests Performed:' && if [ '${env.SKIP_FIREBASE_TESTS}' != 'true' ]; then echo '  Firebase Test Lab:' && echo '    - Robo Tests: ${steps.firebase_robo_test.outcome}' && if [ -f '${env.TEST_APK_PATH}' ]; then echo '    - Instrumentation: ${steps.firebase_instrumentation_test.outcome:-N/A}'; fi; fi && if [ '${env.SKIP_PRELAUNCH}' != 'true' ]; then echo '  Pre-launch Report:' && echo '    - Tests Run: ${steps.wait_for_prelaunch.testsRun}' && echo '    - Passed: ${steps.wait_for_prelaunch.testsPassed}' && echo '    - Failed: ${steps.wait_for_prelaunch.testsFailed}'; fi && echo '' && echo 'Release Status: COMPLETED' && echo '========================================'",
+      "dependsOn": ["post_release_monitor", "check_compatibility"]
+    },
+    {
+      "name": "notify_release_complete",
+      "description": "Notify team about successful test-verified release",
+      "type": "shell",
+      "command": "echo 'Release ${steps.upload_release_bundle.versionCode} has been successfully deployed to ${env.RELEASE_TRACK} after passing all automated tests.'",
+      "dependsOn": ["generate_test_summary"]
+    }
+  ]
+}

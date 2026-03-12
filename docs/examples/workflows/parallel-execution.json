@@ -1,0 +1,63 @@
+{
+  "name": "parallel-release-pipeline",
+  "description": "Example workflow demonstrating parallel step execution",
+  "maxParallel": 4,
+  "env": {
+    "PACKAGE": "com.example.app"
+  },
+  "steps": [
+    {
+      "name": "lint",
+      "type": "shell",
+      "command": "./gradlew lint",
+      "parallel": true,
+      "continueOnError": false
+    },
+    {
+      "name": "unit_tests",
+      "type": "shell",
+      "command": "./gradlew test",
+      "parallel": true,
+      "continueOnError": false
+    },
+    {
+      "name": "integration_tests",
+      "type": "shell",
+      "command": "./gradlew connectedAndroidTest",
+      "parallel": true,
+      "timeout": "10m"
+    },
+    {
+      "name": "build",
+      "type": "shell",
+      "command": "./gradlew bundleRelease",
+      "dependsOn": ["lint", "unit_tests", "integration_tests"],
+      "captureOutputs": ["versionCode", "versionName"]
+    },
+    {
+      "name": "upload_internal",
+      "command": "gpd publish upload app/build/outputs/bundle/release/app-release.aab --package ${env.PACKAGE} --track internal --output json",
+      "dependsOn": ["build"],
+      "parallel": true,
+      "captureOutputs": ["versionCode", "editId"]
+    },
+    {
+      "name": "upload_alpha",
+      "command": "gpd publish upload app/build/outputs/bundle/release/app-release.aab --package ${env.PACKAGE} --track alpha",
+      "dependsOn": ["build"],
+      "parallel": true
+    },
+    {
+      "name": "upload_beta",
+      "command": "gpd publish upload app/build/outputs/bundle/release/app-release.aab --package ${env.PACKAGE} --track beta",
+      "dependsOn": ["build"],
+      "parallel": true,
+      "condition": "${env.UPLOAD_TO_BETA}"
+    },
+    {
+      "name": "promote_to_production",
+      "command": "gpd automation promote --package ${env.PACKAGE} --from-track internal --to-track production --verify",
+      "dependsOn": ["upload_internal", "upload_alpha"]
+    }
+  ]
+}

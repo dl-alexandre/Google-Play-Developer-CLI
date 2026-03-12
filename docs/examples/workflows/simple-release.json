@@ -1,0 +1,19 @@
+{
+  "name": "simple-release",
+  "description": "Simple workflow: upload and release to internal track",
+  "env": {
+    "PACKAGE": "com.example.app"
+  },
+  "steps": [
+    {
+      "name": "upload",
+      "command": "gpd publish upload app.aab --package ${env.PACKAGE} --output json",
+      "captureOutputs": ["versionCode", "editId"]
+    },
+    {
+      "name": "release",
+      "command": "gpd publish release --package ${env.PACKAGE} --track internal --version-code ${steps.upload.versionCode}",
+      "dependsOn": ["upload"]
+    }
+  ]
+}

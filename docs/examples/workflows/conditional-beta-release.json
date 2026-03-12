@@ -1,0 +1,32 @@
+{
+  "name": "conditional-beta-release",
+  "description": "Release to beta only if IS_BETA environment variable is set",
+  "env": {
+    "PACKAGE": "com.example.app",
+    "IS_BETA": "false"
+  },
+  "steps": [
+    {
+      "name": "upload",
+      "command": "gpd publish upload app.aab --package ${env.PACKAGE} --output json",
+      "captureOutputs": ["versionCode"]
+    },
+    {
+      "name": "release_internal",
+      "command": "gpd publish release --package ${env.PACKAGE} --track internal --version-code ${steps.upload.versionCode}",
+      "dependsOn": ["upload"]
+    },
+    {
+      "name": "release_beta",
+      "command": "gpd publish release --package ${env.PACKAGE} --track beta --version-code ${steps.upload.versionCode}",
+      "dependsOn": ["release_internal"],
+      "condition": "${env.IS_BETA}"
+    },
+    {
+      "name": "release_production",
+      "command": "gpd publish release --package ${env.PACKAGE} --track production --version-code ${steps.upload.versionCode}",
+      "dependsOn": ["release_internal"],
+      "condition": "${env.IS_BETA} == false"
+    }
+  ]
+}

@@ -1,0 +1,135 @@
+{
+  "name": "multi-track-release",
+  "description": "Release to multiple tracks simultaneously (internal, alpha, beta) with different release notes per track. Uses upload once, then parallel releases.",
+  "env": {
+    "PACKAGE": "${PACKAGE:-com.example.app}",
+    "AAB_PATH": "${AAB_PATH:-app/build/outputs/bundle/release/app-release.aab}",
+    "RELEASE_NAME": "${RELEASE_NAME:-Release}",
+    "INTERNAL_NOTES": "${INTERNAL_NOTES:-Internal testing build}",
+    "ALPHA_NOTES": "${ALPHA_NOTES:-Alpha release for early adopters}",
+    "BETA_NOTES": "${BETA_NOTES:-Beta release for broader testing}",
+    "BUILD_VERSION": "${BUILD_VERSION:-1.0.0}",
+    "AUTO_PROMOTE_INTERNAL": "${AUTO_PROMOTE_INTERNAL:-true}",
+    "AUTO_PROMOTE_ALPHA": "${AUTO_PROMOTE_ALPHA:-true}"
+  },
+  "steps": [
+    {
+      "name": "validate_app",
+      "description": "Validate app configuration before upload",
+      "command": "gpd automation validate --package ${env.PACKAGE} --checks aab,signing,permissions --strict",
+      "timeout": "10m"
+    },
+    {
+      "name": "upload_aab",
+      "description": "Upload AAB once to be used across all tracks",
+      "command": "gpd publish upload ${env.AAB_PATH} --package ${env.PACKAGE} --output json",
+      "dependsOn": ["validate_app"],
+      "captureOutputs": ["versionCode", "editId", "sha256", "type"]
+    },
+    {
+      "name": "prepare_release_notes_internal",
+      "description": "Prepare release notes for internal track",
+      "type": "shell",
+      "command": "echo '${env.INTERNAL_NOTES}' > internal-release-notes.txt",
+      "dependsOn": ["upload_aab"]
+    },
+    {
+      "name": "prepare_release_notes_alpha",
+      "description": "Prepare release notes for alpha track",
+      "type": "shell",
+      "command": "echo '${env.ALPHA_NOTES}' > alpha-release-notes.txt",
+      "dependsOn": ["upload_aab"]
+    },
+    {
+      "name": "prepare_release_notes_beta",
+      "description": "Prepare release notes for beta track",
+      "type": "shell",
+      "command": "echo '${env.BETA_NOTES}' > beta-release-notes.txt",
+      "dependsOn": ["upload_aab"]
+    },
+    {
+      "name": "release_internal",
+      "description": "Release to internal track with internal notes (COMPLETED status)",
+      "command": "gpd publish release --package ${env.PACKAGE} --track internal --version-code ${steps.upload_aab.versionCode} --status completed --release-name '${env.RELEASE_NAME} Internal (${env.BUILD_VERSION})' --release-notes internal-release-notes.txt",
+      "dependsOn": ["prepare_release_notes_internal"],
+      "captureOutputs": ["status", "track"]
+    },
+    {
+      "name": "release_alpha",
+      "description": "Release to alpha track with alpha notes (COMPLETED status)",
+      "command": "gpd publish release --package ${env.PACKAGE} --track alpha --version-code ${steps.upload_aab.versionCode} --status completed --release-name '${env.RELEASE_NAME} Alpha (${env.BUILD_VERSION})' --release-notes alpha-release-notes.txt",
+      "dependsOn": ["prepare_release_notes_alpha"],
+      "captureOutputs": ["status", "track"]
+    },
+    {
+      "name": "release_beta",
+      "description": "Release to beta track with beta notes (IN_PROGRESS status for staged rollout)",
+      "command": "gpd publish release --package ${env.PACKAGE} --track beta --version-code ${steps.upload_aab.versionCode} --status inProgress --user-fraction 0.50 --release-name '${env.RELEASE_NAME} Beta (${env.BUILD_VERSION})' --release-notes beta-release-notes.txt",
+      "dependsOn": ["prepare_release_notes_beta"],
+      "captureOutputs": ["status", "track", "userFraction"]
+    },
+    {
+      "name": "wait_for_tracks",
+      "description": "Wait for all track releases to stabilize",
+      "type": "shell",
+      "command": "echo 'All tracks released. Internal: completed, Alpha: completed, Beta: 50% rollout' && sleep 30",
+      "dependsOn": ["release_internal", "release_alpha", "release_beta"]
+    },
+    {
+      "name": "verify_internal_track",
+      "description": "Verify internal track release",
+      "command": "gpd publish status --package ${env.PACKAGE} --track internal",
+      "dependsOn": ["wait_for_tracks"],
+      "captureOutputs": ["releases", "track"]
+    },
+    {
+      "name": "verify_alpha_track",
+      "description": "Verify alpha track release",
+      "command": "gpd publish status --package ${env.PACKAGE} --track alpha",
+      "dependsOn": ["wait_for_tracks"],
+      "captureOutputs": ["releases", "track"]
+    },
+    {
+      "name": "verify_beta_track",
+      "description": "Verify beta track release",
+      "command": "gpd publish status --package ${env.PACKAGE} --track beta",
+      "dependsOn": ["wait_for_tracks"],
+      "captureOutputs": ["releases", "track"]
+    },
+    {
+      "name": "check_track_health",
+      "description": "Quick health check across all tracks",
+      "type": "shell",
+      "command": "echo 'Checking health across all tracks...' && echo 'Internal Track: Released to all internal testers' && echo 'Alpha Track: Released to all alpha testers' && echo 'Beta Track: Rolling out to 50% of beta testers'",
+      "dependsOn": ["verify_internal_track", "verify_alpha_track", "verify_beta_track"]
+    },
+    {
+      "name": "notify_slack_internal",
+      "description": "Notify about internal track release",
+      "type": "shell",
+      "command": "echo 'Internal track released: Version ${steps.upload_aab.versionCode}'",
+      "dependsOn": ["release_internal"]
+    },
+    {
+      "name": "notify_slack_alpha",
+      "description": "Notify about alpha track release",
+      "type": "shell",
+      "command": "echo 'Alpha track released: Version ${steps.upload_aab.versionCode}'",
+      "dependsOn": ["release_alpha"]
+    },
+    {
+      "name": "notify_slack_beta",
+      "description": "Notify about beta track release",
+      "type": "shell",
+      "command": "echo 'Beta track released (50% rollout): Version ${steps.upload_aab.versionCode}'",
+      "dependsOn": ["release_beta"]
+    },
+    {
+      "name": "final_summary",
+      "description": "Generate final release summary",
+      "type": "shell",
+      "command": "echo '========================================' && echo 'Multi-Track Release Complete' && echo '========================================' && echo 'Package: ${env.PACKAGE}' && echo 'Version Code: ${steps.upload_aab.versionCode}' && echo 'SHA256: ${steps.upload_aab.sha256}' && echo '' && echo 'Track Status:' && echo '  - Internal: Released (all testers)' && echo '  - Alpha: Released (all testers)' && echo '  - Beta: Rolling out (50% of testers)' && echo '========================================'",
+      "dependsOn": ["check_track_health", "notify_slack_internal", "notify_slack_alpha", "notify_slack_beta"]
+    }
+  ]
+}

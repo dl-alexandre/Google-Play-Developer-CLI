@@ -1,0 +1,42 @@
+{
+  "name": "retry-demo",
+  "description": "Demonstrates step retry functionality for handling transient failures",
+  "env": {
+    "PACKAGE": "com.example.app"
+  },
+  "steps": [
+    {
+      "name": "api-health-check",
+      "type": "shell",
+      "command": "curl -f https://api.example.com/health || exit 1",
+      "retryCount": 5,
+      "retryDelay": "5s",
+      "retryBackoff": "exponential",
+      "continueOnError": true
+    },
+    {
+      "name": "validate-metadata",
+      "command": "gpd automation validate --package ${env.PACKAGE} --checks metadata",
+      "retryCount": 2,
+      "retryDelay": "3s",
+      "retryBackoff": "linear"
+    },
+    {
+      "name": "upload-with-retry",
+      "command": "gpd publish upload app.aab --package ${env.PACKAGE} --output json",
+      "dependsOn": ["validate-metadata"],
+      "captureOutputs": ["versionCode", "editId"],
+      "retryCount": 3,
+      "retryDelay": "10s",
+      "retryBackoff": "exponential",
+      "timeout": "10m"
+    },
+    {
+      "name": "publish-with-retry",
+      "command": "gpd publish release --package ${env.PACKAGE} --track internal --version-code ${steps.upload-with-retry.versionCode}",
+      "dependsOn": ["upload-with-retry"],
+      "retryCount": 2,
+      "retryDelay": "5s"
+    }
+  ]
+}

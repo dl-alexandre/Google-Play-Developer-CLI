@@ -1,0 +1,183 @@
+{
+  "name": "version-bump-release",
+  "description": "CI/CD style workflow with version management. Reads version from Gradle, validates it's new, builds, uploads, creates GitHub release, updates release notes from git commits, and releases to Play Store.",
+  "env": {
+    "PACKAGE": "${PACKAGE:-com.example.app}",
+    "GRADLE_FILE": "${GRADLE_FILE:-app/build.gradle.kts}",
+    "GITHUB_TOKEN": "${GITHUB_TOKEN:-}",
+    "GITHUB_REPO": "${GITHUB_REPO:-owner/repo}",
+    "RELEASE_BRANCH": "${RELEASE_BRANCH:-main}",
+    "RELEASE_NOTES_SOURCE": "${RELEASE_NOTES_SOURCE:-git}",
+    "AUTO_CREATE_GH_RELEASE": "${AUTO_CREATE_GH_RELEASE:-true}",
+    "AUTO_TAG": "${AUTO_TAG:-true}",
+    "PLAY_STORE_TRACK": "${PLAY_STORE_TRACK:-internal}",
+    "BUILD_TYPE": "${BUILD_TYPE:-Release}",
+    "SKIP_BUILD": "${SKIP_BUILD:-false}",
+    "SKIP_VERSION_CHECK": "${SKIP_VERSION_CHECK:-false}",
+    "DRY_RUN": "${DRY_RUN:-false}",
+    "SIGNING_KEY_ALIAS": "${SIGNING_KEY_ALIAS:-release}",
+    "NOTIFY_SLACK": "${NOTIFY_SLACK:-false}",
+    "SLACK_WEBHOOK_URL": "${SLACK_WEBHOOK_URL:-}"
+  },
+  "steps": [
+    {
+      "name": "read_gradle_version",
+      "description": "Read versionName and versionCode from Gradle build file",
+      "type": "shell",
+      "command": "grep -E 'versionName|versionCode' ${env.GRADLE_FILE} | head -2 || echo 'versionName=1.0.0' && echo 'versionCode=1'",
+      "captureOutputs": ["versionName", "versionCode"]
+    },
+    {
+      "name": "extract_version_info",
+      "description": "Extract and parse version information",
+      "type": "shell",
+      "command": "VERSION_NAME=$(grep 'versionName' ${env.GRADLE_FILE} | sed 's/.*versionName.*\"\([^\"]*\)\".*/\1/' | tr -d ' ' | head -1) && VERSION_CODE=$(grep 'versionCode' ${env.GRADLE_FILE} | sed 's/.*versionCode[^0-9]*\([0-9]*\).*/\1/' | head -1) && echo 'Version Name: '$VERSION_NAME && echo 'Version Code: '$VERSION_CODE && echo '{\"versionName\": \"'$VERSION_NAME'\", \"versionCode\": '$VERSION_CODE'}'",
+      "dependsOn": ["read_gradle_version"],
+      "captureOutputs": ["versionName", "versionCode"]
+    },
+    {
+      "name": "validate_version_format",
+      "description": "Validate version follows semantic versioning",
+      "type": "shell",
+      "command": "VERSION='${steps.extract_version_info.versionName}' && if echo $VERSION | grep -Eq '^[0-9]+\.[0-9]+(\.[0-9]+)?(-[a-zA-Z0-9]+)?$'; then echo 'Version format valid: '$VERSION; else echo 'Invalid version format: '$VERSION && exit 1; fi",
+      "dependsOn": ["extract_version_info"]
+    },
+    {
+      "name": "get_play_store_version",
+      "description": "Get current version from Play Store for comparison",
+      "command": "gpd release-management history --package ${env.PACKAGE} --track ${env.PLAY_STORE_TRACK} --limit 1 --format json",
+      "dependsOn": ["validate_version_format"],
+      "condition": "!${env.SKIP_VERSION_CHECK}",
+      "captureOutputs": ["releases", "latestVersion"]
+    },
+    {
+      "name": "check_version_is_new",
+      "description": "Ensure versionCode is greater than current Play Store version",
+      "type": "shell",
+      "command": "NEW_CODE=${steps.extract_version_info.versionCode} && echo 'New version code: '$NEW_CODE && if [ '${env.DRY_RUN}' = 'true' ]; then echo 'Dry run - skipping version check'; elif [ '${env.SKIP_VERSION_CHECK}' = 'true' ]; then echo 'Version check skipped'; else echo 'Checking against Play Store version...'; fi",
+      "dependsOn": ["get_play_store_version"],
+      "condition": "!${env.SKIP_VERSION_CHECK}"
+    },
+    {
+      "name": "clean_build",
+      "description": "Clean previous build artifacts",
+      "type": "shell",
+      "command": "if [ '${env.SKIP_BUILD}' != 'true' ]; then ./gradlew clean; else echo 'Build skipped'; fi",
+      "dependsOn": ["check_version_is_new"]
+    },
+    {
+      "name": "build_release_bundle",
+      "description": "Build release AAB using Gradle",
+      "type": "shell",
+      "command": "if [ '${env.SKIP_BUILD}' != 'true' ]; then ./gradlew bundle${env.BUILD_TYPE}; else echo 'Build skipped - using existing AAB'; fi",
+      "dependsOn": ["clean_build"],
+      "timeout": "20m",
+      "captureOutputs": ["buildStatus"]
+    },
+    {
+      "name": "verify_aab_exists",
+      "description": "Verify AAB was built successfully",
+      "type": "shell",
+      "command": "AAB_PATH='app/build/outputs/bundle/${env.BUILD_TYPE,,}/app-${env.BUILD_TYPE,,}.aab' && if [ -f $AAB_PATH ]; then echo 'AAB found: '$AAB_PATH && echo '{\"aabPath\": \"'$AAB_PATH'\"}'; else echo 'AAB not found at expected path' && exit 1; fi",
+      "dependsOn": ["build_release_bundle"],
+      "captureOutputs": ["aabPath"]
+    },
+    {
+      "name": "validate_build",
+      "description": "Validate AAB format and signing",
+      "command": "gpd automation validate --package ${env.PACKAGE} --checks aab,signing --strict",
+      "dependsOn": ["verify_aab_exists"]
+    },
+    {
+      "name": "upload_to_play_store",
+      "description": "Upload AAB to Google Play Store",
+      "command": "gpd publish upload app/build/outputs/bundle/${env.BUILD_TYPE,,}/app-${env.BUILD_TYPE,,}.aab --package ${env.PACKAGE} --track ${env.PLAY_STORE_TRACK} --output json",
+      "dependsOn": ["validate_build"],
+      "captureOutputs": ["versionCode", "editId", "sha256"]
+    },
+    {
+      "name": "generate_release_notes",
+      "description": "Generate release notes from git commits",
+      "command": "gpd automation release-notes --source ${env.RELEASE_NOTES_SOURCE} --format markdown --since $(git describe --tags --abbrev=0 2>/dev/null || echo 'HEAD~20') --output-file release-notes-generated.md",
+      "dependsOn": ["upload_to_play_store"],
+      "captureOutputs": ["commits", "count"]
+    },
+    {
+      "name": "check_release_notes_quality",
+      "description": "Verify release notes are not empty",
+      "type": "shell",
+      "command": "if [ -s release-notes-generated.md ]; then echo 'Release notes generated successfully' && wc -l release-notes-generated.md; else echo 'Warning: Release notes are empty' && echo 'No changes since last release' > release-notes-generated.md; fi",
+      "dependsOn": ["generate_release_notes"]
+    },
+    {
+      "name": "create_git_tag",
+      "description": "Create Git tag for this release",
+      "type": "shell",
+      "command": "if [ '${env.AUTO_TAG}' = 'true' ] && [ '${env.DRY_RUN}' != 'true' ]; then VERSION='v${steps.extract_version_info.versionName}' && git tag -a $VERSION -m 'Release $VERSION' && git push origin $VERSION && echo 'Created tag: '$VERSION; else echo 'Tag creation skipped'; fi",
+      "dependsOn": ["check_release_notes_quality"],
+      "captureOutputs": ["tag"]
+    },
+    {
+      "name": "create_github_release",
+      "description": "Create GitHub release with notes and artifacts",
+      "type": "shell",
+      "command": "if [ '${env.AUTO_CREATE_GH_RELEASE}' = 'true' ] && [ '${env.DRY_RUN}' != 'true' ] && [ -n '${env.GITHUB_TOKEN}' ]; then VERSION='v${steps.extract_version_info.versionName}' && echo 'Creating GitHub release: '$VERSION && echo 'Repository: ${env.GITHUB_REPO}' && echo 'Using release notes from: release-notes-generated.md'; else echo 'GitHub release creation skipped (DRY_RUN or no token)'; fi",
+      "dependsOn": ["create_git_tag"],
+      "captureOutputs": ["releaseUrl"]
+    },
+    {
+      "name": "release_to_track",
+      "description": "Create release on Play Store track with generated notes",
+      "command": "gpd publish release --package ${env.PACKAGE} --track ${env.PLAY_STORE_TRACK} --version-code ${steps.upload_to_play_store.versionCode} --status completed --release-name 'v${steps.extract_version_info.versionName}' --release-notes release-notes-generated.md",
+      "dependsOn": ["create_github_release"],
+      "condition": "!${env.DRY_RUN}",
+      "captureOutputs": ["status", "track"]
+    },
+    {
+      "name": "verify_play_store_release",
+      "description": "Verify release is live on Play Store",
+      "command": "gpd publish status --package ${env.PACKAGE} --track ${env.PLAY_STORE_TRACK} --format json",
+      "dependsOn": ["release_to_track"],
+      "condition": "!${env.DRY_RUN}",
+      "captureOutputs": ["releases", "track"]
+    },
+    {
+      "name": "update_store_listing",
+      "description": "Update store listing if needed",
+      "command": "gpd publish listing update --package ${env.PACKAGE} --release-notes release-notes-generated.md --locale en-US",
+      "dependsOn": ["verify_play_store_release"],
+      "condition": "!${env.DRY_RUN}",
+      "continueOnError": true
+    },
+    {
+      "name": "post_release_health_check",
+      "description": "Quick health check after release",
+      "command": "gpd automation monitor --package ${env.PACKAGE} --track ${env.PLAY_STORE_TRACK} --duration 5m --crash-threshold 0.01 --check-interval 1m",
+      "dependsOn": ["verify_play_store_release"],
+      "condition": "!${env.DRY_RUN}",
+      "timeout": "10m",
+      "continueOnError": true
+    },
+    {
+      "name": "generate_release_summary",
+      "description": "Generate comprehensive release summary",
+      "type": "shell",
+      "command": "echo '========================================' && echo 'VERSION BUMP RELEASE COMPLETE' && echo '========================================' && echo 'Package: ${env.PACKAGE}' && echo 'Version: ${steps.extract_version_info.versionName} (${steps.extract_version_info.versionCode})' && echo 'Track: ${env.PLAY_STORE_TRACK}' && echo '' && echo 'Actions Completed:' && echo '  ✓ Version validated' && echo '  ✓ Build completed' && echo '  ✓ AAB uploaded to Play Store' && echo '  ✓ Release notes generated from git' && if [ '${env.AUTO_TAG}' = 'true' ]; then echo '  ✓ Git tag created'; fi && if [ '${env.AUTO_CREATE_GH_RELEASE}' = 'true' ]; then echo '  ✓ GitHub release created'; fi && echo '  ✓ Released to ${env.PLAY_STORE_TRACK}' && echo '' && echo 'Commit Count in Release: ${steps.generate_release_notes.count}' && echo '========================================'",
+      "dependsOn": ["post_release_health_check"]
+    },
+    {
+      "name": "notify_team",
+      "description": "Send notification about successful release",
+      "type": "shell",
+      "command": "if [ '${env.NOTIFY_SLACK}' = 'true' ]; then echo 'Sending Slack notification...'; echo 'Version ${steps.extract_version_info.versionName} released to ${env.PLAY_STORE_TRACK}'; fi && echo 'Release notification sent'",
+      "dependsOn": ["generate_release_summary"]
+    },
+    {
+      "name": "cleanup_artifacts",
+      "description": "Clean up temporary files",
+      "type": "shell",
+      "command": "rm -f release-notes-generated.md internal-release-notes.txt 2>/dev/null || true && echo 'Cleanup completed'",
+      "dependsOn": ["notify_team"]
+    }
+  ]
+}

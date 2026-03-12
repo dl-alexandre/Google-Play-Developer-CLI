@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"text/tabwriter"
 	"time"
 
 	"github.com/alecthomas/kong"
 
 	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/cache"
 	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/errors"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/extensions"
 	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/logging"
 )
 
@@ -71,12 +73,22 @@ type KongCLI struct {
 	ReleaseMgmt ReleaseMgmtCmd `cmd:"" name:"release-mgmt" help:"Advanced release management"`
 	Testing     TestingCmd     `cmd:"" help:"Testing and QA tools"`
 	Automation  AutomationCmd  `cmd:"" help:"CI/CD release automation"`
+	Workflow    WorkflowCmd    `cmd:"" help:"Declarative workflow execution"`
+
+	// Extension commands
+	Extension ExtensionCmd `cmd:"" help:"Manage CLI extensions"`
 
 	// Help is automatically provided by Kong
 }
 
 // Run executes the Kong CLI and returns the exit code.
 func RunKongCLI() int {
+	// Check if first argument is an extension to run
+	// This must happen before Kong parsing
+	if tryRunExtension(os.Args[1:]) {
+		return 0 // Extension handled execution
+	}
+
 	var cli KongCLI
 
 	// Set default cache directory
@@ -103,6 +115,7 @@ func RunKongCLI() int {
 			Compact: true,
 			Summary: true,
 		}),
+		kong.Help(buildHelpWithExtensions),
 	)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating parser: %v\n", err)
@@ -143,4 +156,43 @@ func RunKongCLI() int {
 	}
 
 	return errors.ExitSuccess
+}
+
+// buildHelpWithExtensions creates a custom help function that includes installed extensions.
+func buildHelpWithExtensions(options kong.HelpOptions, ctx *kong.Context) error {
+	// First, print the standard help
+	if err := kong.DefaultHelpPrinter(options, ctx); err != nil {
+		return err
+	}
+
+	// Query installed extensions
+	extList, err := extensions.List()
+	if err != nil {
+		// Silently skip if we can't list extensions
+		return nil
+	}
+
+	// If no extensions installed, just return
+	if len(extList) == 0 {
+		return nil
+	}
+
+	// Build and print extension commands section
+	fmt.Fprintln(ctx.Stdout)
+	fmt.Fprintln(ctx.Stdout, "Extension Commands:")
+
+	w := tabwriter.NewWriter(ctx.Stdout, 0, 0, 2, ' ', 0)
+	for _, ext := range extList {
+		desc := ext.Description
+		if len(desc) > 50 {
+			desc = desc[:47] + "..."
+		}
+		if desc == "" {
+			desc = "Extension command"
+		}
+		fmt.Fprintf(w, "  gpd %s\t%s\n", ext.Name, desc)
+	}
+	w.Flush()
+
+	return nil
 }

@@ -1,0 +1,46 @@
+{
+  "name": "cicd-pipeline",
+  "description": "Complete CI/CD pipeline from build to production",
+  "env": {
+    "PACKAGE": "com.example.app"
+  },
+  "steps": [
+    {
+      "name": "validate_config",
+      "command": "gpd automation validate --package ${env.PACKAGE} --checks all --strict"
+    },
+    {
+      "name": "build",
+      "type": "shell",
+      "command": "./gradlew bundleRelease",
+      "dependsOn": ["validate_config"]
+    },
+    {
+      "name": "upload",
+      "command": "gpd publish upload app/build/outputs/bundle/release/app-release.aab --package ${env.PACKAGE} --output json",
+      "dependsOn": ["build"],
+      "captureOutputs": ["versionCode"]
+    },
+    {
+      "name": "release_internal",
+      "command": "gpd publish release --package ${env.PACKAGE} --track internal --version-code ${steps.upload.versionCode} --status completed",
+      "dependsOn": ["upload"]
+    },
+    {
+      "name": "promote_beta",
+      "command": "gpd automation promote --package ${env.PACKAGE} --from-track internal --to-track beta --verify --verify-timeout 15m",
+      "dependsOn": ["release_internal"]
+    },
+    {
+      "name": "staged_rollout",
+      "command": "gpd automation rollout --package ${env.PACKAGE} --track production --start-percentage 5 --target-percentage 100 --step-size 25 --step-interval 4h --health-threshold 0.01 --auto-rollback",
+      "dependsOn": ["promote_beta"],
+      "timeout": "48h"
+    },
+    {
+      "name": "monitor",
+      "command": "gpd automation monitor --package ${env.PACKAGE} --track production --duration 30m --health-threshold 0.01",
+      "dependsOn": ["staged_rollout"]
+    }
+  ]
+}

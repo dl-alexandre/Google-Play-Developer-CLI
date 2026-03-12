@@ -1,0 +1,128 @@
+{
+  "name": "rollback-workflow",
+  "description": "Emergency rollback procedure. Halt current rollout, identify previous stable version, rollback to that version, and verify success.",
+  "env": {
+    "PACKAGE": "${PACKAGE:-com.example.app}",
+    "TRACK": "${TRACK:-production}",
+    "CONFIRM_ROLLBACK": "${CONFIRM_ROLLBACK:-true}",
+    "NOTIFY_SLACK": "${NOTIFY_SLACK:-true}",
+    "SLACK_WEBHOOK": "${SLACK_WEBHOOK:-}",
+    "EMERGENCY_CONTACT": "${EMERGENCY_CONTACT:-on-call@example.com}",
+    "CREATE_INCIDENT": "${CREATE_INCIDENT:-true}",
+    "AUTO_VERIFY": "${AUTO_VERIFY:-true}",
+    "ROLLBACK_VERSION": "${ROLLBACK_VERSION:-}" 
+  },
+  "steps": [
+    {
+      "name": "check_current_status",
+      "description": "Check current production track status and identify in-progress releases",
+      "command": "gpd publish status --package ${env.PACKAGE} --track ${env.TRACK} --format json",
+      "captureOutputs": ["releases", "track", "versionCodes"]
+    },
+    {
+      "name": "get_release_history",
+      "description": "Get detailed release history to identify previous stable version",
+      "command": "gpd release-management history --package ${env.PACKAGE} --track ${env.TRACK} --limit 5",
+      "dependsOn": ["check_current_status"],
+      "captureOutputs": ["releases", "totalCount"]
+    },
+    {
+      "name": "analyze_release_strategy",
+      "description": "Analyze release strategy to get rollback recommendation",
+      "command": "gpd release-management strategy --package ${env.PACKAGE} --track ${env.TRACK} --format json",
+      "dependsOn": ["get_release_history"],
+      "captureOutputs": ["recommendation", "currentVersion", "healthScore", "reasoning"]
+    },
+    {
+      "name": "determine_rollback_target",
+      "description": "Determine target version for rollback based on history and strategy",
+      "type": "shell",
+      "command": "echo 'Analyzing rollback target...' && if [ -n '${env.ROLLBACK_VERSION}' ]; then echo 'Using specified rollback version: ${env.ROLLBACK_VERSION}'; else echo 'Will use previous stable version from history'; fi",
+      "dependsOn": ["analyze_release_strategy"],
+      "captureOutputs": []
+    },
+    {
+      "name": "halt_current_rollout",
+      "description": "Halt any in-progress rollout immediately",
+      "command": "gpd publish halt --package ${env.PACKAGE} --track ${env.TRACK} --confirm",
+      "dependsOn": ["determine_rollback_target"],
+      "captureOutputs": ["status", "haltedVersion"]
+    },
+    {
+      "name": "check_vitals_before_rollback",
+      "description": "Check current vitals before performing rollback for documentation",
+      "command": "gpd vitals crashes --package ${env.PACKAGE} --start-date $(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ) --end-date $(date -u +%Y-%m-%dT%H:%M:%SZ)",
+      "dependsOn": ["halt_current_rollout"],
+      "continueOnError": true,
+      "captureOutputs": ["rows"]
+    },
+    {
+      "name": "check_anrs_before_rollback",
+      "description": "Check current ANR rates before rollback for documentation",
+      "command": "gpd vitals anrs --package ${env.PACKAGE} --start-date $(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ) --end-date $(date -u +%Y-%m-%dT%H:%M:%SZ)",
+      "dependsOn": ["halt_current_rollout"],
+      "continueOnError": true,
+      "captureOutputs": ["rows"]
+    },
+    {
+      "name": "confirm_rollback_action",
+      "description": "Require confirmation before proceeding with rollback",
+      "type": "shell",
+      "command": "if [ '${env.CONFIRM_ROLLBACK}' != 'true' ]; then echo 'CONFIRM_ROLLBACK is not true. Skipping rollback.' && exit 1; else echo 'Proceeding with rollback...'; fi",
+      "dependsOn": ["check_vitals_before_rollback", "check_anrs_before_rollback"]
+    },
+    {
+      "name": "execute_rollback",
+      "description": "Perform rollback to previous stable version",
+      "command": "gpd publish rollback --package ${env.PACKAGE} --track ${env.TRACK} --version-code ${env.ROLLBACK_VERSION} --confirm",
+      "dependsOn": ["confirm_rollback_action"],
+      "condition": "${env.CONFIRM_ROLLBACK}",
+      "captureOutputs": ["status", "previousVersion", "currentVersion"]
+    },
+    {
+      "name": "verify_rollback_completed",
+      "description": "Verify that rollback has been applied",
+      "command": "gpd publish status --package ${env.PACKAGE} --track ${env.TRACK} --format json",
+      "dependsOn": ["execute_rollback"],
+      "condition": "${env.CONFIRM_ROLLBACK}",
+      "captureOutputs": ["releases", "track"]
+    },
+    {
+      "name": "check_rollback_health",
+      "description": "Monitor for 10 minutes to ensure rollback is stable",
+      "command": "gpd automation monitor --package ${env.PACKAGE} --track ${env.TRACK} --duration 10m --crash-threshold 0.02 --anr-threshold 0.01 --check-interval 2m",
+      "dependsOn": ["verify_rollback_completed"],
+      "condition": "${env.AUTO_VERIFY}",
+      "timeout": "15m"
+    },
+    {
+      "name": "generate_rollback_report",
+      "description": "Generate rollback report for incident documentation",
+      "type": "shell",
+      "command": "cat > rollback-report-$(date +%Y%m%d-%H%M%S).txt << 'EOF'\nROLLBACK INCIDENT REPORT\n========================\n\nTimestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)\nPackage: ${env.PACKAGE}\nTrack: ${env.TRACK}\n\nActions Taken:\n1. Halted in-progress rollout\n2. Analyzed release history and strategy\n3. Performed rollback to previous stable version\n4. Verified rollback status\n\nStatus: COMPLETED\n\nNext Steps:\n- Monitor app vitals closely\n- Investigate cause of degradation\n- Plan fix and re-release when ready\nEOF",
+      "dependsOn": ["check_rollback_health"]
+    },
+    {
+      "name": "notify_team_rollback_complete",
+      "description": "Notify team about rollback completion",
+      "type": "shell",
+      "command": "echo '========================================' && echo 'ROLLBACK COMPLETED' && echo '========================================' && echo 'Package: ${env.PACKAGE}' && echo 'Track: ${env.TRACK}' && echo 'Time: $(date)' && echo '========================================' && echo 'Rollback has been successfully completed.' && echo 'Previous stable version is now live.' && echo '========================================'",
+      "dependsOn": ["generate_rollback_report"]
+    },
+    {
+      "name": "create_incident_ticket",
+      "description": "Log incident for tracking (simulated)",
+      "type": "shell",
+      "command": "if [ '${env.CREATE_INCIDENT}' = 'true' ]; then echo 'Incident created for rollback event'; echo 'Contact: ${env.EMERGENCY_CONTACT}'; echo 'Severity: HIGH'; fi",
+      "dependsOn": ["notify_team_rollback_complete"],
+      "condition": "${env.CREATE_INCIDENT}"
+    },
+    {
+      "name": "final_rollback_verification",
+      "description": "Final verification and summary",
+      "type": "shell",
+      "command": "echo '' && echo 'Rollback Workflow Summary:' && echo '========================' && echo 'Current Track Status:' && gpd publish status --package ${env.PACKAGE} --track ${env.TRACK} 2>/dev/null || echo 'Status check completed' && echo '' && echo 'Rollback completed successfully. Monitor vitals and investigate root cause.'",
+      "dependsOn": ["create_incident_ticket"]
+    }
+  ]
+}

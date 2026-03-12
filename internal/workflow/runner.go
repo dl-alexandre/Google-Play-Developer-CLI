@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -439,17 +440,34 @@ func (r *Runner) executeParallelSteps(ctx context.Context, state *RunState, step
 		}(step)
 	}
 
+	// Channel to signal when all workers are done
+	done := make(chan struct{})
 	go func() {
 		wg.Wait()
 		close(results)
 		close(errChan)
+		close(done)
 	}()
 
 	var stepResults []StepResult
 	var errors []error
 
-	for result := range results {
-		stepResults = append(stepResults, result.result)
+	// Wait for results with timeout protection
+	select {
+	case <-done:
+		// Normal completion
+		for result := range results {
+			stepResults = append(stepResults, result.result)
+		}
+	case <-time.After(30 * time.Second):
+		// Timeout - some goroutines may be stuck
+		r.logger.Error("Timeout waiting for parallel steps to complete")
+		// Close channels to unblock range loops
+		close(results)
+		close(errChan)
+		for result := range results {
+			stepResults = append(stepResults, result.result)
+		}
 	}
 
 	for err := range errChan {
@@ -640,7 +658,12 @@ func (r *Runner) executeStepOnce(ctx context.Context, state *RunState, step Step
 		args := strings.Fields(strings.TrimPrefix(command, "gpd "))
 		cmd = exec.CommandContext(ctx, gpdPath, args...)
 	default:
-		cmd = exec.CommandContext(ctx, "sh", "-c", command)
+		// Use platform-appropriate shell
+		if runtime.GOOS == "windows" {
+			cmd = exec.CommandContext(ctx, "cmd", "/c", command)
+		} else {
+			cmd = exec.CommandContext(ctx, "sh", "-c", command)
+		}
 	}
 
 	workingDir := step.WorkingDir
@@ -673,11 +696,49 @@ func (r *Runner) executeStepOnce(ctx context.Context, state *RunState, step Step
 		}
 	}
 
+	if step.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, step.Timeout)
+		defer cancel()
+	}
+
 	var stdoutBuf, stderrBuf bytes.Buffer
 	cmd.Stdout = &stdoutBuf
 	cmd.Stderr = &stderrBuf
 
-	err = cmd.Run()
+	// Start command
+	if err := cmd.Start(); err != nil {
+		return StepResult{
+			Step: step,
+			Output: StepOutput{
+				StepName:   step.Name,
+				ExitCode:   1,
+				StartedAt:  startTime,
+				FinishedAt: time.Now(),
+				Duration:   time.Since(startTime),
+				Error:      fmt.Sprintf("failed to start command: %v", err),
+			},
+		}
+	}
+
+	// Wait for command to complete
+	errChan := make(chan error, 1)
+	go func() {
+		errChan <- cmd.Wait()
+	}()
+
+	// Wait for either command completion or context cancellation
+	select {
+	case err = <-errChan:
+		// Command completed normally
+	case <-ctx.Done():
+		// Context cancelled (timeout or cancellation)
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		err = ctx.Err()
+	}
+
 	endTime := time.Now()
 	duration := endTime.Sub(startTime)
 

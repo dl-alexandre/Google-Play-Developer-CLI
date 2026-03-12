@@ -462,6 +462,8 @@ func (r *Runner) executeParallelSteps(ctx context.Context, state *RunState, step
 	case <-time.After(30 * time.Second):
 		// Timeout - some goroutines may be stuck
 		r.logger.Error("Timeout waiting for parallel steps to complete")
+		// Signal workers to stop by closing stopChan
+		stopOnce.Do(func() { close(stopChan) })
 		// Close channels to unblock range loops
 		close(results)
 		close(errChan)

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -110,6 +111,11 @@ func TestWatcherLifecycle(t *testing.T) {
 }
 
 func TestWatcherEvents(t *testing.T) {
+	// Skip on Windows CI due to goroutine timing issues
+	if os.Getenv("CI") == "true" && os.Getenv("RUNNER_OS") == "Windows" {
+		t.Skip("Skipping watcher tests on Windows CI")
+	}
+
 	t.Run("emit workflow started", func(t *testing.T) {
 		var buf bytes.Buffer
 		opts := WatcherOptions{

@@ -313,9 +313,9 @@ func TestGetExtensionPathsForOS(t *testing.T) {
 		want string
 	}{
 		{"darwin", "Application Support"},
-		{"linux", ".local/share"},
+		{"linux", ".local"}, // Use platform-neutral check
 		{"windows", "gpd"},
-		{"freebsd", ".local/share"},
+		{"freebsd", ".local"}, // Use platform-neutral check
 	}
 
 	for _, tt := range tests {

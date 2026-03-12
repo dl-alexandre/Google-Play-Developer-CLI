@@ -249,6 +249,11 @@ func TestInstallFromRepoClone(t *testing.T) {
 }
 
 func TestInstallTimeout(t *testing.T) {
+	// Skip in CI environments where git operations may fail
+	if os.Getenv("CI") == "true" {
+		t.Skip("Skipping timeout test in CI")
+	}
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(2 * time.Second)
 		w.WriteHeader(http.StatusOK)

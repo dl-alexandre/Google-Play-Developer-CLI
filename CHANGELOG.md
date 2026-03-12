@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.7] - 2026-03-12
+
+### Changes
+
+- test: add Windows CI skip to TestDetectExtensionType and TestStateManager
+- Fix Windows CI failures - skip Unix-specific tests on Windows CI
+- test: add Windows CI skip to watcher tests
+- fix(workflow): close stopChan on timeout to prevent goroutine leak
+- test: skip integration tests on Windows CI
+- fix(workflow): resolve goroutine leaks and Windows process cleanup
+- test: skip watcher tests on Windows CI
+- Revert "ci: allow Windows tests to have non-blocking failures"
+- ci: allow Windows tests to have non-blocking failures
+- fix(workflow): resolve data race in watcher tests
+- test: skip network-dependent tests on Windows CI
+- ci: trigger rebuild to check Windows workflow tests
+- fix: resolve errcheck linter errors in extension system
+- feat(extensions): implement gh-style extension system for gpd
+- feat(workflow): add declarative workflow execution system
+
 ## [0.5.6] - 2026-03-10
 
 ### Changes
@@ -223,7 +243,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docker image support
 - Homebrew formula for macOS/Linux
 
-[Unreleased]: https://github.com/dl-alexandre/Google-Play-Developer-CLI/compare/v0.5.6...HEAD
+[Unreleased]: https://github.com/dl-alexandre/Google-Play-Developer-CLI/compare/v0.5.7...HEAD
+[0.5.7]: https://github.com/dl-alexandre/Google-Play-Developer-CLI/compare/v0.5.6...v0.5.7
 [0.5.6]: https://github.com/dl-alexandre/Google-Play-Developer-CLI/compare/v0.5.5...v0.5.6
 [0.5.5]: https://github.com/dl-alexandre/Google-Play-Developer-CLI/compare/v0.5.4...v0.5.5
 [0.5.4]: https://github.com/dl-alexandre/Google-Play-Developer-CLI/compare/v0.5.3...v0.5.4

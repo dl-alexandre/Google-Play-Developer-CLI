@@ -117,6 +117,7 @@ func TestWorkflowGetStep(t *testing.T) {
 }
 
 func TestStateManager(t *testing.T) {
+	skipIfWindowsCI(t) // Filesystem timing differences on Windows CI
 	tempDir := t.TempDir()
 	sm := NewStateManager(tempDir)
 

@@ -11,6 +11,14 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// skipIfWindowsCI skips tests on Windows CI due to platform-specific file format differences
+func skipIfWindowsCI(t *testing.T) {
+	t.Helper()
+	if os.Getenv("CI") == "true" && runtime.GOOS == "windows" {
+		t.Skip("Skipping test on Windows CI")
+	}
+}
+
 // setupTestExtensionsDir creates a temporary directory for testing and returns cleanup function
 func setupTestExtensionsDir(t *testing.T) (cleanup func()) {
 	t.Helper()
@@ -615,6 +623,7 @@ func TestExpandPath(t *testing.T) {
 }
 
 func TestDetectExtensionType(t *testing.T) {
+	skipIfWindowsCI(t) // ELF and shell script detection doesn't work on Windows
 	tmpDir := t.TempDir()
 
 	// Test binary extension

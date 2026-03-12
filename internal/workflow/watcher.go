@@ -89,6 +89,7 @@ type Watcher struct {
 	started  bool
 	workflow string
 	runID    string
+	outputMu sync.Mutex // Protects output writes to prevent races in tests
 }
 
 // NewWatcher creates a new workflow watcher with the given options.
@@ -133,6 +134,10 @@ func (w *Watcher) Stop() {
 
 	close(w.stop)
 	w.wg.Wait()
+
+	// Drain any remaining events to ensure all output operations complete
+	// This prevents race conditions when tests read from output buffers
+	w.drainEvents()
 }
 
 // EmitWorkflowStarted emits an event when workflow execution begins.
@@ -372,7 +377,10 @@ func (w *Watcher) outputText(event WorkflowEvent) {
 	}
 
 	sb.WriteString("\n")
+
+	w.outputMu.Lock()
 	_, _ = fmt.Fprint(w.opts.Output, sb.String())
+	w.outputMu.Unlock()
 }
 
 func (w *Watcher) outputJSON(event WorkflowEvent) {
@@ -380,15 +388,13 @@ func (w *Watcher) outputJSON(event WorkflowEvent) {
 	if err != nil {
 		return
 	}
+
+	w.outputMu.Lock()
 	_, _ = fmt.Fprintln(w.opts.Output, string(data))
+	w.outputMu.Unlock()
 }
 
 func (w *Watcher) outputTUI(currentStep string, stepNum, totalSteps, completedSteps int, startTime time.Time) {
-	// Clear previous line if not first output
-	if stepNum > 0 || completedSteps > 0 {
-		_, _ = fmt.Fprint(w.opts.Output, "\r\033[K")
-	}
-
 	// Calculate progress
 	progress := 0.0
 	if totalSteps > 0 {
@@ -404,6 +410,14 @@ func (w *Watcher) outputTUI(currentStep string, stepNum, totalSteps, completedSt
 
 	// Calculate elapsed time
 	elapsed := time.Since(startTime)
+
+	w.outputMu.Lock()
+	defer w.outputMu.Unlock()
+
+	// Clear previous line if not first output
+	if stepNum > 0 || completedSteps > 0 {
+		_, _ = fmt.Fprint(w.opts.Output, "\r\033[K")
+	}
 
 	// Format output
 	if currentStep != "" && stepNum > 0 {

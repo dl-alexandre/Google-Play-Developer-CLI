@@ -118,12 +118,12 @@ func TestWatcherEvents(t *testing.T) {
 		}
 		w := NewWatcher(opts)
 		w.Start()
-		defer w.Stop()
 
 		w.EmitWorkflowStarted("test-workflow", "run-123", 5)
 
-		// Give time for event processing
+		// Give time for event processing then stop before reading
 		time.Sleep(50 * time.Millisecond)
+		w.Stop()
 
 		output := buf.String()
 		if !strings.Contains(output, "test-workflow") {
@@ -180,7 +180,6 @@ func TestWatcherEvents(t *testing.T) {
 		}
 		w := NewWatcher(opts)
 		w.Start()
-		defer w.Stop()
 
 		w.EmitWorkflowStarted("test-workflow", "run-123", 3)
 		w.EmitStepStarted("build", 1, 3)
@@ -188,8 +187,9 @@ func TestWatcherEvents(t *testing.T) {
 		w.EmitStepStarted("test", 2, 3)
 		w.EmitStepFailed("test", 2, 3, errors.New("test failure"), 1)
 
-		// Give time for event processing
+		// Give time for event processing then stop before reading
 		time.Sleep(100 * time.Millisecond)
+		w.Stop()
 
 		output := buf.String()
 		if !strings.Contains(output, "Executing step: build") {
@@ -211,13 +211,13 @@ func TestWatcherEvents(t *testing.T) {
 		}
 		w := NewWatcher(opts)
 		w.Start()
-		defer w.Stop()
 
 		w.EmitWorkflowStarted("test-workflow", "run-123", 3)
 		w.EmitStepSkipped("build", 1, 3, "already completed")
 
-		// Give time for event processing
+		// Give time for event processing then stop before reading
 		time.Sleep(50 * time.Millisecond)
+		w.Stop()
 
 		output := buf.String()
 		if !strings.Contains(output, "Skipping step: build") {

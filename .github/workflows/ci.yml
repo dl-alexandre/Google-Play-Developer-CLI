@@ -62,9 +62,7 @@ jobs:
 
       - name: Run tests (Windows)
         if: matrix.os == 'windows-latest'
-        run: |
-          # Run tests but don't fail on workflow package issues (known issue)
-          go test -v ./... || echo "Tests completed with some failures"
+        run: go test -v ./...
 
       - name: Check coverage threshold
         if: matrix.os == 'ubuntu-latest'

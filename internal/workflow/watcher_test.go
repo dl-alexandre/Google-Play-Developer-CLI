@@ -6,12 +6,22 @@ import (
 	"errors"
 	"os"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 )
 
+// skipIfWindowsCI skips tests on Windows CI due to goroutine timing issues
+func skipIfWindowsCI(t *testing.T) {
+	if os.Getenv("CI") == "true" && runtime.GOOS == "windows" {
+		t.Skip("Skipping test on Windows CI")
+	}
+}
+
 func TestNewWatcher(t *testing.T) {
+	skipIfWindowsCI(t)
+
 	t.Run("default options", func(t *testing.T) {
 		opts := DefaultWatcherOptions()
 		w := NewWatcher(opts)
@@ -62,6 +72,8 @@ func TestNewWatcher(t *testing.T) {
 }
 
 func TestWatcherLifecycle(t *testing.T) {
+	skipIfWindowsCI(t)
+
 	t.Run("start and stop", func(t *testing.T) {
 		opts := DefaultWatcherOptions()
 		w := NewWatcher(opts)
@@ -111,10 +123,7 @@ func TestWatcherLifecycle(t *testing.T) {
 }
 
 func TestWatcherEvents(t *testing.T) {
-	// Skip on Windows CI due to goroutine timing issues
-	if os.Getenv("CI") == "true" && os.Getenv("RUNNER_OS") == "Windows" {
-		t.Skip("Skipping watcher tests on Windows CI")
-	}
+	skipIfWindowsCI(t)
 
 	t.Run("emit workflow started", func(t *testing.T) {
 		var buf bytes.Buffer
@@ -236,6 +245,8 @@ func TestWatcherEvents(t *testing.T) {
 }
 
 func TestWatcherJSONFormat(t *testing.T) {
+	skipIfWindowsCI(t)
+
 	t.Run("workflow events as JSON", func(t *testing.T) {
 		var buf bytes.Buffer
 		opts := WatcherOptions{

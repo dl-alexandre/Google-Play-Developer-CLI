@@ -323,7 +323,7 @@ func writeFileInternal(path string, data []byte, perm int) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	if err := f.Chmod(os.FileMode(perm)); err != nil {
 		return err

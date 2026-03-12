@@ -32,7 +32,7 @@ func TestFindReleaseAsset(t *testing.T) {
 				{"name": "gpd-test-ext_windows_amd64.zip", "browser_download_url": "https://example.com/download3", "size": 1234567}
 			]
 		}`
-		w.Write([]byte(response))
+		_, _ = w.Write([]byte(response))
 	}))
 	defer server.Close()
 	_ = server
@@ -47,8 +47,8 @@ func TestExtractArchive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create archive: %v", err)
 	}
-	file.Write([]byte("mock archive content"))
-	file.Close()
+	_, _ = file.Write([]byte("mock archive content"))
+	_ = file.Close()
 
 	err = extractArchive(archivePath, destDir)
 	if err == nil {

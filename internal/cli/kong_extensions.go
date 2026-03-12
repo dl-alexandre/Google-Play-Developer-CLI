@@ -93,15 +93,15 @@ func (c *ExtensionListCmd) Run(globals *Globals) error {
 
 	// Table output
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tVERSION\tDESCRIPTION\tSOURCE")
+	_, _ = fmt.Fprintln(w, "NAME\tVERSION\tDESCRIPTION\tSOURCE")
 	for _, ext := range extList {
 		desc := ext.Description
 		if len(desc) > 40 {
 			desc = desc[:37] + "..."
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", ext.Name, ext.Version, desc, ext.Source)
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", ext.Name, ext.Version, desc, ext.Source)
 	}
-	w.Flush()
+	_ = w.Flush()
 
 	return nil
 }
@@ -266,16 +266,16 @@ func (c *ExtensionUpgradeCmd) Run(globals *Globals) error {
 
 	// Table output
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tOLD VERSION\tNEW VERSION\tSTATUS")
+	_, _ = fmt.Fprintln(w, "NAME\tOLD VERSION\tNEW VERSION\tSTATUS")
 	for _, result := range results {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", result.Name, result.OldVersion, result.NewVersion, result.Status)
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", result.Name, result.OldVersion, result.NewVersion, result.Status)
 	}
-	w.Flush()
+	_ = w.Flush()
 
 	if len(warnings) > 0 {
-		fmt.Fprintln(os.Stderr, "\nWarnings:")
+		_, _ = fmt.Fprintln(os.Stderr, "\nWarnings:")
 		for _, warning := range warnings {
-			fmt.Fprintf(os.Stderr, "  - %s\n", warning)
+			_, _ = fmt.Fprintf(os.Stderr, "  - %s\n", warning)
 		}
 	}
 

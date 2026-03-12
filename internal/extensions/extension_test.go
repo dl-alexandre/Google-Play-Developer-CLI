@@ -24,42 +24,42 @@ func setupTestExtensionsDir(t *testing.T) (cleanup func()) {
 	oldUserProfile := os.Getenv("USERPROFILE")
 
 	// Set environment variables for test isolation
-	os.Setenv("XDG_DATA_HOME", filepath.Join(tmpDir, "share"))
-	os.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpDir, "config"))
-	os.Setenv("APPDATA", tmpDir)
-	os.Setenv("HOME", tmpDir)
-	os.Setenv("USERPROFILE", tmpDir)
+	_ = os.Setenv("XDG_DATA_HOME", filepath.Join(tmpDir, "share"))
+	_ = os.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpDir, "config"))
+	_ = os.Setenv("APPDATA", tmpDir)
+	_ = os.Setenv("HOME", tmpDir)
+	_ = os.Setenv("USERPROFILE", tmpDir)
 
 	return func() {
 		// Restore original environment
 		if oldXdgData == "" {
-			os.Unsetenv("XDG_DATA_HOME")
+			_ = os.Unsetenv("XDG_DATA_HOME")
 		} else {
-			os.Setenv("XDG_DATA_HOME", oldXdgData)
+			_ = os.Setenv("XDG_DATA_HOME", oldXdgData)
 		}
 
 		if oldXdgConfig == "" {
-			os.Unsetenv("XDG_CONFIG_HOME")
+			_ = os.Unsetenv("XDG_CONFIG_HOME")
 		} else {
-			os.Setenv("XDG_CONFIG_HOME", oldXdgConfig)
+			_ = os.Setenv("XDG_CONFIG_HOME", oldXdgConfig)
 		}
 
 		if oldAppData == "" {
-			os.Unsetenv("APPDATA")
+			_ = os.Unsetenv("APPDATA")
 		} else {
-			os.Setenv("APPDATA", oldAppData)
+			_ = os.Setenv("APPDATA", oldAppData)
 		}
 
 		if oldHome == "" {
-			os.Unsetenv("HOME")
+			_ = os.Unsetenv("HOME")
 		} else {
-			os.Setenv("HOME", oldHome)
+			_ = os.Setenv("HOME", oldHome)
 		}
 
 		if oldUserProfile == "" {
-			os.Unsetenv("USERPROFILE")
+			_ = os.Unsetenv("USERPROFILE")
 		} else {
-			os.Setenv("USERPROFILE", oldUserProfile)
+			_ = os.Setenv("USERPROFILE", oldUserProfile)
 		}
 	}
 }
@@ -334,10 +334,10 @@ func TestGetExtensionPathsForOSXDG(t *testing.T) {
 	}
 
 	oldXdgData := os.Getenv("XDG_DATA_HOME")
-	defer os.Setenv("XDG_DATA_HOME", oldXdgData)
+	defer func() { _ = os.Setenv("XDG_DATA_HOME", oldXdgData) }()
 
 	testDir := "/test/xdg/data"
-	os.Setenv("XDG_DATA_HOME", testDir)
+	_ = os.Setenv("XDG_DATA_HOME", testDir)
 
 	paths := getExtensionPathsForOS("linux")
 	want := filepath.Join(testDir, "gpd", "extensions")

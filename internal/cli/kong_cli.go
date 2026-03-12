@@ -178,8 +178,8 @@ func buildHelpWithExtensions(options kong.HelpOptions, ctx *kong.Context) error 
 	}
 
 	// Build and print extension commands section
-	fmt.Fprintln(ctx.Stdout)
-	fmt.Fprintln(ctx.Stdout, "Extension Commands:")
+	_, _ = fmt.Fprintln(ctx.Stdout)
+	_, _ = fmt.Fprintln(ctx.Stdout, "Extension Commands:")
 
 	w := tabwriter.NewWriter(ctx.Stdout, 0, 0, 2, ' ', 0)
 	for _, ext := range extList {
@@ -190,9 +190,9 @@ func buildHelpWithExtensions(options kong.HelpOptions, ctx *kong.Context) error 
 		if desc == "" {
 			desc = "Extension command"
 		}
-		fmt.Fprintf(w, "  gpd %s\t%s\n", ext.Name, desc)
+		_, _ = fmt.Fprintf(w, "  gpd %s\t%s\n", ext.Name, desc)
 	}
-	w.Flush()
+	_ = w.Flush()
 
 	return nil
 }

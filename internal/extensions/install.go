@@ -218,7 +218,7 @@ func findReleaseAsset(ctx context.Context, opts InstallOptions) (string, error) 
 	if err != nil {
 		return "", fmt.Errorf("querying GitHub API: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Check status code
 	if resp.StatusCode == http.StatusNotFound {
@@ -331,7 +331,7 @@ func installFromRelease(ctx context.Context, opts InstallOptions, releaseURL, ex
 	if err != nil {
 		return fmt.Errorf("downloading release: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("downloading release: HTTP %d", resp.StatusCode)
@@ -342,13 +342,13 @@ func installFromRelease(ctx context.Context, opts InstallOptions, releaseURL, ex
 	if err != nil {
 		return fmt.Errorf("creating temp file: %w", err)
 	}
-	defer os.Remove(tmpFile.Name())
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
 
 	// Download with progress tracking
 	if _, err := io.Copy(tmpFile, resp.Body); err != nil {
 		return fmt.Errorf("downloading release: %w", err)
 	}
-	tmpFile.Close()
+	_ = tmpFile.Close()
 
 	// Create extension directory
 	if err := os.MkdirAll(extDir, 0755); err != nil {
@@ -416,13 +416,13 @@ func extractArchive(archivePath, destDir string) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	gzr, err := gzip.NewReader(file)
 	if err != nil {
 		return err
 	}
-	defer gzr.Close()
+	defer func() { _ = gzr.Close() }()
 
 	tr := tar.NewReader(gzr)
 
@@ -451,10 +451,10 @@ func extractArchive(archivePath, destDir string) error {
 				return err
 			}
 			if _, err := io.Copy(outFile, tr); err != nil {
-				outFile.Close()
+				_ = outFile.Close()
 				return err
 			}
-			outFile.Close()
+			_ = outFile.Close()
 		}
 	}
 
@@ -471,7 +471,7 @@ func installFromRepoClone(ctx context.Context, opts InstallOptions, owner, repo,
 	if err != nil {
 		return fmt.Errorf("creating temp directory: %w", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	cloneDir := filepath.Join(tmpDir, "repo")
 
@@ -628,13 +628,13 @@ func copyFile(src, dst string, perm os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	defer srcFile.Close()
+	defer func() { _ = srcFile.Close() }()
 
 	dstFile, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
 	if err != nil {
 		return err
 	}
-	defer dstFile.Close()
+	defer func() { _ = dstFile.Close() }()
 
 	if _, err := io.Copy(dstFile, srcFile); err != nil {
 		return err
@@ -676,7 +676,7 @@ func detectExtensionType(extDir string, manifest *Manifest) string {
 	if err != nil {
 		return "unknown"
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	buf := make([]byte, 2)
 	if _, err := file.Read(buf); err != nil {

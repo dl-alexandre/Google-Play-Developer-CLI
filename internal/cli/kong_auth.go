@@ -21,6 +21,11 @@ type AuthStatusCmd struct{}
 func (cmd *AuthStatusCmd) Run(globals *Globals) error {
 	ctx := context.Background()
 	authMgr := newAuthManager()
+
+	// Try to authenticate with empty key path to load existing credentials
+	// from storage, environment, or ADC
+	_, _ = authMgr.Authenticate(ctx, "")
+
 	status, err := authMgr.GetStatus(ctx)
 	if err != nil {
 		return err

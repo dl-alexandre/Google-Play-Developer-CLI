@@ -1,0 +1,129 @@
+# GoReleaser configuration
+# Documentation: https://goreleaser.com
+
+version: 2
+
+project_name: gpd
+
+before:
+  hooks:
+    - go mod tidy
+    - go mod verify
+    - go test ./...
+
+builds:
+  - id: gpd
+    main: ./cmd/gpd
+    binary: gpd
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.gitCommit={{.Commit}}
+      - -X main.buildTime={{.Date}}
+    flags:
+      - -trimpath
+
+archives:
+  - id: gpd
+    name_template: "{{ .ProjectName }}-{{ .Os }}-{{ .Arch }}"
+    format: tar.gz
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - LICENSE
+      - README.md
+      - CHANGELOG.md
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+      - Merge pull request
+      - Merge branch
+
+release:
+  github:
+    owner: dl-alexandre
+    name: Google-Play-Developer-CLI
+  draft: false
+  prerelease: auto
+  name_template: "v{{.Version}}"
+  header: |
+    ## Google Play Developer CLI v{{.Version}}
+    
+    Full Changelog: https://github.com/dl-alexandre/Google-Play-Developer-CLI/compare/{{.PreviousTag}}...v{{.Version}}
+  footer: |
+    ## Installation
+    
+    ### Binary Download
+    Download the appropriate binary for your platform from the assets below.
+    
+    ### Verification
+    Verify checksums:
+    ```bash
+    sha256sum -c checksums.txt
+    ```
+
+# Homebrew tap configuration
+brews:
+  - name: gpd
+    repository:
+      owner: dl-alexandre
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+      branch: master
+      pull_request:
+        enabled: false
+    commit_author:
+      name: goreleaserbot
+      email: goreleaser@carlosbecker.com
+    commit_msg_template: "Brew formula update for {{ .ProjectName }} version {{ .Tag }}"
+    directory: Formula
+    description: "Fast, lightweight CLI for Google Play Console"
+    homepage: "https://github.com/dl-alexandre/Google-Play-Developer-CLI"
+    license: "MIT"
+    skip_upload: "{{ if index .Env \"HOMEBREW_TAP_TOKEN\" }}false{{ else }}true{{ end }}"
+    test: |
+      system "#{bin}/gpd", "version"
+    install: |
+      bin.install "gpd"
+
+# Scoop configuration for Windows
+scoops:
+  - repository:
+      owner: dl-alexandre
+      name: scoop-bucket
+      token: "{{ .Env.SCOOP_BUCKET_TOKEN }}"
+      branch: main
+      pull_request:
+        enabled: false
+    commit_author:
+      name: goreleaserbot
+      email: goreleaser@carlosbecker.com
+    commit_msg_template: "Scoop update for {{ .ProjectName }} version {{ .Tag }}"
+    directory: bucket
+    description: "Fast, lightweight CLI for Google Play Console"
+    homepage: "https://github.com/dl-alexandre/Google-Play-Developer-CLI"
+    license: MIT
+    skip_upload: "{{ if index .Env \"SCOOP_BUCKET_TOKEN\" }}false{{ else }}true{{ end }}"
+    persist:
+      - "config.yaml"

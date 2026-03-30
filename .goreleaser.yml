@@ -1,5 +1,3 @@
-# GoReleaser configuration
-# Documentation: https://goreleaser.com
 
 version: 2
 
@@ -13,8 +11,7 @@ before:
 
 builds:
   - id: gpd
-    main: ./cmd/gpd
-    binary: gpd
+    main: ./...
     env:
       - CGO_ENABLED=0
     goos:
@@ -46,7 +43,7 @@ archives:
 
 checksum:
   name_template: "checksums.txt"
-  algorithm: sha256
+  algorithm: blake3
 
 changelog:
   sort: asc
@@ -80,10 +77,9 @@ release:
     ### Verification
     Verify checksums:
     ```bash
-    sha256sum -c checksums.txt
+    b3sum -c checksums.txt
     ```
 
-# Homebrew tap configuration
 brews:
   - name: gpd
     repository:
@@ -95,7 +91,7 @@ brews:
         enabled: false
     commit_author:
       name: goreleaserbot
-      email: goreleaser@carlosbecker.com
+      email: bot@dl-alexandre.com
     commit_msg_template: "Brew formula update for {{ .ProjectName }} version {{ .Tag }}"
     directory: Formula
     description: "Fast, lightweight CLI for Google Play Console"
@@ -107,7 +103,6 @@ brews:
     install: |
       bin.install "gpd"
 
-# Scoop configuration for Windows
 scoops:
   - repository:
       owner: dl-alexandre
@@ -118,7 +113,7 @@ scoops:
         enabled: false
     commit_author:
       name: goreleaserbot
-      email: goreleaser@carlosbecker.com
+      email: bot@dl-alexandre.com
     commit_msg_template: "Scoop update for {{ .ProjectName }} version {{ .Tag }}"
     directory: bucket
     description: "Fast, lightweight CLI for Google Play Console"

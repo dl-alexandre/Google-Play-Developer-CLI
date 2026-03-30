@@ -5,13 +5,12 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"text/tabwriter"
 	"time"
 
 	"github.com/alecthomas/kong"
 
-	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/cache"
+	"github.com/dl-alexandre/cli-tools/cache"
 	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/errors"
 	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/extensions"
 	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/logging"
@@ -35,7 +34,7 @@ type Globals struct {
 	Context context.Context `kong:"-"`
 
 	// Cache is initialized by RunKongCLI
-	Cache *cache.Cache `kong:"-"`
+	Cache cache.Cache `kong:"-"`
 }
 
 // KongCLI represents the complete Kong CLI structure.
@@ -91,18 +90,8 @@ func RunKongCLI() int {
 
 	var cli KongCLI
 
-	// Set default cache directory
-	if cli.CacheDir == "" {
-		homeDir, err := os.UserHomeDir()
-		if err == nil {
-			cli.CacheDir = filepath.Join(homeDir, ".gpd", "cache")
-		}
-	}
-
-	// Initialize cache
-	if cli.CacheDir != "" {
-		cli.Cache = cache.New(cli.CacheDir, 24*time.Hour)
-	}
+	// Initialize cache with default directory
+	cli.Cache = cache.New(cache.DefaultDir("gpd"), 24*time.Hour)
 
 	// Perform automatic update check (non-blocking)
 	AutoUpdateCheck(cli.CacheDir)

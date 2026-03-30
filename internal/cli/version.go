@@ -1,17 +1,16 @@
 package cli
 
 import (
-	"github.com/dl-alexandre/Google-Play-Developer-CLI/pkg/version"
+	"github.com/dl-alexandre/cli-tools/version"
 )
 
-// Build-time variables (set by GoReleaser or build flags)
-// These are initialized from the pkg/version package
+// Build-time variables (re-exported from cli-tools/version for backward compatibility)
 var (
 	// Version is the current version of the CLI
 	Version = version.Version
 
 	// BinaryName is the name of the binary
-	BinaryName = "gpd"
+	BinaryName = version.BinaryName
 
 	// GitHubRepo is the GitHub repository name
 	GitHubRepo = "Google-Play-Developer-CLI"
@@ -22,3 +21,8 @@ var (
 	// BuildTime is the build timestamp
 	BuildTime = version.BuildTime
 )
+
+func init() {
+	// Set CLI-specific metadata
+	version.BinaryName = "gpd"
+}

@@ -5,6 +5,7 @@ go 1.25.0
 require (
 	github.com/99designs/keyring v1.2.2
 	github.com/alecthomas/kong v1.14.0
+	github.com/dl-alexandre/cli-tools v0.0.0
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
 	github.com/xuri/excelize/v2 v2.10.0
 	golang.org/x/oauth2 v0.35.0

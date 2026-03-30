@@ -4,16 +4,16 @@ package version
 import (
 	"fmt"
 	"runtime"
+
+	"github.com/dl-alexandre/cli-tools/version"
 )
 
-// Build information set by ldflags during compilation.
 var (
-	Version   = "dev"
-	GitCommit = "unknown"
-	BuildTime = "unknown"
+	Version   = version.Version
+	GitCommit = version.GitCommit
+	BuildTime = version.BuildTime
 )
 
-// Info contains version information.
 type Info struct {
 	Version   string `json:"version"`
 	GitCommit string `json:"gitCommit"`
@@ -22,7 +22,6 @@ type Info struct {
 	Platform  string `json:"platform"`
 }
 
-// Get returns the current version information.
 func Get() *Info {
 	return &Info{
 		Version:   Version,
@@ -33,12 +32,14 @@ func Get() *Info {
 	}
 }
 
-// String returns a human-readable version string.
 func (i *Info) String() string {
 	return fmt.Sprintf("gpd %s (%s) built %s", i.Version, i.GitCommit, i.BuildTime)
 }
 
-// Short returns a short version string.
 func (i *Info) Short() string {
 	return i.Version
+}
+
+func init() {
+	version.BinaryName = "gpd"
 }

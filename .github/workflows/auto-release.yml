@@ -175,6 +175,13 @@ jobs:
           NEW_TAG="${{ steps.version.outputs.new_tag }}"
           LAST_TAG="${{ steps.version.outputs.last_tag }}"
           
+          # Check if tag already exists
+          if git ls-remote --tags origin | grep -q "refs/tags/${NEW_TAG}$"; then
+            echo "⚠️ Tag $NEW_TAG already exists on remote, skipping tag creation"
+            echo "This usually means the release was already created or the workflow was re-triggered."
+            exit 0
+          fi
+          
           # Push CHANGELOG update
           git push origin HEAD:master || git push origin HEAD:main
           
@@ -190,7 +197,11 @@ jobs:
       
       - name: Summary
         run: |
-          if [ "${{ steps.version.outputs.should_release }}" = "true" ]; then
+          NEW_TAG="${{ steps.version.outputs.new_tag }}"
+          if git ls-remote --tags origin | grep -q "refs/tags/${NEW_TAG}$"; then
+            echo "⚠️ Tag $NEW_TAG already exists - no new release created"
+            echo "This is expected if the release was already processed."
+          elif [ "${{ steps.version.outputs.should_release }}" = "true" ]; then
             echo "✅ Released ${{ steps.version.outputs.new_tag }}"
             echo "Previous: ${{ steps.version.outputs.last_tag }}"
           else

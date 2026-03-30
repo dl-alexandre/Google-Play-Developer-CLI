@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-03-30
+
+### Changes
+
+- fix(ci): update Go version from 1.24.x to 1.25.x in all workflows
+
 ## [0.6.3] - 2026-03-15
 
 ### Changes
@@ -256,7 +262,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docker image support
 - Homebrew formula for macOS/Linux
 
-[Unreleased]: https://github.com/dl-alexandre/Google-Play-Developer-CLI/compare/v0.6.3...HEAD
+[Unreleased]: https://github.com/dl-alexandre/Google-Play-Developer-CLI/compare/v0.6.4...HEAD
+[0.6.4]: https://github.com/dl-alexandre/Google-Play-Developer-CLI/compare/v0.6.3...v0.6.4
 [0.6.3]: https://github.com/dl-alexandre/Google-Play-Developer-CLI/compare/v0.6.2...v0.6.3
 [0.5.8]: https://github.com/dl-alexandre/Google-Play-Developer-CLI/compare/v0.5.7...v0.5.8
 [0.5.7]: https://github.com/dl-alexandre/Google-Play-Developer-CLI/compare/v0.5.6...v0.5.7

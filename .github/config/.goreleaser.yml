@@ -123,8 +123,8 @@ brews:
   - name: gpd
     repository:
       owner: dl-alexandre
-      name: tap
-      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     directory: Formula
     homepage: "https://github.com/dl-alexandre/gpd"
     description: "Google Play Developer CLI - fast, lightweight CLI for Google Play Console"

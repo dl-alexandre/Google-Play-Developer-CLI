@@ -237,8 +237,15 @@ jobs:
       - name: Upload multi-API reports
         uses: actions/upload-artifact@v4
         with:
-          name: multi-api-drift-reports
-          path: .artifacts/multi-api/
+          name: multi-api-drift-${{ matrix.api.name }}
+          path: .artifacts/multi-api/${{ matrix.api.name }}.*
+          retention-days: 30
+
+      - name: Upload summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: multi-api-summary-${{ matrix.api.name }}
+          path: .artifacts/multi-api/summary.txt
           retention-days: 30
 
       - name: Generate summary
@@ -253,3 +260,41 @@ jobs:
             STATUS=$([ "$drift" == "true" ] && echo "⚠️" || echo "✅")
             echo "| $api | $STATUS | $score | $revision |" >> $GITHUB_STEP_SUMMARY
           done < .artifacts/multi-api/summary.txt
+
+  # Aggregate results from all matrix jobs
+  aggregate-results:
+    name: Aggregate API Drift Results
+    runs-on: ubuntu-latest
+    needs: monitor-all-apis
+    if: always() && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.monitor_all == 'true'))
+    
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: .artifacts/
+          pattern: multi-api-summary-*
+          merge-multiple: true
+
+      - name: Generate consolidated summary
+        run: |
+          echo "## Multi-API Drift Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| API | Drift | Score | Revision |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|-------|-------|----------|" >> $GITHUB_STEP_SUMMARY
+          
+          # Combine all summary files
+          cat .artifacts/summary.txt 2>/dev/null | sort | while IFS='|' read -r api drift score revision; do
+            STATUS=$([ "$drift" == "true" ] && echo "⚠️" || echo "✅")
+            echo "| $api | $STATUS | $score | $revision |" >> $GITHUB_STEP_SUMMARY
+          done
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "*Summary generated from all monitored APIs*" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload consolidated report
+        uses: actions/upload-artifact@v4
+        with:
+          name: multi-api-drift-consolidated
+          path: .artifacts/summary.txt
+          retention-days: 30

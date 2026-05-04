@@ -19,10 +19,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: "1.25.x"
           cache: true
@@ -37,7 +37,7 @@ jobs:
           echo "bench_file=$BENCH_FILE" >> $GITHUB_OUTPUT
 
       - name: Download previous main benchmark
-        uses: dawidd6/action-download-artifact@v3
+        uses: dawidd6/action-download-artifact@v21
         continue-on-error: true
         with:
           name: gpd-benchmark-main
@@ -57,7 +57,7 @@ jobs:
           cp ${{ steps.benchmark.outputs.bench_file }} benchmark-main.txt
 
       - name: Upload benchmark results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: gpd-benchmark-results
           path: .artifacts/benchmarks/
@@ -65,7 +65,7 @@ jobs:
 
       - name: Upload main baseline
         if: github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: gpd-benchmark-main
           path: benchmark-main.txt

@@ -31,12 +31,12 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 1
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: "1.25.x"
           cache: true
@@ -71,7 +71,7 @@ jobs:
           fi
 
       - name: Upload drift report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: api-drift-report
           path: .artifacts/drift/
@@ -79,7 +79,7 @@ jobs:
 
       - name: Comment on PR (if triggered by PR)
         if: github.event_name == 'pull_request' && steps.drift.outputs.drift_detected == 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
@@ -97,7 +97,7 @@ jobs:
           github.event_name == 'workflow_dispatch' && 
           github.event.inputs.create_issue == 'true' && 
           steps.drift.outputs.drift_detected == 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
@@ -206,10 +206,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: "1.25.x"
           cache: true
@@ -235,14 +235,14 @@ jobs:
           fi
 
       - name: Upload multi-API reports
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: multi-api-drift-${{ matrix.api.name }}
           path: .artifacts/multi-api/${{ matrix.api.name }}.*
           retention-days: 30
 
       - name: Upload summary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: multi-api-summary-${{ matrix.api.name }}
           path: .artifacts/multi-api/summary.txt
@@ -270,7 +270,7 @@ jobs:
     
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: .artifacts/
           pattern: multi-api-summary-*
@@ -293,7 +293,7 @@ jobs:
           echo "*Summary generated from all monitored APIs*" >> $GITHUB_STEP_SUMMARY
 
       - name: Upload consolidated report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: multi-api-drift-consolidated
           path: .artifacts/summary.txt

@@ -47,10 +47,10 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: "1.25.x"
           cache: true
@@ -76,7 +76,7 @@ jobs:
           fi
 
       - name: Upload health report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: orchestration-health
           path: .artifacts/orchestration/health.json
@@ -93,10 +93,10 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: "1.25.x"
           cache: true
@@ -127,7 +127,7 @@ jobs:
           fi
 
       - name: Upload dependency report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: orchestration-deps
           path: .artifacts/orchestration/deps-*.txt
@@ -157,10 +157,10 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: "1.25.x"
           cache: true
@@ -208,7 +208,7 @@ jobs:
           fi
 
       - name: Upload drift report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: orchestration-drift-${{ matrix.api.name }}
           path: .artifacts/orchestration/drift/${{ matrix.api.name }}.json
@@ -224,10 +224,10 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: .artifacts/orchestration
           pattern: orchestration-*
@@ -294,7 +294,7 @@ jobs:
           echo "summary=Report generated with drift score: ${{ needs.drift-detection.outputs.drift_score }}" >> $GITHUB_OUTPUT
 
       - name: Upload final report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: orchestration-final-report
           path: .artifacts/orchestration/final/
@@ -309,7 +309,7 @@ jobs:
     
     steps:
       - name: Create drift tracking issue
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const title = `🔄 API Drift Detected: Android Publisher ${{ needs.drift-detection.outputs.discovery_revision }}`;
@@ -372,12 +372,12 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: "1.25.x"
           cache: true
@@ -405,7 +405,7 @@ jobs:
           git push origin auto/update-api-$(date +%Y%m%d)
 
       - name: Create PR
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             await github.rest.pulls.create({

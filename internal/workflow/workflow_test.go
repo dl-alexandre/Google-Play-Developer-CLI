@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -79,7 +80,8 @@ func TestWorkflowValidation(t *testing.T) {
 				return
 			}
 			if err != nil && tt.errField != "" {
-				if valErr, ok := err.(*ValidationError); ok {
+				var valErr *ValidationError
+				if errors.As(err, &valErr) {
 					if valErr.Field != tt.errField {
 						t.Errorf("Validate() error field = %v, want %v", valErr.Field, tt.errField)
 					}

@@ -193,38 +193,31 @@ func TestTryRunExtension(t *testing.T) {
 	tests := []struct {
 		name string
 		args []string
-		want bool
 	}{
 		{
 			name: "empty args",
 			args: []string{},
-			want: false,
 		},
 		{
 			name: "built-in command",
 			args: []string{"auth"},
-			want: false,
 		},
 		{
 			name: "global flag",
 			args: []string{"--help"},
-			want: false,
 		},
 		{
 			name: "non-existent extension",
 			args: []string{"nonexistent-ext"},
-			want: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// tryRunExtension doesn't actually run the extension in this test
-			// since we don't have any installed extensions
-			got := tryRunExtension(tt.args)
-			if got != tt.want {
-				t.Errorf("tryRunExtension(%v) = %v, want %v", tt.args, got, tt.want)
-			}
+			// since we don't have any installed extensions. It must return
+			// (rather than exiting the process) for all of these inputs.
+			tryRunExtension(tt.args)
 		})
 	}
 }

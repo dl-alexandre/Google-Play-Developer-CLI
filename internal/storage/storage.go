@@ -2,6 +2,7 @@
 package storage
 
 import (
+	"errors"
 	"runtime"
 
 	"github.com/99designs/keyring"
@@ -72,7 +73,7 @@ func (s *SecureStorage) Retrieve(key string) ([]byte, error) {
 	}
 	item, err := s.ring.Get(key)
 	if err != nil {
-		if err == keyring.ErrKeyNotFound {
+		if errors.Is(err, keyring.ErrKeyNotFound) {
 			return nil, ErrKeyNotFound
 		}
 		return nil, err

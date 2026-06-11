@@ -3,6 +3,7 @@ package workflow
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -400,7 +401,7 @@ func (r *Runner) executeParallelSteps(ctx context.Context, state *RunState, step
 				if err != nil {
 					r.logger.Error("Failed to evaluate condition for step %s: %v", s.Name, err)
 					if !s.ContinueOnError {
-						errChan <- fmt.Errorf("condition evaluation failed for step %s: %v", s.Name, err)
+						errChan <- fmt.Errorf("condition evaluation failed for step %s: %w", s.Name, err)
 						stopOnce.Do(func() { close(stopChan) })
 						hasFatalError.Store(true)
 						return
@@ -746,7 +747,8 @@ func (r *Runner) executeStepOnce(ctx context.Context, state *RunState, step Step
 
 	exitCode := 0
 	if err != nil {
-		if exitError, ok := err.(*exec.ExitError); ok {
+		var exitError *exec.ExitError
+		if errors.As(err, &exitError) {
 			exitCode = exitError.ExitCode()
 		} else {
 			exitCode = 1

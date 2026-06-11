@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -108,7 +109,8 @@ func (cmd *GeneratedApksListCmd) Run(globals *Globals) error {
 	client.Release()
 
 	if err != nil {
-		if apiErr, ok := err.(*googleapi.Error); ok && apiErr.Code == 404 {
+		var apiErr *googleapi.Error
+		if stderrors.As(err, &apiErr) && apiErr.Code == 404 {
 			return errors.NewAPIError(errors.CodeNotFound, fmt.Sprintf("generated APKs not found for version code %d", cmd.VersionCode)).
 				WithHint("Ensure the bundle has been uploaded and processed")
 		}
@@ -242,7 +244,8 @@ func (cmd *GeneratedApksDownloadCmd) Run(globals *Globals) error {
 	client.ReleaseForUpload()
 
 	if err != nil {
-		if apiErr, ok := err.(*googleapi.Error); ok && apiErr.Code == 404 {
+		var apiErr *googleapi.Error
+		if stderrors.As(err, &apiErr) && apiErr.Code == 404 {
 			return errors.NewAPIError(errors.CodeNotFound, fmt.Sprintf("APK not found for download ID: %s", cmd.DownloadID)).
 				WithHint("Use 'gpd generated-apks list' to get valid download IDs")
 		}

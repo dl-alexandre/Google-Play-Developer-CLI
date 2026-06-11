@@ -43,7 +43,7 @@ func Install(ctx context.Context, opts InstallOptions) (*InstallResult, error) {
 
 	// Determine install source type
 	if isLocalPath(opts.Source) {
-		return installLocal(ctx, opts)
+		return installLocal(opts)
 	}
 
 	return installFromGitHub(ctx, opts)
@@ -63,7 +63,7 @@ func isLocalPath(source string) bool {
 }
 
 // installLocal installs an extension from a local directory.
-func installLocal(ctx context.Context, opts InstallOptions) (*InstallResult, error) {
+func installLocal(opts InstallOptions) (*InstallResult, error) {
 	path := expandPath(opts.Source)
 
 	// Validate the local extension
@@ -161,7 +161,7 @@ func installFromGitHub(ctx context.Context, opts InstallOptions) (*InstallResult
 	// Try to install from GitHub Release first
 	releaseURL, err := findReleaseAsset(ctx, opts)
 	if err == nil && releaseURL != "" {
-		if err := installFromRelease(ctx, opts, releaseURL, extDir, extName); err == nil {
+		if err := installFromRelease(ctx, opts, releaseURL, extDir); err == nil {
 			return &InstallResult{
 				Extension: loadInstalledExtension(extName),
 				Installed: !alreadyInstalled,
@@ -171,7 +171,7 @@ func installFromGitHub(ctx context.Context, opts InstallOptions) (*InstallResult
 	}
 
 	// Fall back to cloning the repo
-	if err := installFromRepoClone(ctx, opts, owner, repo, extDir, extName); err != nil {
+	if err := installFromRepoClone(ctx, opts, owner, repo, extDir); err != nil {
 		return nil, fmt.Errorf("installing from repository: %w", err)
 	}
 
@@ -315,7 +315,7 @@ func findReleaseAsset(ctx context.Context, opts InstallOptions) (string, error) 
 }
 
 // installFromRelease installs from a GitHub Release asset.
-func installFromRelease(ctx context.Context, opts InstallOptions, releaseURL, extDir, extName string) error {
+func installFromRelease(ctx context.Context, opts InstallOptions, releaseURL, extDir string) error {
 	client := &http.Client{Timeout: opts.Timeout}
 
 	req, err := http.NewRequestWithContext(ctx, "GET", releaseURL, nil)
@@ -462,7 +462,7 @@ func extractArchive(archivePath, destDir string) error {
 }
 
 // installFromRepoClone clones a repo and installs from it.
-func installFromRepoClone(ctx context.Context, opts InstallOptions, owner, repo, extDir, extName string) error {
+func installFromRepoClone(ctx context.Context, opts InstallOptions, owner, repo, extDir string) error {
 	// Construct repo URL
 	repoURL := fmt.Sprintf("https://github.com/%s/%s.git", owner, repo)
 

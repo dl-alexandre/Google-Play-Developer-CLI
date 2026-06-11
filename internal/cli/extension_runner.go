@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 
@@ -9,22 +10,23 @@ import (
 )
 
 // tryRunExtension attempts to execute an extension if the command is an extension name.
-// Returns true if an extension was found and executed, false otherwise.
-func tryRunExtension(args []string) bool {
+// If an extension is found, it is executed and the process exits, so this function
+// does not return. Otherwise it returns and the caller should continue normally.
+func tryRunExtension(args []string) {
 	if len(args) == 0 {
-		return false
+		return
 	}
 
 	cmdName := args[0]
 
 	// Skip if it's a known global flag or built-in command
 	if isGlobalFlag(cmdName) || extensions.IsBuiltInCommand(cmdName) {
-		return false
+		return
 	}
 
 	// Check if this is an installed extension
 	if !extensions.IsInstalled(cmdName) {
-		return false
+		return
 	}
 
 	// Get the extension executable path
@@ -34,7 +36,7 @@ func tryRunExtension(args []string) bool {
 			logging.String("extension", cmdName),
 			logging.String("error", err.Error()),
 		)
-		return false
+		return
 	}
 
 	// Verify the executable exists
@@ -43,7 +45,7 @@ func tryRunExtension(args []string) bool {
 			logging.String("extension", cmdName),
 			logging.String("path", execPath),
 		)
-		return false
+		return
 	}
 
 	// Execute the extension with remaining arguments
@@ -75,7 +77,8 @@ func tryRunExtension(args []string) bool {
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
 			// Propagate the exit code
 			if exitErr.ExitCode() != 0 {
 				os.Exit(exitErr.ExitCode())
@@ -90,7 +93,6 @@ func tryRunExtension(args []string) bool {
 	}
 
 	os.Exit(0)
-	return true // Should never reach here
 }
 
 // isGlobalFlag checks if the argument is a global flag.

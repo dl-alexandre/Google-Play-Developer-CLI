@@ -21,8 +21,9 @@ func ClassifyAuthError(err error) *APIError {
 	if err == nil {
 		return nil
 	}
-	if apiErr, ok := err.(*APIError); ok {
-		return apiErr
+	var classifiedErr *APIError
+	if errors.As(err, &classifiedErr) {
+		return classifiedErr
 	}
 
 	var retrieveErr *oauth2.RetrieveError

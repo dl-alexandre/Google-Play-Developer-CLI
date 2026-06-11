@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -105,7 +106,8 @@ func (cmd *SystemApksVariantsListCmd) Run(globals *Globals) error {
 	client.Release()
 
 	if err != nil {
-		if apiErr, ok := err.(*googleapi.Error); ok && apiErr.Code == 404 {
+		var apiErr *googleapi.Error
+		if stderrors.As(err, &apiErr) && apiErr.Code == 404 {
 			return errors.NewAPIError(errors.CodeNotFound, fmt.Sprintf("system APK variants not found for version code %d", cmd.VersionCode)).
 				WithHint("Ensure the bundle has been uploaded and system APKs have been generated")
 		}
@@ -205,7 +207,8 @@ func (cmd *SystemApksVariantsGetCmd) Run(globals *Globals) error {
 	client.Release()
 
 	if err != nil {
-		if apiErr, ok := err.(*googleapi.Error); ok && apiErr.Code == 404 {
+		var apiErr *googleapi.Error
+		if stderrors.As(err, &apiErr) && apiErr.Code == 404 {
 			return errors.NewAPIError(errors.CodeNotFound, fmt.Sprintf("system APK variant %d not found for version code %d", cmd.VariantId, cmd.VersionCode)).
 				WithHint("Use 'gpd system-apks variants list' to see available variants")
 		}
@@ -314,11 +317,12 @@ func (cmd *SystemApksVariantsCreateCmd) Run(globals *Globals) error {
 	client.Release()
 
 	if err != nil {
-		if apiErr, ok := err.(*googleapi.Error); ok && apiErr.Code == 404 {
+		var apiErr *googleapi.Error
+		if stderrors.As(err, &apiErr) && apiErr.Code == 404 {
 			return errors.NewAPIError(errors.CodeNotFound, fmt.Sprintf("bundle with version code %d not found", cmd.VersionCode)).
 				WithHint("Ensure the bundle has been uploaded to Google Play")
 		}
-		if apiErr, ok := err.(*googleapi.Error); ok && apiErr.Code == 400 {
+		if stderrors.As(err, &apiErr) && apiErr.Code == 400 {
 			return errors.NewAPIError(errors.CodeValidationError, fmt.Sprintf("invalid device specification: %v", err)).
 				WithHint("Check that all required fields are provided and valid")
 		}
@@ -471,7 +475,8 @@ func (cmd *SystemApksVariantsDownloadCmd) Run(globals *Globals) error {
 	client.ReleaseForUpload()
 
 	if err != nil {
-		if apiErr, ok := err.(*googleapi.Error); ok && apiErr.Code == 404 {
+		var apiErr *googleapi.Error
+		if stderrors.As(err, &apiErr) && apiErr.Code == 404 {
 			return errors.NewAPIError(errors.CodeNotFound, fmt.Sprintf("system APK variant %d not found for version code %d", cmd.VariantID, cmd.VersionCode)).
 				WithHint("Use 'gpd system-apks variants list' to see available variants")
 		}

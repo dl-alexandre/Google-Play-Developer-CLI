@@ -301,10 +301,9 @@ func (c *ExtensionExecCmd) Run(globals *Globals) error {
 	// Execute the extension with forwarded arguments
 	// This will replace the current process on Unix or run as subprocess
 	args := append([]string{c.Name}, c.Args...)
-	if tryRunExtension(args) {
-		// Extension was executed - this should not return as the process exits
-		return nil
-	}
+	// If the extension is executed, tryRunExtension does not return
+	// (the process exits).
+	tryRunExtension(args)
 
 	return fmt.Errorf("failed to execute extension %q", c.Name)
 }

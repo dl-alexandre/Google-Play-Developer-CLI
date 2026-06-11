@@ -3,6 +3,7 @@ package cli
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -84,10 +85,9 @@ type KongCLI struct {
 // Run executes the Kong CLI and returns the exit code.
 func RunKongCLI() int {
 	// Check if first argument is an extension to run
-	// This must happen before Kong parsing
-	if tryRunExtension(os.Args[1:]) {
-		return 0 // Extension handled execution
-	}
+	// This must happen before Kong parsing. If an extension is found,
+	// tryRunExtension does not return (the process exits).
+	tryRunExtension(os.Args[1:])
 
 	var cli KongCLI
 
@@ -148,7 +148,8 @@ func RunKongCLI() int {
 	// Execute the selected command
 	err = kongCtx.Run(&cli.Globals)
 	if err != nil {
-		if apiErr, ok := err.(*errors.APIError); ok {
+		var apiErr *errors.APIError
+		if stderrors.As(err, &apiErr) {
 			return apiErr.ExitCode()
 		}
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

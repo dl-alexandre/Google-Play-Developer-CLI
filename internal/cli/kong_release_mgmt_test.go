@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -1025,7 +1026,8 @@ func TestReleaseNotesCmd_Validation(t *testing.T) {
 					return
 				}
 
-				apiErr, ok := err.(*errors.APIError)
+				var apiErr *errors.APIError
+				ok := stderrors.As(err, &apiErr)
 				if !ok {
 					t.Errorf("expected APIError but got %T", err)
 					return
@@ -1266,7 +1268,8 @@ func TestReleaseNotesCmd_CopyAction(t *testing.T) {
 					return
 				}
 
-				apiErr, ok := err.(*errors.APIError)
+				var apiErr *errors.APIError
+				ok := stderrors.As(err, &apiErr)
 				if !ok {
 					t.Errorf("expected APIError but got %T", err)
 					return
@@ -1489,7 +1492,8 @@ func TestReleaseConflictsCmd_ValidateVersionCodes(t *testing.T) {
 					return
 				}
 
-				apiErr, ok := err.(*errors.APIError)
+				var apiErr *errors.APIError
+				ok := stderrors.As(err, &apiErr)
 				if !ok {
 					t.Errorf("expected APIError but got %T", err)
 					return

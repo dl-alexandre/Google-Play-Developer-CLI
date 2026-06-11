@@ -3,6 +3,7 @@ package testutil
 
 import (
 	"bytes"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -147,7 +148,8 @@ func (g *GoldenFile) Assert(actual []byte) {
 	t.Helper()
 
 	if err := g.Compare(actual); err != nil {
-		if mismatch, ok := err.(*GoldenMismatch); ok {
+		var mismatch *GoldenMismatch
+		if errors.As(err, &mismatch) {
 			t.Errorf("Golden file mismatch:\n%s", mismatch.Diff())
 		} else {
 			t.Errorf("Golden file error: %v", err)

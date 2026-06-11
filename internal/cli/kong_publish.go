@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -611,7 +612,8 @@ func (cmd *PublishReleaseCmd) updateReleaseTrack(ctx context.Context, client *ap
 	client.Release()
 
 	if err != nil {
-		if apiErr, ok := err.(*googleapi.Error); ok && apiErr.Code == 404 {
+		var apiErr *googleapi.Error
+		if stderrors.As(err, &apiErr) && apiErr.Code == 404 {
 			return errors.NewAPIError(errors.CodeNotFound, fmt.Sprintf("track not found: %s", cmd.Track))
 		}
 		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to update track: %v", err))
@@ -1327,7 +1329,8 @@ func (cmd *PublishStatusCmd) Run(globals *Globals) error {
 		client.Release()
 
 		if err != nil {
-			if apiErr, ok := err.(*googleapi.Error); ok && apiErr.Code == 404 {
+			var apiErr *googleapi.Error
+			if stderrors.As(err, &apiErr) && apiErr.Code == 404 {
 				return errors.NewAPIError(errors.CodeNotFound, fmt.Sprintf("track not found: %s", cmd.Track))
 			}
 			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to get track: %v", err))
@@ -1722,7 +1725,8 @@ func (cmd *PublishListingGetCmd) Run(globals *Globals) error {
 		client.Release()
 
 		if err != nil {
-			if apiErr, ok := err.(*googleapi.Error); ok && apiErr.Code == 404 {
+			var apiErr *googleapi.Error
+			if stderrors.As(err, &apiErr) && apiErr.Code == 404 {
 				return errors.NewAPIError(errors.CodeNotFound, fmt.Sprintf("listing not found for locale: %s", cmd.Locale))
 			}
 			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to get listing: %v", err))
@@ -2518,7 +2522,8 @@ func (cmd *PublishImagesDeleteCmd) Run(globals *Globals) error {
 	})
 	client.Release()
 	if err != nil {
-		if apiErr, ok := err.(*googleapi.Error); ok && apiErr.Code == 404 {
+		var apiErr *googleapi.Error
+		if stderrors.As(err, &apiErr) && apiErr.Code == 404 {
 			return errors.NewAPIError(errors.CodeNotFound, fmt.Sprintf("image not found: %s", cmd.ID))
 		}
 		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to delete image: %v", err))
@@ -3179,7 +3184,8 @@ func (cmd *PublishTestersAddCmd) Run(globals *Globals) error {
 	client.Release()
 	if err != nil {
 		// If 404, start with empty testers
-		if apiErr, ok := err.(*googleapi.Error); ok && apiErr.Code == 404 {
+		var apiErr *googleapi.Error
+		if stderrors.As(err, &apiErr) && apiErr.Code == 404 {
 			testers = &androidpublisher.Testers{}
 		} else {
 			return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to get current testers: %v", err))
@@ -3445,7 +3451,8 @@ func (cmd *PublishTestersListCmd) Run(globals *Globals) error {
 		})
 		if err != nil {
 			// Skip tracks with errors (e.g., no testers configured)
-			if apiErr, ok := err.(*googleapi.Error); ok && apiErr.Code == 404 {
+			var apiErr *googleapi.Error
+			if stderrors.As(err, &apiErr) && apiErr.Code == 404 {
 				continue
 			}
 			continue
@@ -3536,7 +3543,8 @@ func (cmd *PublishTestersGetCmd) Run(globals *Globals) error {
 	client.Release()
 
 	if err != nil {
-		if apiErr, ok := err.(*googleapi.Error); ok && apiErr.Code == 404 {
+		var apiErr *googleapi.Error
+		if stderrors.As(err, &apiErr) && apiErr.Code == 404 {
 			return errors.NewAPIError(errors.CodeNotFound, fmt.Sprintf("no testers found for track: %s", cmd.Track))
 		}
 		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to get testers: %v", err))
@@ -4256,7 +4264,8 @@ func (cmd *PublishBetaGroupsGetCmd) Run(globals *Globals) error {
 	client.Release()
 
 	if err != nil {
-		if apiErr, ok := err.(*googleapi.Error); ok && apiErr.Code == 404 {
+		var apiErr *googleapi.Error
+		if stderrors.As(err, &apiErr) && apiErr.Code == 404 {
 			return errors.NewAPIError(errors.CodeNotFound, fmt.Sprintf("beta group not found: %s", cmd.Group))
 		}
 		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to get beta group: %v", err))

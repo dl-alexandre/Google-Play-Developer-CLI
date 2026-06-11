@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -377,7 +378,8 @@ func (cmd *WorkflowValidateCmd) Run(globals *Globals) error {
 		}
 
 		// Try to extract more specific information
-		if valErr, ok := err.(*workflow.ValidationError); ok {
+		var valErr *workflow.ValidationError
+		if stderrors.As(err, &valErr) {
 			issue.Field = valErr.Field
 		}
 

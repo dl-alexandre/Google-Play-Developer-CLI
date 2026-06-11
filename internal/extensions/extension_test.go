@@ -73,7 +73,7 @@ func setupTestExtensionsDir(t *testing.T) (cleanup func()) {
 }
 
 // createTestExtension creates a test extension in the extensions directory
-func createTestExtension(t *testing.T, name string, manifest *Manifest) *Extension {
+func createTestExtension(t *testing.T, name string, manifest *Manifest) {
 	t.Helper()
 
 	extDir := filepath.Join(GetExtensionsDir(), name)
@@ -118,8 +118,6 @@ func createTestExtension(t *testing.T, name string, manifest *Manifest) *Extensi
 	if err := os.WriteFile(binPath, []byte(content), 0755); err != nil {
 		t.Fatalf("Failed to write executable: %v", err)
 	}
-
-	return ext
 }
 
 // createTestManifestFile creates a .gpd-extension manifest file

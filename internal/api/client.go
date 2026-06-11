@@ -5,6 +5,7 @@ import (
 	"context"
 	crand "crypto/rand"
 	"encoding/binary"
+	"errors"
 	"net/http"
 	"strconv"
 	"sync"
@@ -428,7 +429,8 @@ func isRetryableError(err error) bool {
 		return false
 	}
 
-	if apiErr, ok := err.(*googleapi.Error); ok {
+	var apiErr *googleapi.Error
+	if errors.As(err, &apiErr) {
 		if apiErr.Code == http.StatusTooManyRequests {
 			return true
 		}
@@ -477,8 +479,8 @@ func calculateDelayWithConfig(cfg RetryConfig, attempt int, err error) time.Dura
 }
 
 func extractRetryAfter(err error) time.Duration {
-	apiErr, ok := err.(*googleapi.Error)
-	if !ok {
+	var apiErr *googleapi.Error
+	if !errors.As(err, &apiErr) {
 		return 0
 	}
 

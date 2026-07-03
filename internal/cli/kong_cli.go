@@ -150,6 +150,9 @@ func RunKongCLI() int {
 	if err != nil {
 		var apiErr *errors.APIError
 		if stderrors.As(err, &apiErr) {
+			// Print the error before exiting: without this an APIError exits
+			// with only a status code and no message (a silent failure).
+			fmt.Fprintf(os.Stderr, "Error: %v\n", apiErr)
 			return apiErr.ExitCode()
 		}
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

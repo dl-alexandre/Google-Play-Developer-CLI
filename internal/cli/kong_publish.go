@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	stderrors "errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -243,7 +244,12 @@ func (cmd *PublishUploadCmd) uploadBundle(ctx context.Context, client *api.Clien
 			}
 		}()
 
-		bundle, err := svc.Edits.Bundles.Upload(packageName, editID).Media(file).Context(ctx).Do()
+		// Force octet-stream: the Go client sniffs an AAB as application/zip,
+		// which Play's edits.bundles.upload rejects ("Media type 'application/zip'
+		// is not supported"). The API requires application/octet-stream.
+		bundle, err := svc.Edits.Bundles.Upload(packageName, editID).
+			Media(file, googleapi.ContentType("application/octet-stream")).
+			Context(ctx).Do()
 		if err != nil {
 			return err
 		}
@@ -269,7 +275,10 @@ func (cmd *PublishUploadCmd) uploadAPK(ctx context.Context, client *api.Client, 
 			}
 		}()
 
-		apk, err := svc.Edits.Apks.Upload(packageName, editID).Media(file).Context(ctx).Do()
+		// Same octet-stream requirement as bundles (an APK also sniffs as zip).
+		apk, err := svc.Edits.Apks.Upload(packageName, editID).
+			Media(file, googleapi.ContentType("application/octet-stream")).
+			Context(ctx).Do()
 		if err != nil {
 			return err
 		}
@@ -3055,7 +3064,12 @@ func (cmd *PublishDeobfuscationUploadCmd) Run(globals *Globals) error {
 	}
 	var uploadResp *androidpublisher.DeobfuscationFilesUploadResponse
 	err = client.DoWithRetry(ctx, func() error {
-		uploadResp, err = svc.Edits.Deobfuscationfiles.Upload(pkg, editID, cmd.VersionCode, cmd.Type).Media(file).Context(ctx).Do()
+		// Rewind: the same file handle is reused across retries, so a retried
+		// attempt must re-read from the start, not from EOF.
+		if _, serr := file.Seek(0, io.SeekStart); serr != nil {
+			return serr
+		}
+		uploadResp, err = svc.Edits.Deobfuscationfiles.Upload(pkg, editID, cmd.VersionCode, cmd.Type).Media(file, googleapi.ContentType("application/octet-stream")).Context(ctx).Do()
 		return err
 	})
 	client.ReleaseForUpload()
@@ -4913,7 +4927,10 @@ func (cmd *PublishInternalShareUploadCmd) Run(globals *Globals) error {
 	if ext == extAAB {
 		var resp *androidpublisher.InternalAppSharingArtifact
 		err = client.DoWithRetry(ctx, func() error {
-			resp, err = svc.Internalappsharingartifacts.Uploadbundle(pkg).Media(file).Context(ctx).Do()
+			if _, serr := file.Seek(0, io.SeekStart); serr != nil {
+				return serr
+			}
+			resp, err = svc.Internalappsharingartifacts.Uploadbundle(pkg).Media(file, googleapi.ContentType("application/octet-stream")).Context(ctx).Do()
 			return err
 		})
 		client.ReleaseForUpload()
@@ -4932,7 +4949,10 @@ func (cmd *PublishInternalShareUploadCmd) Run(globals *Globals) error {
 	} else {
 		var resp *androidpublisher.InternalAppSharingArtifact
 		err = client.DoWithRetry(ctx, func() error {
-			resp, err = svc.Internalappsharingartifacts.Uploadapk(pkg).Media(file).Context(ctx).Do()
+			if _, serr := file.Seek(0, io.SeekStart); serr != nil {
+				return serr
+			}
+			resp, err = svc.Internalappsharingartifacts.Uploadapk(pkg).Media(file, googleapi.ContentType("application/octet-stream")).Context(ctx).Do()
 			return err
 		})
 		client.ReleaseForUpload()

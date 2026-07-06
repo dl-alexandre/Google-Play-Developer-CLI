@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -228,8 +229,13 @@ func (cmd *BulkUploadCmd) uploadFile(ctx context.Context, client *api.Client, pk
 	case extAAB:
 		var bundle *androidpublisher.Bundle
 		err = client.DoWithRetry(ctx, func() error {
+			// Rewind: the same file handle is reused across retries, so a
+			// retried attempt must re-read from the start, not from EOF.
+			if _, serr := f.Seek(0, io.SeekStart); serr != nil {
+				return serr
+			}
 			var uerr error
-			bundle, uerr = svc.Edits.Bundles.Upload(pkg, editID).Media(f).Context(ctx).Do()
+			bundle, uerr = svc.Edits.Bundles.Upload(pkg, editID).Media(f, googleapi.ContentType("application/octet-stream")).Context(ctx).Do()
 			return uerr
 		})
 		if err != nil {
@@ -239,8 +245,11 @@ func (cmd *BulkUploadCmd) uploadFile(ctx context.Context, client *api.Client, pk
 	case extAPK:
 		var apk *androidpublisher.Apk
 		err = client.DoWithRetry(ctx, func() error {
+			if _, serr := f.Seek(0, io.SeekStart); serr != nil {
+				return serr
+			}
 			var uerr error
-			apk, uerr = svc.Edits.Apks.Upload(pkg, editID).Media(f).Context(ctx).Do()
+			apk, uerr = svc.Edits.Apks.Upload(pkg, editID).Media(f, googleapi.ContentType("application/octet-stream")).Context(ctx).Do()
 			return uerr
 		})
 		if err != nil {

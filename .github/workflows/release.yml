@@ -11,6 +11,10 @@ on:
         required: true
         type: string
 
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
@@ -23,15 +27,46 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
 
+
+      - name: Resolve release tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "name=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check if release already published
+        id: published
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          COUNT=$(gh release view "${{ steps.tag.outputs.name }}" \
+            --json assets -q '.assets | length' 2>/dev/null || echo 0)
+          echo "asset_count=$COUNT" >> "$GITHUB_OUTPUT"
+          if [ "$COUNT" -ge 6 ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Release already published
+        if: steps.published.outputs.skip == 'true'
+        run: |
+          echo "Release ${{ steps.tag.outputs.name }} already has ${{ steps.published.outputs.asset_count }} assets — skipping publish"
       - name: Set up Go
+        if: steps.published.outputs.skip != 'true'
         uses: actions/setup-go@v6
         with:
           go-version-file: 'go.mod'
 
       - name: Run tests
+        if: steps.published.outputs.skip != 'true'
         run: go test ./...
 
       - name: Run GoReleaser
+        if: steps.published.outputs.skip != 'true'
         uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser

@@ -218,7 +218,7 @@ GPD_INSTALL_INSECURE=1 curl -fsSL https://raw.githubusercontent.com/dl-alexandre
 ```yaml
 - uses: dl-alexandre/Google-Play-Developer-CLI/.github/actions/setup-gpd@main
   with:
-    version: v0.6.4   # pin for CI; use latest only for throwaway jobs
+    version: v0.6.5   # pin for CI; use latest only for throwaway jobs
 ```
 
 See [CI/CD integration](docs/examples/ci-cd-integration.md#install-gpd-in-ci-setup-gpd) for full examples.

@@ -164,7 +164,7 @@ jobs:
         uses: dl-alexandre/Google-Play-Developer-CLI/.github/actions/setup-gpd@main
         with:
           # Pin binary version in CI (prefer explicit tags over latest).
-          version: v0.6.4
+          version: v0.6.5
           # Optional: raise API rate limits (defaults to github.token)
           # token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -187,7 +187,7 @@ When the workflow lives in the gpd repo itself:
 ```yaml
 - uses: ./.github/actions/setup-gpd
   with:
-    version: v0.6.4
+    version: v0.6.5
 ```
 
 ### Alternative: install script

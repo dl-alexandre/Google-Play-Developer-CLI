@@ -125,7 +125,7 @@ Optional / later:
 
 1. Broader domain package migration for remaining large `kong_*.go` families (beyond `outfmt` + `playship`)  
 2. Even deeper `validate` (media matrix, content rating, all listing locales)  
-3. Publish production tag `v0.6.5+` so GitHub Releases use the new archive + checksum names end-to-end  
+3. ~~Publish production tag `v0.6.5+`~~ — **v0.6.5** shipped with new archive + checksum names  
 
 **Delivered recently:** TTY-aware output; checksum install + GoReleaser SHA-256 (snapshot verified); generated command docs; `validate` (package/track/listing network probes) + `publish play`; multi-profile auth including **delete/logout**; `setup-gpd` action; agent **skills/** pack; `outfmt` + `playship` extractions.
 

@@ -6,11 +6,12 @@ This guide demonstrates how to integrate the Google Play Developer CLI (`gpd`) i
 
 1. [Overview](#overview)
 2. [Authentication Setup](#authentication-setup)
-3. [GitHub Actions Examples](#github-actions-examples)
-4. [GitLab CI Examples](#gitlab-ci-examples)
-5. [Common Patterns](#common-patterns)
-6. [Best Practices](#best-practices)
-7. [Troubleshooting](#troubleshooting)
+3. [Install gpd in CI (`setup-gpd`)](#install-gpd-in-ci-setup-gpd)
+4. [GitHub Actions Examples](#github-actions-examples)
+5. [GitLab CI Examples](#gitlab-ci-examples)
+6. [Common Patterns](#common-patterns)
+7. [Best Practices](#best-practices)
+8. [Troubleshooting](#troubleshooting)
 
 ## Overview
 
@@ -139,6 +140,67 @@ For environments where you can securely store files:
 
 4. **Application Default Credentials**: For GCP environments
 
+## Install gpd in CI (`setup-gpd`)
+
+Prefer the official composite action over piping `install.sh` in GitHub Actions. It resolves a release tag, downloads the correct OS/arch asset, verifies checksums when present, adds the binary to `PATH`, and runs `gpd version`.
+
+### Inputs
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `version` | `latest` | Release tag or version (`latest`, `v0.6.4`, or `0.6.4`) |
+| `token` | `github.token` | Optional GitHub token to avoid API rate limits when resolving releases |
+
+### Minimal example
+
+```yaml
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup gpd
+        uses: dl-alexandre/Google-Play-Developer-CLI/.github/actions/setup-gpd@main
+        with:
+          # Pin binary version in CI (prefer explicit tags over latest).
+          version: v0.6.4
+          # Optional: raise API rate limits (defaults to github.token)
+          # token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify install
+        run: gpd version
+
+      - name: Deploy
+        env:
+          GPD_SERVICE_ACCOUNT_KEY: ${{ secrets.GPD_SERVICE_ACCOUNT_KEY }}
+        run: |
+          gpd publish upload app-release.aab \
+            --package ${{ secrets.APP_PACKAGE_NAME }} \
+            --track internal
+```
+
+### Local path (this repository)
+
+When the workflow lives in the gpd repo itself:
+
+```yaml
+- uses: ./.github/actions/setup-gpd
+  with:
+    version: v0.6.4
+```
+
+### Alternative: install script
+
+If you are not using GitHub Actions (or cannot use composite actions), the install script still works:
+
+```yaml
+- name: Install gpd
+  run: |
+    curl -fsSL https://raw.githubusercontent.com/dl-alexandre/Google-Play-Developer-CLI/main/install.sh | bash
+    echo "$HOME/.local/bin" >> $GITHUB_PATH
+```
+
 ## GitHub Actions Examples
 
 ### Basic Upload Workflow
@@ -174,15 +236,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.22.x'
-
-      - name: Install gpd
-        run: |
-          curl -fsSL https://raw.githubusercontent.com/dl-alexandre/Google-Play-Developer-CLI/main/install.sh | bash
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - name: Setup gpd
+        uses: dl-alexandre/Google-Play-Developer-CLI/.github/actions/setup-gpd@main
 
       - name: Verify authentication
         env:

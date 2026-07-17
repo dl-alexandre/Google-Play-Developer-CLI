@@ -141,10 +141,19 @@ git push origin v0.1.0
 ```
 
 GoReleaser handles:
-- Cross-platform builds
+- Cross-platform builds (archives named `gpd_<version>_<os>_<arch>.tar.gz` / `.zip`)
+- SHA-256 checksums (`gpd_<version>_checksums.txt`) for `install.sh` verification
 - GitHub releases
 - Homebrew formula updates
-- Docker image publishing
+- Scoop bucket updates
+
+`install.sh` downloads those archives and verifies SHA-256 against the checksums
+asset (override with `GPD_INSTALL_INSECURE=1` only when you must skip verification).
+Smoke-test checksum/install logic without a real release:
+
+```bash
+make test-install-checksum
+```
 
 ## Questions?
 

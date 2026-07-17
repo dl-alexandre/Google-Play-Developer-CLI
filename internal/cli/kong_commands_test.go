@@ -19,7 +19,7 @@ func TestPublishCmd_HasExpectedSubcommands(t *testing.T) {
 	typeOfCmd := v.Type()
 
 	expectedSubcommands := []string{
-		"Upload", "Release", "Rollout", "Promote", "Halt", "Rollback",
+		"Play", "Upload", "Release", "Rollout", "Promote", "Halt", "Rollback",
 		"Status", "Tracks", "Capabilities", "Listing", "Details", "Images",
 		"Assets", "Deobfuscation", "Testers", "Builds", "BetaGroups", "InternalShare",
 	}

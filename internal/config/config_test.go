@@ -587,3 +587,23 @@ func TestConfigValidate(t *testing.T) {
 		})
 	}
 }
+
+
+func TestResolveAuthProfile(t *testing.T) {
+	t.Setenv("GPD_AUTH_PROFILE", "")
+	// flag wins
+	if got := ResolveAuthProfile("from-flag"); got != "from-flag" {
+		t.Fatalf("flag: got %q", got)
+	}
+	t.Setenv("GPD_AUTH_PROFILE", "from-env")
+	if got := ResolveAuthProfile(""); got != "from-env" {
+		t.Fatalf("env: got %q", got)
+	}
+	t.Setenv("GPD_AUTH_PROFILE", "")
+	// without config active profile, default
+	home := setTestHome(t)
+	_ = home
+	if got := ResolveAuthProfile(""); got != "default" {
+		t.Fatalf("default: got %q", got)
+	}
+}

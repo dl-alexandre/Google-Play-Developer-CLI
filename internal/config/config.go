@@ -317,6 +317,7 @@ const (
 	EnvTimeout           = "GPD_TIMEOUT"
 	EnvStoreTokens       = "GPD_STORE_TOKENS" //nolint:gosec // G101: This is an env var name, not credentials
 	EnvCI                = "GPD_CI"
+	EnvDefaultOutput     = "GPD_DEFAULT_OUTPUT"
 )
 
 // GetEnvServiceAccountKey returns the service account key from environment.
@@ -339,6 +340,38 @@ func GetEnvPackage() string {
 
 func GetEnvAuthProfile() string {
 	return os.Getenv(EnvAuthProfile)
+}
+
+// ResolveAuthProfile picks the active auth profile.
+// Priority: explicit flag > GPD_AUTH_PROFILE > config activeProfile > "default".
+func ResolveAuthProfile(flagProfile string) string {
+	if strings.TrimSpace(flagProfile) != "" {
+		return strings.TrimSpace(flagProfile)
+	}
+	if env := strings.TrimSpace(GetEnvAuthProfile()); env != "" {
+		return env
+	}
+	if cfg, err := Load(); err == nil && cfg != nil {
+		if p := strings.TrimSpace(cfg.ActiveProfile); p != "" {
+			return p
+		}
+	}
+	return "default"
+}
+
+// SetActiveProfile persists the active auth profile to the config file.
+func SetActiveProfile(profile string) error {
+	profile = strings.TrimSpace(profile)
+	if profile == "" {
+		profile = "default"
+	}
+	cfg, loadWarn := Load()
+	if cfg == nil {
+		cfg = DefaultConfig()
+	}
+	_ = loadWarn
+	cfg.ActiveProfile = profile
+	return cfg.Save()
 }
 
 // GetEnvTimeout returns the timeout from environment.

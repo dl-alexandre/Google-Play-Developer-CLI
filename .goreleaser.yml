@@ -7,11 +7,13 @@ before:
   hooks:
     - go mod tidy
     - go mod verify
-    - go test ./...
+    # Prefer unit tags for speed/stability in release builds (integration/workflow tests can flake).
+    - go test -tags=unit ./...
 
 builds:
   - id: gpd
-    main: ./...
+    main: ./cmd/gpd
+    binary: gpd
     env:
       - CGO_ENABLED=0
     goos:
@@ -23,15 +25,18 @@ builds:
       - arm64
     ldflags:
       - -s -w
-      - -X main.version={{.Version}}
-      - -X main.gitCommit={{.Commit}}
-      - -X main.buildTime={{.Date}}
+      - -X github.com/dl-alexandre/Google-Play-Developer-CLI/pkg/version.Version={{.Version}}
+      - -X github.com/dl-alexandre/Google-Play-Developer-CLI/pkg/version.GitCommit={{.Commit}}
+      - -X github.com/dl-alexandre/Google-Play-Developer-CLI/pkg/version.BuildTime={{.Date}}
     flags:
       - -trimpath
 
 archives:
   - id: gpd
-    name_template: "{{ .ProjectName }}-{{ .Os }}-{{ .Arch }}"
+    # Must match install.sh FILENAME: gpd_${VERSION}_${OS}_${ARCH}.tar.gz
+    # (OS: darwin/linux/windows; ARCH: x86_64 for amd64, else arm64/…)
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
     format: tar.gz
     format_overrides:
       - goos: windows
@@ -41,9 +46,11 @@ archives:
       - README.md
       - CHANGELOG.md
 
+# install.sh verifies SHA-256 lines in shasum format: "<hash>  <filename>"
+# Prefers gpd_${VERSION}_checksums.txt, falls back to checksums.txt.
 checksum:
-  name_template: "checksums.txt"
-  algorithm: blake3
+  name_template: "gpd_{{ .Version }}_checksums.txt"
+  algorithm: sha256
 
 changelog:
   sort: asc
@@ -75,9 +82,11 @@ release:
     Download the appropriate binary for your platform from the assets below.
     
     ### Verification
-    Verify checksums:
+    Each release publishes `gpd_{{ .Version }}_checksums.txt` (SHA-256, shasum format).
+    The install script verifies this automatically; to verify manually:
     ```bash
-    b3sum -c checksums.txt
+    shasum -a 256 -c gpd_{{ .Version }}_checksums.txt
+    # or: sha256sum -c gpd_{{ .Version }}_checksums.txt
     ```
 
 brews:

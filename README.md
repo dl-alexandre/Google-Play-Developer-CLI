@@ -120,12 +120,21 @@ gpd publish upload myapp.aab --package com.example.app --track internal --json
 gpd is purpose-built for programmatic access by AI agents and automation:
 
 ```bash
-# Get the AI agent quickstart guide
-gpd help agent
-
 # Example: Query reviews and get structured JSON for processing
 gpd reviews list --package com.example.app --min-rating 1 --output json --pretty
 ```
+
+### Agent skills pack
+
+Installable ASC-style skills live under [`skills/`](skills/README.md). Point your agent at the skill folders (or copy/symlink them into your agent skills root):
+
+| Skill | Path |
+| --- | --- |
+| Auth (service account, profiles, doctor/check) | [`skills/gpd-auth`](skills/gpd-auth/SKILL.md) |
+| Release (validate, publish play, rollout) | [`skills/gpd-release`](skills/gpd-release/SKILL.md) |
+| Reviews & vitals | [`skills/gpd-reviews-vitals`](skills/gpd-reviews-vitals/SKILL.md) |
+
+See [`skills/README.md`](skills/README.md) for install notes. Prefer live `gpd <cmd> --help` over inventing flags.
 
 **Key features for automation:**
 
@@ -193,6 +202,27 @@ brew install gpd
 curl -fsSL https://raw.githubusercontent.com/dl-alexandre/Google-Play-Developer-CLI/main/install.sh | bash
 ```
 
+The install script downloads the release archive matching your OS/arch
+(`gpd_<version>_<os>_<arch>.tar.gz`) and **requires SHA-256 verification** against
+the release checksums file (`gpd_<version>_checksums.txt`, or `checksums.txt`).
+If checksums cannot be downloaded or verified, install aborts unless you
+explicitly opt out:
+
+```bash
+# Only if you understand the risk (e.g. air-gapped debug); not recommended
+GPD_INSTALL_INSECURE=1 curl -fsSL https://raw.githubusercontent.com/dl-alexandre/Google-Play-Developer-CLI/main/install.sh | bash
+```
+
+### GitHub Actions (`setup-gpd`)
+
+```yaml
+- uses: dl-alexandre/Google-Play-Developer-CLI/.github/actions/setup-gpd@main
+  with:
+    version: v0.6.4   # pin for CI; use latest only for throwaway jobs
+```
+
+See [CI/CD integration](docs/examples/ci-cd-integration.md#install-gpd-in-ci-setup-gpd) for full examples.
+
 ### Go Install
 
 ```bash
@@ -251,10 +281,10 @@ gpd config doctor
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--package` | App package name | - |
-| `--output` | Output format: json, table, markdown, csv (analytics/vitals only) | json |
+| `--output` | Output format: json, table, markdown, csv, excel | table on TTY, json in pipes/CI (`GPD_DEFAULT_OUTPUT` overrides) |
 | `--pretty` | Pretty print JSON output | false |
 | `--timeout` | Network timeout | 30s |
-| `--key` | Service account key file path | - |
+| `--key-path` | Service account key file path | - |
 | `--quiet` | Suppress stderr except errors | false |
 | `--verbose` | Verbose output | false |
 | `--profile` | Authentication profile name | - |
@@ -267,18 +297,22 @@ gpd config doctor
 #### `gpd auth` - Authentication
 
 ```bash
-gpd auth login              # OAuth device login (uses GPD_CLIENT_ID)
-gpd auth init               # Alias for auth login
-gpd auth switch <profile>   # Switch active profile
-gpd auth list               # List stored profiles
-gpd auth status              # Check authentication status
-gpd auth check --package ... # Validate permissions
-gpd auth logout              # Clear stored credentials
-gpd auth diagnose            # Detailed auth diagnostics
-gpd auth doctor              # Diagnose authentication setup
+gpd auth login [profile] --key-path sa.json   # Service account login (CI-friendly)
+gpd auth init [profile]                       # Alias for auth login
+gpd auth switch <profile>                     # Switch + persist active profile
+gpd auth list                                 # List stored profiles
+gpd auth status                               # Check authentication status
+gpd auth check --package com.example.app      # Validate package API access
+gpd auth logout                               # Clear session credentials
+gpd auth doctor --refresh-check               # Sectioned auth diagnostics
+gpd auth diagnose --refresh-check             # Alias for auth doctor
 ```
 
+Profile resolution: `--profile` → `GPD_AUTH_PROFILE` → config `activeProfile` → `default`.
+
 If your OAuth consent screen is in testing mode, refresh tokens can expire after 7 days and Google enforces a 100 refresh-token issuance cap per OAuth client. If you encounter repeated `invalid_grant` refresh failures, re-authenticate and revoke unused tokens in Google Cloud Console, or move the app to production.
+
+More detail: [docs/auth-parity-guide.md](docs/auth-parity-guide.md).
 
 #### `gpd config` - Configuration
 
@@ -638,7 +672,19 @@ Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for gui
 
 ## App Store Connect CLI Parity
 
-See the parity matrix in [docs/asc-parity.md](docs/asc-parity.md).
+Coming from [App Store Connect CLI](https://github.com/rorkai/App-Store-Connect-CLI)? Start here:
+
+- [docs/asc-parity.md](docs/asc-parity.md) — feature parity matrix (verified against live help)
+- [docs/auth-parity-guide.md](docs/auth-parity-guide.md) — auth migration + profiles
+- [docs/asc-workflow-mapping.md](docs/asc-workflow-mapping.md) — release/build/metadata workflows
+- [docs/COMMANDS.md](docs/COMMANDS.md) — generated command taxonomy (`make generate-command-docs`)
+
+High-level Play ship ergonomics:
+
+```bash
+gpd validate --package com.example.app --file ./app.aab --dry-run
+gpd publish play ./app.aab --package com.example.app --track internal --dry-run
+```
 
 ---
 

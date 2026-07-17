@@ -26,7 +26,7 @@ Before using `gpd`, you'll need to set up authentication with a Google Cloud ser
 export GPD_SERVICE_ACCOUNT_KEY='{"type": "service_account", ...}'
 
 # Option 2: Key file
-gpd --key /path/to/service-account.json auth status
+gpd --key-path /path/to/service-account.json auth status
 
 # Option 3: Application Default Credentials
 export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
@@ -44,13 +44,20 @@ gpd auth status
 # Check permissions for a specific app
 gpd auth check --package com.example.app
 
-# Diagnose configuration issues
+# Diagnose auth + configuration issues
+gpd auth doctor --refresh-check
 gpd config doctor
 ```
+
+ASC users: see [Auth Parity Guide](auth-parity-guide.md), [ASC Parity Matrix](asc-parity.md), and [COMMANDS.md](COMMANDS.md).
 
 Then try your first commands:
 
 ```bash
+# Readiness + high-level ship (dry-run)
+gpd validate --package com.example.app --file app.aab --dry-run
+gpd publish play app.aab --package com.example.app --track internal --dry-run
+
 # Upload an app bundle
 gpd publish upload app.aab --package com.example.app
 

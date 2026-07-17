@@ -13,6 +13,8 @@ import (
 	"github.com/alecthomas/kong"
 
 	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/cache"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/cli/outfmt"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/config"
 	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/errors"
 	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/extensions"
 	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/logging"
@@ -21,7 +23,7 @@ import (
 // Globals contains all global flags shared across all commands.
 type Globals struct {
 	Package     string        `help:"App package name" short:"p"`
-	Output      string        `help:"Output format: json, table, markdown, csv, excel" default:"json" enum:"json,table,markdown,csv,excel"`
+	Output      string        `help:"Output format: json, table, markdown, csv, excel (default: table on TTY, json in pipes/CI; override with GPD_DEFAULT_OUTPUT)" default:"json" enum:"json,table,markdown,csv,excel"`
 	Pretty      bool          `help:"Pretty print JSON output"`
 	Timeout     time.Duration `help:"Network timeout" default:"30s"`
 	StoreTokens string        `help:"Token storage: auto, never, secure" default:"auto" enum:"auto,never,secure"`
@@ -76,6 +78,9 @@ type KongCLI struct {
 	Automation  AutomationCmd  `cmd:"" help:"CI/CD release automation"`
 	Workflow    WorkflowCmd    `cmd:"" help:"Declarative workflow execution"`
 
+	// High-level operator commands (ASC-style job ergonomics)
+	Validate ValidateCmd `cmd:"" help:"Submission readiness / pre-publish validation report"`
+
 	// Extension commands
 	Extension ExtensionCmd `cmd:"" help:"Manage CLI extensions"`
 
@@ -128,6 +133,13 @@ func RunKongCLI() int {
 		return errors.ExitValidationError
 	}
 
+	// Resolve auth profile once for all commands:
+	// --profile > GPD_AUTH_PROFILE > config activeProfile > "default"
+	cli.Profile = config.ResolveAuthProfile(cli.Profile)
+	// TTY-aware output: explicit --output > GPD_DEFAULT_OUTPUT > table(TTY)/json(pipe)
+	cli.Output = outfmt.ResolveOutputFromEnvAndTTY(cli.Output, os.Args[1:])
+	applyAuthGlobals(&cli.Globals)
+
 	// Set up verbose logging if requested
 	if cli.Verbose {
 		logger := logging.NewLogger(os.Stderr, true)
@@ -143,6 +155,7 @@ func RunKongCLI() int {
 
 	logging.Debug("Command execution started",
 		logging.String("timeout", cli.Timeout.String()),
+		logging.String("profile", cli.Profile),
 	)
 
 	// Execute the selected command

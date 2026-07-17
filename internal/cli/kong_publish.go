@@ -16,12 +16,14 @@ import (
 	"google.golang.org/api/googleapi"
 
 	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/api"
+	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/cli/playship"
 	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/errors"
 	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/output"
 )
 
 // PublishCmd contains publishing commands.
 type PublishCmd struct {
+	Play          PublishPlayCmd          `cmd:"" help:"High-level upload→track→status publish job (ASC publish analogue)"`
 	Upload        PublishUploadCmd        `cmd:"" help:"Upload APK or AAB"`
 	Release       PublishReleaseCmd       `cmd:"" help:"Create or update a release"`
 	Rollout       PublishRolloutCmd       `cmd:"" help:"Update rollout percentage"`
@@ -40,6 +42,145 @@ type PublishCmd struct {
 	Builds        PublishBuildsCmd        `cmd:"" help:"Manage uploaded builds"`
 	BetaGroups    PublishBetaGroupsCmd    `cmd:"" help:"Beta group management (ASC compatibility)"`
 	InternalShare PublishInternalShareCmd `cmd:"" help:"Upload artifacts for internal sharing"`
+}
+
+// PublishPlayCmd is a composed high-level ship job:
+// validate local inputs → upload binary → assign track release (status / fraction) → status.
+// Prefer --dry-run in CI preflight.
+type PublishPlayCmd struct {
+	File       string  `arg:"" help:"APK or AAB to publish" type:"existingfile"`
+	Track      string  `help:"Target track" default:"internal" enum:"internal,alpha,beta,production"`
+	Percentage float64 `help:"Staged rollout percentage (0-100). When >0, release status is inProgress with userFraction; 0 uses --status for a full track assignment"`
+	Status     string  `help:"Release status after upload (used when --percentage is 0)" default:"completed" enum:"draft,completed,halted,inProgress"`
+	DryRun     bool    `help:"Plan the publish job without network side effects"`
+}
+
+// Run executes the high-level publish play job.
+func (cmd *PublishPlayCmd) Run(globals *Globals) error {
+	if globals.Package == "" {
+		return errors.ErrPackageRequired
+	}
+	if !api.IsValidTrack(cmd.Track) {
+		return errors.ErrTrackInvalid
+	}
+
+	releaseStatus, userFraction, err := playship.ResolveReleaseParams(cmd.Status, cmd.Percentage)
+	if err != nil {
+		return err
+	}
+
+	// Local artifact readiness (no network, no nested CLI output).
+	for _, c := range validateArtifactFile(cmd.File) {
+		if c.Status == "fail" {
+			return errors.NewAPIError(errors.CodeValidationError, c.Message).
+				WithHint("Provide a non-empty .aab or .apk path")
+		}
+	}
+
+	plan := playship.BuildPlan(globals.Package, cmd.File, cmd.Track, cmd.Status, cmd.Percentage, userFraction)
+
+	if cmd.DryRun {
+		return outputResult(output.NewResult(map[string]interface{}{
+			"job":  "publish.play",
+			"mode": "dry-run",
+			"plan": plan,
+		}).WithNoOp("dry-run mode").WithServices("publish"), globals.Output, globals.Pretty)
+	}
+
+	// Live path: single edit → upload → Tracks.Update(status/fraction) → commit → status.
+	return cmd.runLivePublishPlay(globals, releaseStatus, userFraction)
+}
+
+// runLivePublishPlay performs upload + track assignment + commit in one edit.
+func (cmd *PublishPlayCmd) runLivePublishPlay(globals *Globals, releaseStatus string, userFraction float64) error {
+	ctx := globals.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	start := time.Now()
+	pkg := globals.Package
+
+	upload := &PublishUploadCmd{File: cmd.File, Track: cmd.Track, NoAutoCommit: true}
+	fileInfo, fileType, err := upload.validateUploadFile()
+	if err != nil {
+		return err
+	}
+
+	client, svc, err := upload.createUploadClient(ctx, globals)
+	if err != nil {
+		return err
+	}
+
+	editID, err := upload.getOrCreateEditID(ctx, client, svc, pkg)
+	if err != nil {
+		return err
+	}
+
+	versionCode, sha1, sha256, err := upload.uploadBinary(ctx, client, svc, pkg, editID, fileType)
+	if err != nil {
+		return err
+	}
+
+	if err := upload.uploadExpansionFiles(ctx, client, svc, pkg, editID, versionCode); err != nil {
+		return err
+	}
+
+	// Assign uploaded artifact to the track with the requested status / fraction.
+	trackPayload := playship.BuildTrackRelease(cmd.Track, releaseStatus, []int64{versionCode}, userFraction)
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+	updateErr := client.DoWithRetry(ctx, func() error {
+		_, uerr := svc.Edits.Tracks.Update(pkg, editID, cmd.Track, trackPayload).Context(ctx).Do()
+		return uerr
+	})
+	client.Release()
+	if updateErr != nil {
+		return errors.NewAPIError(errors.CodeGeneralError,
+			fmt.Sprintf("failed to assign version %d to track %s: %v", versionCode, cmd.Track, updateErr)).
+			WithHint("Upload succeeded in the edit but Tracks.Update failed; commit may be incomplete")
+	}
+
+	// Commit the edit (upload left NoAutoCommit so track assignment is included).
+	if err := client.Acquire(ctx); err != nil {
+		return err
+	}
+	commitErr := client.DoWithRetry(ctx, func() error {
+		_, cerr := svc.Edits.Commit(pkg, editID).Context(ctx).Do()
+		return cerr
+	})
+	client.Release()
+	if commitErr != nil {
+		return errors.NewAPIError(errors.CodeGeneralError,
+			fmt.Sprintf("failed to commit publish play edit: %v", commitErr)).
+			WithHint("Artifact may be uploaded; retry publish release or commit the edit manually")
+	}
+
+	result := output.NewResult(map[string]interface{}{
+		"job":           "publish.play",
+		"mode":          "live",
+		"package":       pkg,
+		"track":         cmd.Track,
+		"file":          cmd.File,
+		"fileType":      fileType,
+		"size":          fileInfo.Size(),
+		"versionCode":   versionCode,
+		"sha1":          sha1,
+		"sha256":        sha256,
+		"editId":        editID,
+		"committed":     true,
+		"status":        releaseStatus,
+		"userFraction":  userFraction,
+		"percentage":    cmd.Percentage,
+		"trackAssigned": true,
+	}).WithDuration(time.Since(start)).WithServices("publish", "androidpublisher")
+
+	if err := outputResult(result, globals.Output, globals.Pretty); err != nil {
+		return err
+	}
+
+	// Surface track status after commit.
+	return (&PublishStatusCmd{Track: cmd.Track}).Run(globals)
 }
 
 // PublishUploadCmd uploads APK or AAB.

@@ -427,3 +427,241 @@ func TestLoadStoredTokenExpiredNoRefresh(t *testing.T) {
 		t.Fatalf("expected nil for expired token without refresh token")
 	}
 }
+
+func TestClearProfileRemovesMetadataAndStorage(t *testing.T) {
+	tempHome := t.TempDir()
+	setConfigEnv(t, tempHome)
+
+	storage := &memoryStorage{available: true}
+	m := NewManager(storage)
+	m.SetStoreTokens("auto")
+	m.SetActiveProfile("team-a")
+
+	key := tokenStorageKey("team-a", "hash1")
+	meta := &TokenMetadata{
+		Profile:      "team-a",
+		ClientIDHash: "hash1",
+		Origin:       "keyfile",
+		UpdatedAt:    time.Now().UTC().Format(time.RFC3339),
+	}
+	if err := writeTokenMetadata(key, meta); err != nil {
+		t.Fatalf("writeTokenMetadata error: %v", err)
+	}
+	if err := storage.Store(key, []byte(`{"access_token":"tok"}`)); err != nil {
+		t.Fatalf("store error: %v", err)
+	}
+	// Leave an unrelated profile intact.
+	otherKey := tokenStorageKey("team-b", "hash2")
+	otherMeta := &TokenMetadata{
+		Profile:      "team-b",
+		ClientIDHash: "hash2",
+		Origin:       "oauth",
+		UpdatedAt:    time.Now().UTC().Format(time.RFC3339),
+	}
+	if err := writeTokenMetadata(otherKey, otherMeta); err != nil {
+		t.Fatalf("writeTokenMetadata other error: %v", err)
+	}
+	if err := storage.Store(otherKey, []byte(`{"access_token":"other"}`)); err != nil {
+		t.Fatalf("store other error: %v", err)
+	}
+
+	// Seed in-memory creds so Clear() can be observed.
+	m.mu.Lock()
+	m.creds = &Credentials{Email: "a@example.com"}
+	m.mu.Unlock()
+
+	if err := m.ClearProfile("team-a"); err != nil {
+		t.Fatalf("ClearProfile error: %v", err)
+	}
+
+	if _, err := os.Stat(tokenMetadataPath(key)); !os.IsNotExist(err) {
+		t.Fatalf("expected team-a metadata removed, stat err=%v", err)
+	}
+	if _, err := storage.Retrieve(key); err == nil {
+		t.Fatal("expected team-a storage key removed")
+	}
+	if m.GetCredentials() != nil {
+		t.Fatal("expected in-memory creds cleared for active profile")
+	}
+
+	// Other profile preserved.
+	if _, err := os.Stat(tokenMetadataPath(otherKey)); err != nil {
+		t.Fatalf("expected team-b metadata kept: %v", err)
+	}
+	if _, err := storage.Retrieve(otherKey); err != nil {
+		t.Fatalf("expected team-b storage kept: %v", err)
+	}
+}
+
+func TestClearProfileNonActiveKeepsInMemory(t *testing.T) {
+	tempHome := t.TempDir()
+	setConfigEnv(t, tempHome)
+
+	storage := &memoryStorage{available: true}
+	m := NewManager(storage)
+	m.SetActiveProfile("active")
+	m.mu.Lock()
+	m.creds = &Credentials{Email: "active@example.com"}
+	m.mu.Unlock()
+
+	meta := &TokenMetadata{
+		Profile:      "other",
+		ClientIDHash: "h",
+		UpdatedAt:    time.Now().UTC().Format(time.RFC3339),
+	}
+	if err := writeTokenMetadata("other--h", meta); err != nil {
+		t.Fatalf("writeTokenMetadata error: %v", err)
+	}
+
+	if err := m.ClearProfile("other"); err != nil {
+		t.Fatalf("ClearProfile error: %v", err)
+	}
+	if m.GetCredentials() == nil || m.GetCredentials().Email != "active@example.com" {
+		t.Fatal("clearing non-active profile must not wipe in-memory active creds")
+	}
+}
+
+func TestClearAllProfiles(t *testing.T) {
+	tempHome := t.TempDir()
+	setConfigEnv(t, tempHome)
+
+	storage := &memoryStorage{available: true}
+	m := NewManager(storage)
+	m.SetStoreTokens("auto")
+
+	for _, p := range []string{"a", "b"} {
+		key := tokenStorageKey(p, "h")
+		if err := writeTokenMetadata(key, &TokenMetadata{
+			Profile: p, ClientIDHash: "h", UpdatedAt: time.Now().UTC().Format(time.RFC3339),
+		}); err != nil {
+			t.Fatalf("write meta %s: %v", p, err)
+		}
+		if err := storage.Store(key, []byte(`{"access_token":"t"}`)); err != nil {
+			t.Fatalf("store %s: %v", p, err)
+		}
+	}
+	m.mu.Lock()
+	m.creds = &Credentials{Email: "x@example.com"}
+	m.mu.Unlock()
+
+	if err := m.ClearAllProfiles(); err != nil {
+		t.Fatalf("ClearAllProfiles error: %v", err)
+	}
+	profiles, err := m.ListProfiles()
+	if err != nil {
+		t.Fatalf("ListProfiles error: %v", err)
+	}
+	if len(profiles) != 0 {
+		t.Fatalf("expected no profiles, got %d", len(profiles))
+	}
+	if m.GetCredentials() != nil {
+		t.Fatal("expected in-memory cleared")
+	}
+}
+
+func TestDeleteProfile(t *testing.T) {
+	tempHome := t.TempDir()
+	setConfigEnv(t, tempHome)
+
+	storage := &memoryStorage{available: true}
+	m := NewManager(storage)
+
+	existed, err := m.DeleteProfile("missing")
+	if err != nil {
+		t.Fatalf("DeleteProfile missing error: %v", err)
+	}
+	if existed {
+		t.Fatal("expected existed=false for missing profile")
+	}
+
+	key := tokenStorageKey("prod", "abc")
+	if err := writeTokenMetadata(key, &TokenMetadata{
+		Profile: "prod", ClientIDHash: "abc", UpdatedAt: time.Now().UTC().Format(time.RFC3339),
+	}); err != nil {
+		t.Fatalf("writeTokenMetadata: %v", err)
+	}
+	if err := storage.Store(key, []byte(`{"access_token":"t"}`)); err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	existed, err = m.DeleteProfile("prod")
+	if err != nil {
+		t.Fatalf("DeleteProfile error: %v", err)
+	}
+	if !existed {
+		t.Fatal("expected existed=true")
+	}
+	ok, err := m.ProfileExists("prod")
+	if err != nil {
+		t.Fatalf("ProfileExists error: %v", err)
+	}
+	if ok {
+		t.Fatal("expected profile gone")
+	}
+}
+
+func TestDeleteProfileBareStorageOnly(t *testing.T) {
+	tempHome := t.TempDir()
+	setConfigEnv(t, tempHome)
+
+	storage := &memoryStorage{available: true}
+	m := NewManager(storage)
+	// Profile key with no metadata file.
+	if err := storage.Store("solo", []byte(`{"access_token":"t"}`)); err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	existed, err := m.DeleteProfile("solo")
+	if err != nil {
+		t.Fatalf("DeleteProfile error: %v", err)
+	}
+	if !existed {
+		t.Fatal("expected bare storage key to count as existing")
+	}
+	if _, err := storage.Retrieve("solo"); err == nil {
+		t.Fatal("expected bare key deleted")
+	}
+}
+
+func TestProfileExistsAndCollectKeys(t *testing.T) {
+	tempHome := t.TempDir()
+	setConfigEnv(t, tempHome)
+
+	m := NewManager(&memoryStorage{available: true})
+	ok, err := m.ProfileExists("none")
+	if err != nil || ok {
+		t.Fatalf("expected false, got %v %v", ok, err)
+	}
+
+	if err := writeTokenMetadata("p--h1", &TokenMetadata{
+		Profile: "p", ClientIDHash: "h1", UpdatedAt: time.Now().UTC().Format(time.RFC3339),
+	}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := writeTokenMetadata("p--h2", &TokenMetadata{
+		Profile: "p", ClientIDHash: "h2", UpdatedAt: time.Now().UTC().Format(time.RFC3339),
+	}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	keys, err := collectProfileTokenKeys("p")
+	if err != nil {
+		t.Fatalf("collectProfileTokenKeys: %v", err)
+	}
+	if len(keys) != 2 {
+		t.Fatalf("expected 2 keys, got %v", keys)
+	}
+	ok, err = m.ProfileExists("p")
+	if err != nil || !ok {
+		t.Fatalf("expected exists, got %v %v", ok, err)
+	}
+}
+
+func TestClearProfileMissingIsOK(t *testing.T) {
+	tempHome := t.TempDir()
+	setConfigEnv(t, tempHome)
+	m := NewManager(&memoryStorage{available: true})
+	if err := m.ClearProfile("ghost"); err != nil {
+		t.Fatalf("ClearProfile empty should succeed: %v", err)
+	}
+}

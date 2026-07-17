@@ -33,8 +33,9 @@ PLATFORMS = linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
 
 .PHONY: all build build-optimized build-small build-optimized-all build-all clean test deps tidy lint install help format install-hooks \
 	benchmark benchmark-compare benchmark-regression benchmark-baseline \
-	test-unit test-integration test-e2e test-coverage-threshold test-flaky security check vet \
-	apidrift apidrift-check apidrift-json apidrift-markdown apidrift-build apidrift-verbose apidrift-multi
+	test-unit test-integration test-e2e test-coverage-threshold test-flaky test-install-checksum security check vet \
+	apidrift apidrift-check apidrift-json apidrift-markdown apidrift-build apidrift-verbose apidrift-multi \
+	generate-command-docs check-docs
 
 # Default target
 all: deps build
@@ -89,9 +90,17 @@ build-optimized-all:
 	@echo "Running full optimization build..."
 	@bash ./scripts/build-optimized.sh all
 
+# Generate docs/COMMANDS.md from live gpd help
+generate-command-docs: build
+	@bash ./scripts/generate-command-docs.sh
+
+# Fail if docs/COMMANDS.md drifts from live help
+check-docs: build
+	@bash ./scripts/check-command-docs.sh
+
 # Run all checks (format, vet, lint, test)
 .PHONY: check
-check: format vet lint test
+check: format vet lint test check-docs
 	@echo "✓ All checks passed"
 
 # Run go vet
@@ -126,6 +135,11 @@ test-all:
 test-unit:
 	@echo "Running unit tests..."
 	@bash -o pipefail -c '$(GOTEST) -v -race -cover -tags=unit -count=1 ./... 2>&1 | sed "/malformed LC_DYSYMTAB/d"'
+
+# Smoke-test install.sh checksum verification + GoReleaser naming alignment
+test-install-checksum:
+	@echo "Running install checksum smoke tests..."
+	@bash ./scripts/test-install-checksum.sh "$(CURDIR)/.tmp/install-checksum"
 
 # Run only integration tests
 test-integration:
@@ -306,6 +320,7 @@ help:
 	@echo ""
 	@echo "Test & Quality:"
 	@echo "  test              - Run tests"
+	@echo "  test-install-checksum - Smoke-test install.sh checksum verification"
 	@echo "  test-coverage     - Run tests with coverage report"
 	@echo "  lint              - Run linter"
 	@echo "  benchmark         - Run all benchmarks"

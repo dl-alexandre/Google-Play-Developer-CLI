@@ -1,65 +1,155 @@
-# Authentication Parity Guide (ASC -> gpd)
+# Authentication Parity Guide (ASC → gpd)
 
-This guide explains how App Store Connect (ASC) auth workflows map to `gpd`, where behavior differs, and what to do in migration scenarios.
+**Last verified:** 2026-07-17 against live `gpd auth --help` and generated [COMMANDS.md](COMMANDS.md).
 
-## Auth Model Differences
+This guide maps App Store Connect CLI auth workflows to `gpd`, documents real commands (not aspirational ones), and explains migration choices.
 
-- ASC commonly uses browser-based login sessions and key-based automation.
-- `gpd` supports:
-  - Service account credentials (recommended for CI/automation).
-  - OAuth device flow (`gpd auth login`) for user-based interactive auth.
-- `gpd` does not use browser redirect login in the same way as ASC CLI flows.
+## Auth model differences
 
-## Decision Tree
+| | ASC | gpd |
+| --- | --- | --- |
+| Primary credential | App Store Connect API key (`.p8` + key ID + issuer ID) | Google **service account** JSON (recommended for CI) |
+| Interactive human auth | Key registration; optional web session flows elsewhere | OAuth **device flow** when client ID is configured |
+| Storage | System keychain with config fallback (`--bypass-keychain`) | Platform secure storage (`--store-tokens auto\|never\|secure`) |
+| Profiles | Named keys (`--name`, `auth switch`) | Named profiles (`auth login <profile>`, `auth switch`, `--profile`, `GPD_AUTH_PROFILE`) |
+| Diagnostics | `asc auth status --validate`, `asc auth doctor` / `asc doctor` | `gpd auth status`, `gpd auth doctor` / `diagnose`, `gpd config doctor` |
+| Package access check | Network validate on login (`--network`) | `gpd auth check --package <pkg>` (edits insert/delete probe) |
 
-Use this to pick the right auth path.
+`gpd` does **not** use ASC-style browser redirect login for Play automation. Prefer service accounts in CI.
 
-1. Need unattended CI/CD automation?
-   - Use service account auth (`--key` or `GOOGLE_APPLICATION_CREDENTIALS`).
-2. Need human interactive access for support/ops workflows?
-   - Use `gpd auth login` (device flow).
-3. Need to manage multiple personas or environments?
-   - Use profile-based auth (`gpd auth login <profile>`, `gpd auth switch <profile>`, `gpd auth list`).
-4. Seeing refresh failures (`invalid_grant`) during OAuth usage?
-   - Re-authenticate, revoke stale tokens, and verify OAuth consent screen mode.
+## Implemented commands (source of truth)
 
-## Command Mapping (ASC -> gpd)
+```bash
+gpd auth status                 # Auth status (profile, origin, token validity)
+gpd auth login [profile]        # Authenticate (service account --key / env / ADC)
+gpd auth init [profile]         # Alias of login (ASC naming parity)
+gpd auth logout [--name name | --all]     # Clear stored credentials for active/named/all profiles
+gpd auth delete <profile> [--force]       # Remove a profile (refuse active unless --force)
+gpd auth list                   # List stored profiles + active marker
+gpd auth switch <profile>       # Persist active profile to config
+gpd auth check --package ...    # Validate Play API access for a package
+gpd auth doctor                 # Sectioned diagnostics report
+gpd auth diagnose               # Alias of doctor
+```
 
-- `asc auth login` -> `gpd auth login`
-- `asc auth init` -> `gpd auth init`
-- `asc auth switch` -> `gpd auth switch <profile>`
-- `asc auth status` -> `gpd auth status`
-- `asc auth doctor` -> `gpd auth diagnose` (or `gpd auth doctor`)
-- `asc auth logout` -> `gpd auth logout`
+Global flags that affect auth:
 
-## Migration Guidance for ASC Users
+| Flag / env | Role |
+| --- | --- |
+| `--key-path` / service account path on login | Explicit key file |
+| `--profile` | Override active profile for this invocation |
+| `GPD_AUTH_PROFILE` | Env override for profile |
+| `GPD_SERVICE_ACCOUNT_KEY` | Inline JSON key |
+| `GOOGLE_APPLICATION_CREDENTIALS` | ADC key path |
+| `GPD_CLIENT_ID` / `GPD_CLIENT_SECRET` | Device-flow OAuth (when used) |
+| `--store-tokens` | `auto` (default), `never`, `secure` |
 
-1. Service-account-first migration (recommended)
-   - Provision a Google service account with Android Publisher permissions.
-   - Prefer `gpd --key /path/key.json ...` in CI jobs.
-   - Validate with `gpd auth status` and `gpd auth check --package <pkg>`.
+### Profile resolution order
 
-2. User flow migration
-   - Use `gpd auth login` to authorize via device flow.
-   - Use profile names to separate teams/apps: `gpd auth login team-a`, `gpd auth switch team-a`.
+1. `--profile` flag  
+2. `GPD_AUTH_PROFILE`  
+3. `activeProfile` in config file  
+4. `default`
 
-3. Operational diagnostics
-   - Use `gpd auth diagnose --refresh-check` to inspect token source, scopes, storage, and refresh outcomes.
+`gpd auth switch <profile>` and successful `auth login` / `auth init` persist `activeProfile` via `config.SetActiveProfile`.
 
-## OAuth Testing-Mode Constraints
+## Command mapping (ASC → gpd)
 
-If your OAuth consent screen is in testing mode:
+| ASC | gpd | Notes |
+| --- | --- | --- |
+| `asc auth login --name ... --key-id ... --issuer-id ... --private-key ...` | `gpd auth login [profile] --key-path key.json` | Different credential material |
+| `asc auth init` | `gpd auth init [profile]` | gpd init authenticates; ASC init scaffolds config template |
+| `asc auth switch` | `gpd auth switch <profile>` | Implemented |
+| `asc auth status` / `--validate` | `gpd auth status` | Use `auth check` for package validation |
+| `asc auth doctor` / `asc doctor` | `gpd auth doctor` / `gpd auth diagnose` | Structured sections + summary; `--refresh-check`, `--network` |
+| `asc auth logout` | `gpd auth logout [--name name \| --all]` | Clears stored tokens for the active profile by default |
+| (profile delete) | `gpd auth delete <profile> [--force]` | Refuses the active profile unless `--force` (then switches to `default`) |
+| (login `--network`) | `gpd auth check --package ...` | Explicit package permission probe |
+| `asc auth login --bypass-keychain` | `--store-tokens never` or CI env without secure storage | Closest operational equivalent |
 
-- Refresh tokens can expire after 7 days.
-- Google enforces a 100 refresh-token issuance cap per OAuth client.
+## Decision tree
 
-If you hit recurring `invalid_grant` errors:
+1. **Unattended CI/CD?**  
+   Use a service account with Android Publisher access.  
+   `gpd --key-path /secrets/sa.json ...` or `GOOGLE_APPLICATION_CREDENTIALS`.  
+   Prefer `--store-tokens never` in CI.
 
-1. Re-authenticate with `gpd auth login`.
-2. Revoke stale tokens in Google Cloud Console.
-3. Move OAuth consent screen to production for stable long-lived behavior.
+2. **Human ops / support on a laptop?**  
+   `gpd auth login team-ops --key-path ./sa.json`  
+   or device flow when OAuth client is configured.
 
-## Known Boundaries
+3. **Multiple apps/teams?**  
+   ```bash
+   gpd auth login team-a --key-path ./team-a.json
+   gpd auth login team-b --key-path ./team-b.json
+   gpd auth switch team-a
+   gpd --profile team-b publish status --package com.example.b
+   ```
 
-- No ASC-identical browser login UX; device flow and service accounts are the supported models.
-- `gpd` auth behavior is optimized for explicit CLI/automation usage with JSON output and diagnosable failure modes.
+4. **Auth failures / invalid_grant (OAuth)?**  
+   Re-login, revoke stale tokens, move OAuth consent to production if stuck in testing mode (7-day refresh tokens, 100-token cap).
+
+## Doctor report shape
+
+`gpd auth doctor` prints a JSON envelope (`data`) with:
+
+- `sections[]` — Environment, Storage, Profiles, Credentials, optional Network, Runtime  
+- `summary` — counts of ok / info / warn / fail  
+- `recommendations[]`  
+- `activeProfile`
+
+Useful flags:
+
+```bash
+gpd auth doctor --refresh-check
+gpd auth doctor --refresh-check --network --package com.example.app
+gpd auth diagnose --refresh-check   # alias
+```
+
+`gpd config doctor` remains available for config-path and store-tokens issues; prefer **auth doctor** for credential health.
+
+## Migration guidance for ASC users
+
+### Service-account first (recommended)
+
+1. Create a Google Cloud service account.  
+2. Enable Android Publisher API (and other APIs you need).  
+3. Invite the service account in Play Console with the right app permissions.  
+4. ```bash
+   gpd auth login ci --key-path ./sa.json
+   gpd auth status
+   gpd auth check --package com.example.app
+   ```
+
+### Profile hygiene
+
+```bash
+gpd auth list
+gpd auth switch ci
+gpd auth status --pretty
+gpd auth logout --name staging      # clear one profile's stored tokens
+gpd auth logout --all               # clear every profile
+gpd auth delete staging             # remove a non-active profile
+gpd auth delete ci --force          # delete active profile; switches to default
+```
+
+### Diagnostics before filing bugs
+
+```bash
+gpd auth doctor --refresh-check --output json --pretty
+gpd config doctor --pretty
+```
+
+## Known boundaries
+
+- No ASC-identical `.p8` / issuer workflow — different platforms.  
+- No browser redirect login for Play automation.  
+- `auth logout` clears stored tokens/metadata for the active profile (or `--name` / `--all`); `auth delete` removes a named profile and refuses the active profile unless `--force`.  
+- OAuth device flow depends on `GPD_CLIENT_ID` (and optional secret) being configured.  
+- Testing-mode OAuth apps: refresh tokens can expire after 7 days.
+
+## Related
+
+- [ASC Parity Matrix](asc-parity.md)  
+- [ASC Workflow Mapping](asc-workflow-mapping.md)  
+- Multi-account implementation notes: [PLAN-multi-account.md](PLAN-multi-account.md)

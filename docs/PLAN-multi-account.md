@@ -1,34 +1,33 @@
 # Multi-Account / Profile Support Implementation Plan
 
-**Status**: Blocked — waiting on asccli multi-account bugfixes to land first
-**Priority**: High
-**Date**: 2026-03-01
+**Status**: Phase 1–2 largely complete (2026-07-17) — CLI surface + profile resolution shipped  
+**Priority**: Medium (remaining polish)  
+**Date**: 2026-03-01 (updated 2026-07-17)
 
 ## Background
 
-The backend infrastructure for multi-account support already exists but the CLI surface is incomplete. Users currently can't switch between accounts without manually swapping `--key` flags or environment variables.
+The backend infrastructure for multi-account support already existed; the CLI surface was incomplete and parity docs overstated capabilities. As of 2026-07-17 the core profile commands and global resolution are implemented.
 
 ### What Already Works
 
 | Component | Location | Status |
 |-----------|----------|--------|
 | Profile-keyed token storage | `internal/auth/token_storage.go` | Working |
-| `tokenStorageKey("{profile}--{hash}")` | `token_storage.go:112-116` | Working |
-| `Manager.ListProfiles()` | `token_storage.go:69` | Working |
+| `tokenStorageKey("{profile}--{hash}")` | `token_storage.go` | Working |
+| `Manager.ListProfiles()` | `token_storage.go` | Working |
 | `SetActiveProfile()` / `GetActiveProfile()` | `internal/auth/auth.go` | Working |
-| `--profile` global CLI flag | `internal/cli/kong_cli.go:27` | Exists (not wired) |
-| `GPD_AUTH_PROFILE` env var | `internal/config/` | Defined (not read) |
-| `activeProfile` in config file | `internal/config/config.go` | Exists |
+| `--profile` global CLI flag | `internal/cli/kong_cli.go` | Wired via `ResolveAuthProfile` + `applyAuthGlobals` |
+| `GPD_AUTH_PROFILE` env var | `internal/config` | Read in `ResolveAuthProfile` |
+| `activeProfile` in config file | `internal/config/config.go` | Read + written by `SetActiveProfile` |
 | Token metadata files (`.meta.json`) | `internal/auth/token_storage.go` | Working |
 | Platform-specific secure storage | `internal/storage/` | Working |
+| `auth list/switch/init/login/check/doctor/diagnose` | `internal/cli/kong_auth.go` | Implemented |
 
-### What's Missing
+### Remaining gaps
 
-1. **CLI commands**: `auth switch`, `auth list`, `auth init` — documented in parity guides but not implemented
-2. **`--profile` flag propagation** — only `kong_reviews.go` calls `SetActiveProfile(globals.Profile)`; other commands ignore it
-3. **`GPD_AUTH_PROFILE` env var** — `GetEnvAuthProfile()` exists but is never called during CLI init
-4. **Profile deletion/cleanup** — no mechanism to remove a stored profile
-5. **Active profile persistence** — no way to remember which profile was last used across invocations
+1. **Profile deletion/cleanup** — no `auth delete` yet  
+2. **Logout profile targeting** — logout is not yet fully profile-file-aware (`--all` / secure-storage wipe)  
+3. **Per-command explicit profile on every API path** — globals are resolved centrally; some older helpers still construct managers independently (should keep using `newAuthManager()`)
 
 ## Implementation Steps
 

@@ -65,6 +65,8 @@ jobs:
         if: steps.published.outputs.skip != 'true'
         run: go test ./...
 
+      # Publishes platform archives (gpd_<ver>_<os>_<arch>.tar.gz|zip),
+      # gpd_<ver>_checksums.txt (SHA-256 for install.sh), Homebrew, and Scoop.
       - name: Run GoReleaser
         if: steps.published.outputs.skip != 'true'
         uses: goreleaser/goreleaser-action@v7

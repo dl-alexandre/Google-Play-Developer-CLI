@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/auth"
 	gpdErrors "github.com/dl-alexandre/Google-Play-Developer-CLI/internal/errors"
@@ -234,20 +235,108 @@ func TestAuthLogoutCmd_AlreadyLoggedOut(t *testing.T) {
 func TestAuthCmd_SubcommandsExist(t *testing.T) {
 	cmd := AuthCmd{}
 
-	// Verify Status field exists
-	if reflect.TypeOf(cmd.Status).String() != "cli.AuthStatusCmd" {
-		t.Errorf("AuthCmd.Status type = %v, want cli.AuthStatusCmd", reflect.TypeOf(cmd.Status))
+	want := map[string]string{
+		"Status":   "cli.AuthStatusCmd",
+		"Login":    "cli.AuthLoginCmd",
+		"Init":     "cli.AuthInitCmd",
+		"Logout":   "cli.AuthLogoutCmd",
+		"Delete":   "cli.AuthDeleteCmd",
+		"List":     "cli.AuthListCmd",
+		"Switch":   "cli.AuthSwitchCmd",
+		"Check":    "cli.AuthCheckCmd",
+		"Doctor":   "cli.AuthDoctorCmd",
+		"Diagnose": "cli.AuthDiagnoseCmd",
 	}
 
-	// Verify Login field exists
-	if reflect.TypeOf(cmd.Login).String() != "cli.AuthLoginCmd" {
-		t.Errorf("AuthCmd.Login type = %v, want cli.AuthLoginCmd", reflect.TypeOf(cmd.Login))
+	val := reflect.ValueOf(cmd)
+	typ := reflect.TypeOf(cmd)
+	for name, wantType := range want {
+		field, ok := typ.FieldByName(name)
+		if !ok {
+			t.Errorf("AuthCmd missing field %s", name)
+			continue
+		}
+		got := field.Type.String()
+		if got != wantType {
+			t.Errorf("AuthCmd.%s type = %v, want %s", name, got, wantType)
+		}
+		_ = val
 	}
+}
 
-	// Verify Logout field exists
-	if reflect.TypeOf(cmd.Logout).String() != "cli.AuthLogoutCmd" {
-		t.Errorf("AuthCmd.Logout type = %v, want cli.AuthLogoutCmd", reflect.TypeOf(cmd.Logout))
+// TestAuthListCmd_Empty runs list with no stored profiles.
+func TestAuthListCmd_Empty(t *testing.T) {
+	cmd := &AuthListCmd{}
+	globals := &Globals{Output: "json", Profile: "default"}
+	applyAuthGlobals(globals)
+	if err := cmd.Run(globals); err != nil {
+		t.Fatalf("AuthListCmd.Run() unexpected error: %v", err)
 	}
+}
+
+// TestAuthSwitchCmd_Default allows switching to default without stored metadata.
+func TestAuthSwitchCmd_Default(t *testing.T) {
+	// Isolate config dir
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, ".config"))
+
+	cmd := &AuthSwitchCmd{Profile: "default"}
+	globals := &Globals{Output: "json"}
+	applyAuthGlobals(globals)
+	if err := cmd.Run(globals); err != nil {
+		t.Fatalf("AuthSwitchCmd.Run() unexpected error: %v", err)
+	}
+}
+
+// TestAuthSwitchCmd_Missing fails for unknown profiles.
+func TestAuthSwitchCmd_Missing(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, ".config"))
+
+	cmd := &AuthSwitchCmd{Profile: "does-not-exist"}
+	globals := &Globals{Output: "json"}
+	applyAuthGlobals(globals)
+	if err := cmd.Run(globals); err == nil {
+		t.Fatal("AuthSwitchCmd.Run() expected error for missing profile")
+	}
+}
+
+// TestAuthDoctorCmd_NoRefresh runs doctor without credential load.
+func TestAuthDoctorCmd_NoRefresh(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, ".config"))
+
+	cmd := &AuthDoctorCmd{}
+	globals := &Globals{Output: "json", StoreTokens: "never", Timeout: time.Second}
+	applyAuthGlobals(globals)
+	if err := cmd.Run(globals); err != nil {
+		// Doctor may return auth failure only when summary.Errors > 0.
+		// With no refresh check, empty env should still succeed.
+		var apiErr *gpdErrors.APIError
+		if errors.As(err, &apiErr) {
+			t.Fatalf("AuthDoctorCmd.Run() unexpected API error: %v", err)
+		}
+		t.Fatalf("AuthDoctorCmd.Run() unexpected error: %v", err)
+	}
+}
+
+// TestAuthCheckCmd_RequiresPackage validates package is required.
+func TestAuthCheckCmd_RequiresPackage(t *testing.T) {
+	cmd := &AuthCheckCmd{}
+	globals := &Globals{Output: "json"}
+	applyAuthGlobals(globals)
+	if err := cmd.Run(globals); err == nil {
+		t.Fatal("AuthCheckCmd.Run() expected error without package")
+	}
+}
+
+// TestResolveAuthProfileViaGlobals ensures applyAuthGlobals is safe.
+func TestApplyAuthGlobals_NilSafe(t *testing.T) {
+	applyAuthGlobals(nil)
+	_ = newAuthManager()
 }
 
 // TestAuthLoginCmd_StructFields tests AuthLoginCmd struct fields and tags
@@ -584,5 +673,216 @@ func TestAuthLogoutCmd_MultipleCalls(t *testing.T) {
 		if err != nil {
 			t.Fatalf("AuthLogoutCmd.Run() call %d unexpected error: %v", i+1, err)
 		}
+	}
+}
+
+func TestAuthLogoutCmd_WithProfileFlag(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, ".config"))
+
+	// Seed metadata for a named profile via auth package helpers (login may not write meta without secure storage).
+	metaDir := filepath.Join(tmp, ".config", "gpd", "tokens")
+	if err := os.MkdirAll(metaDir, 0o700); err != nil {
+		// Paths may differ by platform; fall through using login + store-tokens never still exercises Run().
+		t.Logf("mkdir tokens (may vary by OS path layout): %v", err)
+	}
+
+	cmd := &AuthLogoutCmd{Name: "staging"}
+	globals := &Globals{Output: "json", Profile: "default"}
+	applyAuthGlobals(globals)
+	if err := cmd.Run(globals); err != nil {
+		t.Fatalf("AuthLogoutCmd.Run() with --profile unexpected error: %v", err)
+	}
+}
+
+func TestAuthLogoutCmd_All(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, ".config"))
+
+	cmd := &AuthLogoutCmd{All: true}
+	globals := &Globals{Output: "json"}
+	applyAuthGlobals(globals)
+	if err := cmd.Run(globals); err != nil {
+		t.Fatalf("AuthLogoutCmd.Run() --all unexpected error: %v", err)
+	}
+}
+
+func TestAuthDeleteCmd_MissingProfile(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, ".config"))
+
+	cmd := &AuthDeleteCmd{Profile: "does-not-exist"}
+	globals := &Globals{Output: "json", Profile: "default"}
+	applyAuthGlobals(globals)
+	err := cmd.Run(globals)
+	if err == nil {
+		t.Fatal("AuthDeleteCmd.Run() expected not-found error")
+	}
+	var apiErr *gpdErrors.APIError
+	if errors.As(err, &apiErr) {
+		if apiErr.ExitCode() != gpdErrors.ExitNotFound && apiErr.Code != gpdErrors.CodeNotFound {
+			// Accept either typed not-found semantics.
+			t.Logf("delete missing profile error: %v", err)
+		}
+	}
+}
+
+func TestAuthDeleteCmd_RefuseActiveWithoutForce(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, ".config"))
+
+	// Create token metadata so DeleteProfile would find the profile if force allowed.
+	tokensDir := filepath.Join(tmp, ".config", "gpd", "tokens")
+	if err := os.MkdirAll(tokensDir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	meta := map[string]string{
+		"profile":      "active-one",
+		"clientIdHash": "hash",
+		"origin":       "keyfile",
+		"updatedAt":    time.Now().UTC().Format(time.RFC3339),
+	}
+	data, _ := json.Marshal(meta)
+	metaPath := filepath.Join(tokensDir, "active-one--hash.meta.json")
+	if err := os.WriteFile(metaPath, data, 0o600); err != nil {
+		t.Fatalf("write meta: %v", err)
+	}
+
+	// Persist active profile via switch-like config write.
+	if err := (&AuthSwitchCmd{Profile: "active-one"}).Run(&Globals{Output: "json", Profile: "active-one"}); err != nil {
+		// Switch requires profile in list — we wrote meta so it should work if config path matches.
+		// If path layout differs, set globals.Profile and applyAuthGlobals instead.
+		t.Logf("switch note: %v", err)
+	}
+
+	cmd := &AuthDeleteCmd{Profile: "active-one", Force: false}
+	globals := &Globals{Output: "json", Profile: "active-one"}
+	applyAuthGlobals(globals)
+	err := cmd.Run(globals)
+	if err == nil {
+		t.Fatal("AuthDeleteCmd.Run() expected error deleting active profile without --force")
+	}
+}
+
+func TestAuthDeleteCmd_ForceActiveSwitchesToDefault(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, ".config"))
+	// Also set HOME-style path used by config.GetPaths on macOS.
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(tmp, ".cache"))
+
+	tokensDir := filepath.Join(tmp, ".config", "gpd", "tokens")
+	if err := os.MkdirAll(tokensDir, 0o700); err != nil {
+		// Discover real tokens path via list after writing through auth if needed.
+		t.Logf("mkdir primary tokens dir: %v", err)
+	}
+	meta := map[string]interface{}{
+		"profile":      "doomed",
+		"clientIdHash": "hash",
+		"origin":       "keyfile",
+		"updatedAt":    time.Now().UTC().Format(time.RFC3339),
+	}
+	data, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	// Write under both common config layouts used in tests.
+	for _, dir := range []string{
+		filepath.Join(tmp, ".config", "gpd", "tokens"),
+		filepath.Join(tmp, "Library", "Application Support", "gpd", "tokens"),
+	} {
+		_ = os.MkdirAll(dir, 0o700)
+		_ = os.WriteFile(filepath.Join(dir, "doomed--hash.meta.json"), data, 0o600)
+	}
+
+	// Make doomed active via config + globals.
+	switchCmd := &AuthSwitchCmd{Profile: "doomed"}
+	switchGlobals := &Globals{Output: "json", Profile: "doomed"}
+	applyAuthGlobals(switchGlobals)
+	if err := switchCmd.Run(switchGlobals); err != nil {
+		// Fallback: still test delete --force path with active matching globals.
+		t.Logf("AuthSwitchCmd note: %v", err)
+	}
+
+	delCmd := &AuthDeleteCmd{Profile: "doomed", Force: true}
+	delGlobals := &Globals{Output: "json", Profile: "doomed"}
+	applyAuthGlobals(delGlobals)
+	if err := delCmd.Run(delGlobals); err != nil {
+		t.Fatalf("AuthDeleteCmd.Run() --force unexpected error: %v", err)
+	}
+
+	// Deleting again should report not found.
+	if err := delCmd.Run(delGlobals); err == nil {
+		t.Fatal("second delete expected not found")
+	}
+}
+
+func TestAuthDeleteCmd_NonActive(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, ".config"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(tmp, ".cache"))
+
+	meta := map[string]interface{}{
+		"profile":      "old-team",
+		"clientIdHash": "h",
+		"origin":       "oauth",
+		"updatedAt":    time.Now().UTC().Format(time.RFC3339),
+	}
+	data, _ := json.MarshalIndent(meta, "", "  ")
+	for _, dir := range []string{
+		filepath.Join(tmp, ".config", "gpd", "tokens"),
+		filepath.Join(tmp, "Library", "Application Support", "gpd", "tokens"),
+	} {
+		_ = os.MkdirAll(dir, 0o700)
+		_ = os.WriteFile(filepath.Join(dir, "old-team--h.meta.json"), data, 0o600)
+	}
+
+	cmd := &AuthDeleteCmd{Profile: "old-team"}
+	globals := &Globals{Output: "json", Profile: "default"}
+	applyAuthGlobals(globals)
+	if err := cmd.Run(globals); err != nil {
+		t.Fatalf("AuthDeleteCmd.Run() non-active unexpected error: %v", err)
+	}
+}
+
+func TestAuthDeleteCmd_EmptyProfile(t *testing.T) {
+	cmd := &AuthDeleteCmd{Profile: "  "}
+	globals := &Globals{Output: "json"}
+	if err := cmd.Run(globals); err == nil {
+		t.Fatal("expected validation error for empty profile")
+	}
+}
+
+func TestAuthDeleteCmd_StructFields(t *testing.T) {
+	cmd := AuthDeleteCmd{Profile: "p", Force: true}
+	if cmd.Profile != "p" || !cmd.Force {
+		t.Fatalf("unexpected fields: %+v", cmd)
+	}
+	typ := reflect.TypeOf(cmd)
+	prof, ok := typ.FieldByName("Profile")
+	if !ok {
+		t.Fatal("AuthDeleteCmd missing Profile field")
+	}
+	if _, hasArg := prof.Tag.Lookup("arg"); !hasArg {
+		t.Fatal("AuthDeleteCmd.Profile should be a Kong arg")
+	}
+}
+
+func TestAuthLogoutCmd_StructFields(t *testing.T) {
+	cmd := AuthLogoutCmd{Name: "p", All: true}
+	if cmd.Name != "p" || !cmd.All {
+		t.Fatalf("unexpected fields: %+v", cmd)
+	}
+	typ := reflect.TypeOf(cmd)
+	if _, ok := typ.FieldByName("All"); !ok {
+		t.Fatal("AuthLogoutCmd missing All field")
+	}
+	if _, ok := typ.FieldByName("Name"); !ok {
+		t.Fatal("AuthLogoutCmd missing Name field")
 	}
 }

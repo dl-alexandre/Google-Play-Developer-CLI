@@ -476,11 +476,13 @@ type CheckResult struct {
 // Status represents the current authentication status.
 type Status struct {
 	Authenticated bool   `json:"authenticated"`
+	Profile       string `json:"profile,omitempty"`
 	Origin        string `json:"origin,omitempty"`
 	Email         string `json:"email,omitempty"`
 	KeyPath       string `json:"keyPath,omitempty"`
 	TokenValid    bool   `json:"tokenValid"`
 	TokenExpiry   string `json:"tokenExpiry,omitempty"`
+	TokenLocation string `json:"tokenLocation,omitempty"`
 }
 
 // GetStatus returns the current authentication status.
@@ -488,17 +490,26 @@ func (m *Manager) GetStatus(ctx context.Context) (*Status, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	profile := m.activeProfile
+	if profile == "" {
+		profile = defaultAuthProfile
+	}
+
 	if m.creds == nil {
 		return &Status{
 			Authenticated: false,
+			Profile:       profile,
+			TokenLocation: m.TokenLocation(),
 		}, nil
 	}
 
 	status := &Status{
 		Authenticated: true,
+		Profile:       profile,
 		Origin:        m.creds.Origin.String(),
 		Email:         m.creds.Email,
 		KeyPath:       m.creds.KeyPath,
+		TokenLocation: m.TokenLocation(),
 	}
 
 	// Check token validity

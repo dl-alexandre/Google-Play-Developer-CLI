@@ -1,69 +1,143 @@
 # App Store Connect CLI Parity Matrix
 
-This matrix maps App Store Connect CLI feature groups to `gpd` equivalents. Where Google Play has no direct analogue, the status is marked as not applicable. Links in the gpd column point to the most relevant reference or example documentation in this repo.
+**Last verified:** 2026-07-17 against:
 
-Status meanings:
-- Full: Comparable capability and scope
-- Partial: Similar capability with notable gaps or model differences
-- Not applicable: No Google Play equivalent
-- gpd-only: Google Play capability with no ASC equivalent
+- live `gpd --help` / `gpd auth --help` / `gpd publish --help` / `gpd validate --help`
+- generated [COMMANDS.md](COMMANDS.md) (`make generate-command-docs`)
+- [rorkai/App-Store-Connect-CLI](https://github.com/rorkai/App-Store-Connect-CLI) `docs/COMMANDS.md` (reference)
 
-## Parity Matrix
+This matrix maps App Store Connect CLI (`asc`) feature groups to `gpd` equivalents. It is intentionally **honest about model differences** and about what is implemented versus platform-impossible.
 
-| ASC Feature Group | ASC Commands (examples) | gpd Equivalent (docs) | Status |
+Related docs:
+
+- [Auth Parity Guide](auth-parity-guide.md)
+- [ASC Workflow Mapping](asc-workflow-mapping.md)
+- [Command taxonomy (generated)](COMMANDS.md)
+- [API Coverage Matrix](api-coverage-matrix.md)
+
+## Status meanings
+
+| Status | Meaning |
+| --- | --- |
+| **Full** | Comparable capability for day-to-day automation |
+| **Partial** | Similar goals with platform or product gaps |
+| **Not applicable** | No Google Play equivalent (Apple-only) |
+| **gpd-only** | Play capability with no ASC equivalent |
+
+## CLI contract (aligned where it matters)
+
+| Topic | ASC | gpd |
+| --- | --- | --- |
+| Framework | `ffcli`, domain packages | Kong (`internal/cli/kong_*.go`) |
+| Default `--output` | TTY-aware: `table` / pipe `json` | **TTY-aware:** `table` on TTY, `json` in pipes/CI; `GPD_DEFAULT_OUTPUT` + explicit `--output` win |
+| Destructive ops | `--confirm` | `--confirm` / `--dry-run` on mutating commands |
+| Auth | `.p8` API key + profiles + doctor | Service account / ADC / device flow + profiles + doctor |
+| High-level ship | `asc publish`, `asc validate`, `asc status` | `gpd publish play`, `gpd validate`, `gpd publish status` |
+| Command docs | generated `docs/COMMANDS.md` | generated `docs/COMMANDS.md` (`make generate-command-docs` / `make check-docs`) |
+| Install trust | checksum-verified install script | checksum-verified `install.sh` (`GPD_INSTALL_INSECURE=1` opt-out) |
+
+---
+
+## Parity matrix
+
+### Getting started & auth
+
+| ASC Feature Group | ASC Commands (examples) | gpd Equivalent | Status |
 | --- | --- | --- | --- |
-| Authentication | `asc auth login`, `asc auth switch`, `asc auth init`, `asc auth status`, `asc auth doctor`, `asc auth logout` | `gpd auth login`, `gpd auth init`, `gpd auth switch`, `gpd auth list`, `gpd auth status`, `gpd auth check`, `gpd auth diagnose`, `gpd auth doctor`, `gpd auth logout` ([Command Reference](../README.md#command-reference), [Auth Parity Guide](auth-parity-guide.md)) | Partial (device code OAuth + service accounts; no browser auth) |
-| Apps & Builds | `asc apps`, `asc builds list`, `asc builds info`, `asc builds expire`, `asc builds expire-all`, `asc builds upload`, `asc builds add-groups`, `asc builds remove-groups` | `gpd apps list`, `gpd apps get`, `gpd publish builds list`, `gpd publish builds get`, `gpd publish builds expire`, `gpd publish builds expire-all`, `gpd publish upload`, `gpd publish status`, `gpd publish tracks`, `gpd publish capabilities` ([API: Apps](api-coverage-matrix.md#apps), [API: Bundles/APKs](api-coverage-matrix.md#bundlesapks), [API: Tracks](api-coverage-matrix.md#tracks)) | Partial (no global build registry; no build-level beta group assignment) |
-| TestFlight | `asc feedback`, `asc crashes`, `asc testflight apps list`, `asc testflight apps get`, `asc testflight sync pull` | `gpd vitals crashes` ([Command Reference](../README.md#command-reference), [Error Debugging](examples/error-debugging.md)) | Partial (no feedback/testflight sync) |
-| Beta Groups | `asc beta-groups list`, `asc beta-groups create`, `asc beta-groups get`, `asc beta-groups update`, `asc beta-groups delete`, `asc beta-groups add-testers`, `asc beta-groups remove-testers` | `gpd publish beta-groups list/get/create/update/delete/add-testers/remove-testers`, `gpd publish testers list/get/add/remove` ([Command Reference](../README.md#command-reference)) | Partial (compatibility commands map groups to internal/alpha/beta tracks; no standalone group object in Play API) |
-| Beta Testers | `asc beta-testers list`, `asc beta-testers get`, `asc beta-testers add`, `asc beta-testers remove`, `asc beta-testers invite`, `asc beta-testers add-groups`, `asc beta-testers remove-groups` | `gpd publish testers list`, `gpd publish testers get`, `gpd publish testers add`, `gpd publish testers remove` ([Command Reference](../README.md#command-reference)) | Partial (track-based, no invite lifecycle) |
-| Devices | `asc devices list`, `asc devices get`, `asc devices register`, `asc devices update` | N/A | Not applicable |
-| App Store | `asc reviews`, `asc reviews respond`, `asc reviews response get`, `asc reviews response for-review`, `asc reviews response delete` | `gpd reviews list`, `gpd reviews get`, `gpd reviews reply`, `gpd reviews response-get`, `gpd reviews response-delete`, `gpd reviews capabilities` ([API: Reviews](api-coverage-matrix.md#reviews)) | Partial (`gpd reviews response-delete` exists but returns platform limitation: deletion unsupported by Google Play API) |
-| App Tags | `asc app-tags list`, `asc app-tags get`, `asc app-tags update`, `asc app-tags territories`, `asc app-tags territories-relationships`, `asc app-tags relationships` | N/A | Not applicable |
-| App Events | `asc app-events list`, `asc app-events localizations list`, `asc app-events localizations screenshots list`, `asc app-events localizations video-clips list`, `asc app-events relationships`, `asc app-events localizations screenshots-relationships`, `asc app-events localizations video-clips-relationships` | N/A | Not applicable |
-| Alternative Distribution | `asc alternative-distribution domains list`, `asc alternative-distribution domains create`, `asc alternative-distribution domains delete`, `asc alternative-distribution keys list`, `asc alternative-distribution keys create`, `asc alternative-distribution keys app`, `asc alternative-distribution packages create`, `asc alternative-distribution packages get`, `asc alternative-distribution packages versions list`, `asc alternative-distribution packages versions get`, `asc alternative-distribution packages versions deltas`, `asc alternative-distribution packages versions variants` | N/A | Not applicable |
-| Analytics & Sales | `asc analytics sales`, `asc analytics request`, `asc analytics requests`, `asc analytics get`, `asc analytics download` | `gpd analytics query`, `gpd analytics capabilities`, `gpd vitals crashes`, `gpd vitals anrs` ([Command Reference](../README.md#command-reference), [Error Debugging](examples/error-debugging.md)) | Partial (Play Reporting focus) |
-| Finance Reports | `asc finance reports`, `asc finance regions` | N/A | Not applicable |
-| Sandbox Testers | `asc sandbox list`, `asc sandbox get`, `asc sandbox update`, `asc sandbox clear-history` | N/A | Not applicable |
-| Xcode Cloud | `asc xcode-cloud workflows`, `asc xcode-cloud build-runs`, `asc xcode-cloud run`, `asc xcode-cloud status` | N/A | Not applicable |
-| Game Center | `asc game-center achievements`, `asc game-center leaderboards`, `asc game-center leaderboard-sets` | `gpd games achievements`, `gpd games scores`, `gpd games events`, `gpd games players`, `gpd grouping` ([API: Play Games Services](api-coverage-matrix.md#play-games-services-api-v1), [API: Games Management](api-coverage-matrix.md#games-management-api-v1)) | Partial (different feature set) |
-| App Setup | `asc app-setup info set`, `asc app-setup categories set`, `asc app-setup availability set`, `asc app-setup pricing set`, `asc app-setup localizations upload` | `gpd publish listing update`, `gpd publish details update`, `gpd publish images upload`, `gpd publish assets upload`, `gpd publish assets spec` ([API: Listings](api-coverage-matrix.md#listings), [API: Images](api-coverage-matrix.md#images), [API: App Details](api-coverage-matrix.md#app-details)) | Partial (pricing/availability differ) |
-| Categories | `asc categories list`, `asc categories set` | N/A | Not applicable |
-| Versions | `asc versions list`, `asc versions get`, `asc versions attach-build`, `asc versions release`, `asc versions phased-release get`, `asc versions phased-release create`, `asc versions phased-release update`, `asc versions phased-release delete`, `asc versions promotions create` | `gpd publish release`, `gpd publish rollout`, `gpd publish promote`, `gpd publish halt`, `gpd publish rollback`, `gpd publish status`, `gpd release-mgmt calendar`, `gpd release-mgmt history`, `gpd release-mgmt notes` ([API: Tracks](api-coverage-matrix.md#tracks), [Edit Workflow](examples/edit-workflow.md), [Release Workflow](examples/release-workflow.md)) | Partial (workflow and concepts differ) |
-| App Info | `asc app-info get`, `asc app-info set` | `gpd publish listing get`, `gpd publish listing update`, `gpd publish details get`, `gpd publish details update` ([API: Listings](api-coverage-matrix.md#listings), [API: App Details](api-coverage-matrix.md#app-details)) | Partial (workflow and scope differ) |
-| Pre-Release Versions | `asc pre-release-versions list`, `asc pre-release-versions get` | N/A | Not applicable |
-| Localizations | `asc localizations list`, `asc localizations download`, `asc localizations upload` | `gpd publish listing get`, `gpd publish listing update`, `gpd publish images upload` ([API: Listings](api-coverage-matrix.md#listings), [API: Images](api-coverage-matrix.md#images)) | Partial (scope and workflow differ) |
-| Build Localizations | `asc build-localizations list`, `asc build-localizations create`, `asc build-localizations update`, `asc build-localizations delete`, `asc build-localizations get` | N/A | Not applicable |
-| Offer Codes (Subscriptions) | `asc offer-codes list`, `asc offer-codes generate`, `asc offer-codes values` | N/A | Not applicable |
-| In-App Purchases & Subscriptions | `asc in-app-purchases`, `asc subscriptions`, `asc subscription-groups` | `gpd monetization products`, `gpd monetization subscriptions`, `gpd monetization base-plans`, `gpd monetization offers` ([API: Monetization - Subscriptions](api-coverage-matrix.md#monetization---subscriptions), [API: Base Plans](api-coverage-matrix.md#monetization---base-plans), [API: Offers](api-coverage-matrix.md#monetization---offers), [API: In-app Products](api-coverage-matrix.md#monetization---in-app-products), [Subscription Management](examples/subscription-management.md)) | Partial (model differs) |
-| Migrate (Fastlane Compatibility) | `asc migrate validate`, `asc migrate import`, `asc migrate export` | `gpd migrate` ([Command Reference](../README.md#command-reference)) | Full |
-| Submit | `asc submit create`, `asc submit status`, `asc submit cancel` | `gpd publish release`, `gpd publish rollout`, `gpd publish promote`, `gpd publish halt`, `gpd publish rollback` ([API: Tracks](api-coverage-matrix.md#tracks), [Edit Workflow](examples/edit-workflow.md), [Release Workflow](examples/release-workflow.md)) | Partial (workflow and concepts differ) |
-| Utilities | `asc version` | `gpd version`, `gpd config init`, `gpd config doctor`, `gpd config path`, `gpd config get`, `gpd config set`, `gpd config completion` ([Command Reference](../README.md#command-reference)) | Partial (additional utilities available) |
-| Output Formats | `asc --output table`, `asc --output markdown` | `gpd --output json`, `gpd --output table`, `gpd --output markdown` ([Command Reference](../README.md#command-reference)) | Full |
+| Authentication | `asc auth login/init/switch/status/doctor/logout` | `gpd auth login/init/switch/list/status/check/doctor/diagnose/logout` ([Auth Parity Guide](auth-parity-guide.md)) | **Partial** — multi-profile CLI implemented; credentials are service-account/ADC/device-flow, not ASC `.p8` |
+| Config / doctor | `asc doctor`, `asc init`, `asc docs` | `gpd config *`, `gpd auth doctor` | **Partial** — no embedded docs browser / install-skills |
+| Output formats | `--output table\|json\|markdown`, TTY defaults | `--output json\|table\|markdown\|csv\|excel`, TTY defaults, `GPD_DEFAULT_OUTPUT` | **Full** for day-to-day use |
+| Version / completion | `asc version`, `asc completion` | `gpd version`, `gpd completion`, `gpd check-update` | **Full** |
 
-## gpd Features Without ASC Equivalent
+### Apps, builds, distribution
 
-| gpd Feature Group | gpd Commands (examples) | Docs | Status |
+| ASC Feature Group | ASC Commands (examples) | gpd Equivalent | Status |
 | --- | --- | --- | --- |
-| Permissions & Access | `gpd permissions users`, `gpd permissions grants` | [API: Users](api-coverage-matrix.md#users), [API: Grants](api-coverage-matrix.md#grants) | gpd-only |
-| Edit Transactions | `gpd publish edit create`, `gpd publish edit validate`, `gpd publish edit commit` | [API: Edits](api-coverage-matrix.md#edits), [Edit Workflow](examples/edit-workflow.md) | gpd-only |
-| Internal App Sharing | `gpd publish internal-share upload` | [API: Internal App Sharing](api-coverage-matrix.md#internal-app-sharing) | gpd-only |
-| Deobfuscation Uploads | `gpd publish deobfuscation upload` | [API: Deobfuscation Files](api-coverage-matrix.md#deobfuscation-files) | gpd-only |
-| Purchases Verification | `gpd purchases verify`, `gpd purchases products acknowledge`, `gpd purchases subscriptions revoke`, `gpd purchases voided list` | [API: Purchases - Products](api-coverage-matrix.md#purchases---products), [API: Purchases - Subscriptions](api-coverage-matrix.md#purchases---subscriptions), [API: Purchases - Voided](api-coverage-matrix.md#purchases---voided) | gpd-only |
-| Play Integrity | `gpd integrity decode` | [API: Play Integrity](api-coverage-matrix.md#play-integrity-api-v1) | gpd-only |
-| App Recovery | `gpd recovery create`, `gpd recovery deploy`, `gpd recovery cancel` | [API: App Recovery](api-coverage-matrix.md#app-recovery) | gpd-only |
-| Android Vitals Error Reporting | `gpd vitals errors issues`, `gpd vitals errors reports`, `gpd vitals errors counts`, `gpd vitals anomalies`, `gpd vitals metrics` | [API: Error Issues Search](api-coverage-matrix.md#error-issues-search), [API: Anomalies](api-coverage-matrix.md#anomalies), [Error Debugging](examples/error-debugging.md) | gpd-only |
-| Custom App Publishing | `gpd customapp create` | [API: Custom App Publishing](api-coverage-matrix.md#play-custom-app-publishing-api-v1) | gpd-only |
-| Bulk Operations | `gpd bulk upload`, `gpd bulk listings`, `gpd bulk images`, `gpd bulk tracks` | [Bulk Operations](examples/bulk-operations.md) | gpd-only |
-| Multi-App Comparison | `gpd compare vitals`, `gpd compare reviews`, `gpd compare releases`, `gpd compare subscriptions` | [Multi-App Comparison](examples/multi-app-comparison.md) | gpd-only |
-| Release Management | `gpd release-mgmt calendar`, `gpd release-mgmt conflicts`, `gpd release-mgmt strategy`, `gpd release-mgmt history`, `gpd release-mgmt notes` | [Release Workflow](examples/release-workflow.md) | gpd-only |
-| Testing & Validation | `gpd testing prelaunch`, `gpd testing device-lab`, `gpd testing screenshots`, `gpd testing validate`, `gpd testing compatibility` | [Testing Guide](examples/testing-validation.md) | gpd-only |
-| Automation Workflows | `gpd automation release-notes`, `gpd automation rollout`, `gpd automation promote`, `gpd automation validate`, `gpd automation monitor` | [Automation Workflows](examples/automation-workflows.md) | gpd-only |
-| Continuous Monitoring | `gpd monitor watch`, `gpd monitor anomalies`, `gpd monitor dashboard`, `gpd monitor report`, `gpd monitor webhooks` | [Monitoring Setup](examples/monitoring-setup.md) | gpd-only |
-| Play Grouping API | `gpd grouping`, `gpd grouping token`, `gpd grouping token-recall` | [API: Play Grouping](api-coverage-matrix.md#play-grouping-api) | gpd-only |
+| Apps | `asc apps list/get` | `gpd apps list`, `gpd apps get` | **Partial** |
+| Builds | `asc builds upload/list/...` | `gpd publish upload`, `gpd publish builds *`, `gpd publish play` | **Partial** — track/edit model, not global build registry |
+| TestFlight | `asc testflight`, feedback, crashes | `gpd vitals *`, `gpd publish testers`, `gpd publish beta-groups` | **Partial** |
+| Beta groups / testers | `asc beta-groups`, `asc beta-testers` | `gpd publish beta-groups *`, `gpd publish testers *` | **Partial** |
+| Internal sharing | N/A | `gpd publish internal-share upload` | **gpd-only** |
+| Deobfuscation | N/A | `gpd publish deobfuscation upload` | **gpd-only** |
+| Devices / signing / Xcode / sandbox | `asc devices`, certificates, xcode-cloud, sandbox | N/A | **Not applicable** |
 
-## Notes
+### Metadata & media
 
-- Some ASC features (Devices, Xcode Cloud, Sandbox Testers, App Tags, App Events, Finance Reports, Alternative Distribution) have no Google Play equivalents.
-- Some gpd features (Play Integrity, App Recovery, Deobfuscation, Purchases, Edit Transactions, Permissions & Access, Bulk Operations, Comparison Tools, Release Management, Testing, Automation, Monitoring) have no ASC equivalents.
-- For the full Google Play API-to-command mapping, see [API Coverage Matrix](api-coverage-matrix.md).
+| ASC Feature Group | ASC Commands (examples) | gpd Equivalent | Status |
+| --- | --- | --- | --- |
+| Listing / localizations | `asc localizations`, `asc metadata` | `gpd publish listing *`, `gpd publish details *` | **Partial** |
+| Screenshots / assets | `asc screenshots` | `gpd publish images *`, `gpd publish assets *` | **Partial** |
+| App tags / events / clips / categories / pre-orders | ASC-only | N/A | **Not applicable** |
+
+### Review & release
+
+| ASC Feature Group | ASC Commands (examples) | gpd Equivalent | Status |
+| --- | --- | --- | --- |
+| Customer reviews | `asc reviews` | `gpd reviews list/get/reply/response-*` | **Partial** — response delete limited by Play API |
+| Validate / readiness | `asc validate` | `gpd validate` (dry-run readiness report) | **Partial** — local + plan; live network probes via `auth check` / publish status |
+| High-level publish | `asc publish appstore\|testflight` | `gpd publish play` (upload→track→status), plus primitives | **Partial** — Play track model |
+| Status | `asc status --watch` | `gpd publish status`, `gpd monitor *`, `gpd automation monitor` | **Partial** |
+| Versions / phased release | `asc versions`, phased-release | `gpd publish rollout`, `gpd release-mgmt *` | **Partial** |
+
+### Analytics, finance, ads
+
+| ASC Feature Group | gpd Equivalent | Status |
+| --- | --- | --- |
+| Analytics & sales | `gpd analytics *`, `gpd vitals *` | **Partial** |
+| Finance / Apple Ads | N/A | **Not applicable** |
+
+### Monetization & games
+
+| ASC Feature Group | gpd Equivalent | Status |
+| --- | --- | --- |
+| IAP & subscriptions | `gpd monetization *` | **Partial** |
+| Purchase verification | `gpd purchases *` | **gpd-only** (stronger on Play) |
+| StoreKit retention | N/A | **Not applicable** |
+| Game Center | `gpd games *`, `gpd grouping` | **Partial** |
+
+### Automation & tooling
+
+| ASC Feature Group | gpd Equivalent | Status |
+| --- | --- | --- |
+| Workflows | `gpd workflow *` | **Full** for declarative multi-step runs (schema differs) |
+| Migrate (Fastlane) | `gpd migrate` | **Partial** |
+| Agent skills | [`skills/`](../skills/README.md) (`gpd-auth`, `gpd-release`, `gpd-reviews-vitals`) | **Partial** (packaged skills; not a runtime installer) |
+| Extensions | `gpd extension *` | **gpd-only** |
+| Telemetry / snitch / schema search | N/A or not implemented | **Not applicable** |
+
+---
+
+## gpd features without ASC equivalent
+
+Permissions, edit lifecycle depth, internal sharing, deobfuscation, purchases, integrity, recovery, vitals depth, custom apps, generated/system APKs, bulk, compare, release-mgmt, testing, automation, monitor, maintenance/API drift, extensions.
+
+---
+
+## Intentionally not mirrored (Apple-only)
+
+Devices, certificates, profiles, bundle IDs, notarization, Xcode / Xcode Cloud, sandbox testers, App Tags/Events/Clips, alternative distribution, Apple Ads, ASC finance, StoreKit retention, web-session scraping.
+
+---
+
+## Remaining product gaps
+
+Optional / later:
+
+1. Broader domain package migration for remaining large `kong_*.go` families (beyond `outfmt` + `playship`)  
+2. Even deeper `validate` (media matrix, content rating, all listing locales)  
+3. Publish production tag `v0.6.5+` so GitHub Releases use the new archive + checksum names end-to-end  
+
+**Delivered recently:** TTY-aware output; checksum install + GoReleaser SHA-256 (snapshot verified); generated command docs; `validate` (package/track/listing network probes) + `publish play`; multi-profile auth including **delete/logout**; `setup-gpd` action; agent **skills/** pack; `outfmt` + `playship` extractions.
+
+---
+
+## Maintenance rule
+
+When adding or removing a user-facing command:
+
+1. `make generate-command-docs` and commit `docs/COMMANDS.md`  
+2. `make check-docs` must pass  
+3. Update this matrix if ASC parity status changes  
+4. Prefer live `gpd <cmd> --help` over inventing flags in docs  
+
+For Play API endpoint mapping (not ASC), see [API Coverage Matrix](api-coverage-matrix.md).

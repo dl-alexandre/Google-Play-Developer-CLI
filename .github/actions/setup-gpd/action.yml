@@ -1,0 +1,252 @@
+name: 'Setup gpd'
+description: 'Install the Google Play Developer CLI (gpd) binary for CI'
+author: 'dl-alexandre'
+
+branding:
+  icon: 'download'
+  color: 'green'
+
+inputs:
+  version:
+    description: 'gpd release version to install (e.g. v0.6.4, 0.6.4, or "latest")'
+    required: false
+    default: 'latest'
+  token:
+    description: 'GitHub token for API rate limits when resolving releases (defaults to github.token)'
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Install gpd
+      shell: bash
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_TOKEN: ${{ inputs.token }}
+        GITHUB_TOKEN_DEFAULT: ${{ github.token }}
+        GITHUB_REPOSITORY_ENV: ${{ github.repository }}
+      run: |
+        set -euo pipefail
+
+        DEFAULT_REPO="dl-alexandre/Google-Play-Developer-CLI"
+        # Prefer the caller's repo when it is this project (or a fork), so in-repo CI
+        # resolves releases from the same GitHub repository.
+        if [[ "${GITHUB_REPOSITORY_ENV:-}" == *"/Google-Play-Developer-CLI" ]]; then
+          REPO="${GITHUB_REPOSITORY_ENV}"
+        else
+          REPO="${DEFAULT_REPO}"
+        fi
+
+        TOKEN="${INPUT_TOKEN:-${GITHUB_TOKEN_DEFAULT:-}}"
+        AUTH_HEADER=()
+        if [ -n "${TOKEN}" ]; then
+          AUTH_HEADER=(-H "Authorization: Bearer ${TOKEN}")
+        fi
+
+        api_get() {
+          local url="$1"
+          curl -fsSL \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "${AUTH_HEADER[@]}" \
+            "${url}"
+        }
+
+        download() {
+          local url="$1"
+          local out="$2"
+          if [ -n "${TOKEN}" ]; then
+            curl -fsSL \
+              -H "Accept: application/octet-stream" \
+              -H "Authorization: Bearer ${TOKEN}" \
+              -o "${out}" \
+              "${url}"
+          else
+            curl -fsSL -o "${out}" "${url}"
+          fi
+        }
+
+        # --- Resolve release tag ---
+        VERSION_INPUT="${INPUT_VERSION:-latest}"
+        VERSION_INPUT="${VERSION_INPUT#v}"
+
+        if [ "${VERSION_INPUT}" = "latest" ] || [ -z "${VERSION_INPUT}" ]; then
+          echo "Resolving latest release for ${REPO}..."
+          RELEASE_JSON="$(api_get "https://api.github.com/repos/${REPO}/releases/latest")"
+          TAG="$(printf '%s' "${RELEASE_JSON}" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+        else
+          TAG="v${VERSION_INPUT}"
+          echo "Resolving release ${TAG} for ${REPO}..."
+          # Validate the tag exists (falls back to tag endpoint if no formal release).
+          if ! RELEASE_JSON="$(api_get "https://api.github.com/repos/${REPO}/releases/tags/${TAG}" 2>/dev/null)"; then
+            if api_get "https://api.github.com/repos/${REPO}/git/refs/tags/${TAG}" >/dev/null 2>&1; then
+              RELEASE_JSON=""
+            else
+              echo "::error::Release or tag '${TAG}' not found in ${REPO}"
+              exit 1
+            fi
+          fi
+        fi
+
+        if [ -z "${TAG:-}" ]; then
+          echo "::error::Could not resolve a release tag for ${REPO}"
+          exit 1
+        fi
+        VERSION="${TAG#v}"
+        echo "Installing gpd ${TAG} from ${REPO}"
+
+        # --- Map runner OS / ARCH (install.sh + goreleaser naming) ---
+        UNAME_S="$(uname -s | tr '[:upper:]' '[:lower:]')"
+        UNAME_M="$(uname -m)"
+
+        case "${UNAME_S}" in
+          linux)  OS="linux" ;;
+          darwin) OS="darwin" ;;
+          mingw*|msys*|cygwin*) OS="windows" ;;
+          *)
+            echo "::error::Unsupported OS: ${UNAME_S}"
+            exit 1
+            ;;
+        esac
+
+        case "${UNAME_M}" in
+          x86_64|amd64)
+            ARCH_INSTALL="x86_64"
+            ARCH_GO="amd64"
+            ;;
+          arm64|aarch64)
+            ARCH_INSTALL="arm64"
+            ARCH_GO="arm64"
+            ;;
+          *)
+            echo "::error::Unsupported architecture: ${UNAME_M}"
+            exit 1
+            ;;
+        esac
+
+        if [ "${OS}" = "windows" ]; then
+          EXT_INSTALL="zip"
+          EXT_GO="zip"
+        else
+          EXT_INSTALL="tar.gz"
+          EXT_GO="tar.gz"
+        fi
+
+        # Prefer install.sh naming, then current GoReleaser asset names.
+        CANDIDATES=(
+          "gpd_${VERSION}_${OS}_${ARCH_INSTALL}.${EXT_INSTALL}"
+          "gpd-${OS}-${ARCH_GO}.${EXT_GO}"
+          "gpd_${VERSION}_${OS}_${ARCH_GO}.${EXT_INSTALL}"
+        )
+
+        BASE_URL="https://github.com/${REPO}/releases/download/${TAG}"
+        TMP_DIR="$(mktemp -d)"
+        trap 'rm -rf "${TMP_DIR}"' EXIT
+
+        ASSET_NAME=""
+        ASSET_PATH=""
+        for name in "${CANDIDATES[@]}"; do
+          echo "Trying asset: ${name}"
+          if download "${BASE_URL}/${name}" "${TMP_DIR}/${name}" 2>/dev/null; then
+            ASSET_NAME="${name}"
+            ASSET_PATH="${TMP_DIR}/${name}"
+            break
+          fi
+        done
+
+        if [ -z "${ASSET_PATH}" ] || [ ! -f "${ASSET_PATH}" ]; then
+          echo "::error::Could not download a gpd asset for ${OS}/${ARCH_GO} (tag ${TAG}). Tried: ${CANDIDATES[*]}"
+          exit 1
+        fi
+        echo "Downloaded ${ASSET_NAME}"
+
+        # --- Checksums (prefer gpd_*_checksums.txt, then checksums.txt) ---
+        CHECKSUMS_PATH="${TMP_DIR}/checksums.txt"
+        CHECKSUMS_OK=0
+        for cname in "gpd_${VERSION}_checksums.txt" "checksums.txt" "gpd_${TAG}_checksums.txt"; do
+          if download "${BASE_URL}/${cname}" "${CHECKSUMS_PATH}" 2>/dev/null; then
+            echo "Using checksums file: ${cname}"
+            CHECKSUMS_OK=1
+            break
+          fi
+        done
+
+        if [ "${CHECKSUMS_OK}" -ne 1 ]; then
+          echo "::warning::No checksums.txt / gpd_*_checksums.txt found for ${TAG}; installing WITHOUT checksum verification."
+        else
+          expected="$(awk -v asset="${ASSET_NAME}" '
+            $2 == asset || $2 == ("*" asset) { print $1; exit }
+          ' "${CHECKSUMS_PATH}")"
+          if [ -z "${expected}" ]; then
+            echo "::warning::Asset ${ASSET_NAME} not listed in checksums file; installing WITHOUT checksum verification."
+          else
+            if command -v shasum >/dev/null 2>&1; then
+              actual="$(shasum -a 256 "${ASSET_PATH}" | awk '{print $1}')"
+            elif command -v sha256sum >/dev/null 2>&1; then
+              actual="$(sha256sum "${ASSET_PATH}" | awk '{print $1}')"
+            else
+              echo "::warning::No shasum/sha256sum available; installing WITHOUT checksum verification."
+              actual=""
+            fi
+
+            if [ -n "${actual}" ]; then
+              if [ "${expected}" != "${actual}" ]; then
+                # GoReleaser may use blake3; if lengths differ, warn instead of hard-failing.
+                if [ "${#expected}" -ne "${#actual}" ]; then
+                  echo "::warning::Checksum algorithm mismatch for ${ASSET_NAME} (expected digest length ${#expected}, sha256 length ${#actual}); skipping strict verify."
+                else
+                  echo "::error::Checksum verification failed for ${ASSET_NAME}"
+                  echo "  expected: ${expected}"
+                  echo "  actual:   ${actual}"
+                  exit 1
+                fi
+              else
+                echo "Checksum verified for ${ASSET_NAME}"
+              fi
+            fi
+          fi
+        fi
+
+        # --- Extract / install ---
+        INSTALL_DIR="${RUNNER_TEMP:-/tmp}/gpd-bin"
+        mkdir -p "${INSTALL_DIR}"
+
+        case "${ASSET_NAME}" in
+          *.tar.gz|*.tgz)
+            tar -xzf "${ASSET_PATH}" -C "${TMP_DIR}"
+            ;;
+          *.zip)
+            if command -v unzip >/dev/null 2>&1; then
+              unzip -qo "${ASSET_PATH}" -d "${TMP_DIR}"
+            else
+              echo "::error::unzip is required to extract Windows zip assets"
+              exit 1
+            fi
+            ;;
+          *)
+            echo "::error::Unknown archive format: ${ASSET_NAME}"
+            exit 1
+            ;;
+        esac
+
+        BIN_SRC="$(find "${TMP_DIR}" -type f \( -name 'gpd' -o -name 'gpd.exe' \) | head -n1)"
+        if [ -z "${BIN_SRC}" ] || [ ! -f "${BIN_SRC}" ]; then
+          echo "::error::gpd binary not found after extracting ${ASSET_NAME}"
+          ls -la "${TMP_DIR}" || true
+          exit 1
+        fi
+
+        BIN_NAME="gpd"
+        if [[ "${BIN_SRC}" == *.exe ]]; then
+          BIN_NAME="gpd.exe"
+        fi
+
+        mv "${BIN_SRC}" "${INSTALL_DIR}/${BIN_NAME}"
+        chmod +x "${INSTALL_DIR}/${BIN_NAME}"
+
+        echo "${INSTALL_DIR}" >> "${GITHUB_PATH}"
+        export PATH="${INSTALL_DIR}:${PATH}"
+
+        echo "gpd installed to ${INSTALL_DIR}/${BIN_NAME}"
+        "${INSTALL_DIR}/${BIN_NAME}" version

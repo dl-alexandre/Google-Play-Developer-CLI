@@ -225,3 +225,183 @@ func (m *Manager) loadStoredToken(key string) (*oauth2.Token, error) {
 	}
 	return token, nil
 }
+
+// normalizeProfile returns a non-empty profile name, defaulting to "default".
+func normalizeProfile(profile string) string {
+	profile = strings.TrimSpace(profile)
+	if profile == "" {
+		return defaultAuthProfile
+	}
+	return profile
+}
+
+// collectProfileTokenKeys returns all storage keys that belong to profile,
+// based on token metadata files under the config tokens directory.
+func collectProfileTokenKeys(profile string) ([]string, error) {
+	profile = normalizeProfile(profile)
+	paths := config.GetPaths()
+	dir := filepath.Join(paths.ConfigDir, "tokens")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	seen := make(map[string]struct{})
+	var keys []string
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), tokenMetadataSuffix) {
+			continue
+		}
+		metaPath := filepath.Join(dir, entry.Name())
+		meta, err := readTokenMetadata(metaPath)
+		if err != nil || meta == nil {
+			continue
+		}
+		if meta.Profile != profile {
+			continue
+		}
+		key := strings.TrimSuffix(entry.Name(), tokenMetadataSuffix)
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
+	}
+	return keys, nil
+}
+
+// collectAllTokenKeys returns every storage key that has a metadata file.
+func collectAllTokenKeys() ([]string, error) {
+	paths := config.GetPaths()
+	dir := filepath.Join(paths.ConfigDir, "tokens")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var keys []string
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), tokenMetadataSuffix) {
+			continue
+		}
+		key := strings.TrimSuffix(entry.Name(), tokenMetadataSuffix)
+		if key == "" {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	return keys, nil
+}
+
+// deleteTokenKey removes a token from secure storage (best-effort) and deletes
+// its metadata file if present.
+func (m *Manager) deleteTokenKey(key string) error {
+	if key == "" {
+		return nil
+	}
+	if m.storage != nil && m.storage.Available() {
+		// Best-effort: missing keys are not fatal during cleanup.
+		_ = m.storage.Delete(key)
+	}
+	metaPath := tokenMetadataPath(key)
+	if err := os.Remove(metaPath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+// ClearProfile removes stored tokens and metadata for the given profile.
+// If the profile is the manager's active profile, in-memory credentials are cleared.
+// Succeeds even when no stored data exists for the profile.
+func (m *Manager) ClearProfile(profile string) error {
+	profile = normalizeProfile(profile)
+	keys, err := collectProfileTokenKeys(profile)
+	if err != nil {
+		return err
+	}
+	// Always attempt the bare profile key (used when client ID hash is empty).
+	bare := tokenStorageKey(profile, "")
+	hasBare := false
+	for _, k := range keys {
+		if k == bare {
+			hasBare = true
+			break
+		}
+	}
+	if !hasBare {
+		keys = append(keys, bare)
+	}
+
+	for _, key := range keys {
+		if err := m.deleteTokenKey(key); err != nil {
+			return err
+		}
+	}
+
+	if m.GetActiveProfile() == profile {
+		m.Clear()
+	}
+	return nil
+}
+
+// ClearAllProfiles removes tokens and metadata for every stored profile and
+// clears in-memory credentials.
+func (m *Manager) ClearAllProfiles() error {
+	keys, err := collectAllTokenKeys()
+	if err != nil {
+		return err
+	}
+	for _, key := range keys {
+		if err := m.deleteTokenKey(key); err != nil {
+			return err
+		}
+	}
+	m.Clear()
+	return nil
+}
+
+// DeleteProfile removes a profile's stored credentials and metadata.
+// Returns false for existed when no metadata was found for the profile.
+// Unlike ClearProfile, callers use existed to report "not found".
+func (m *Manager) DeleteProfile(profile string) (existed bool, err error) {
+	profile = normalizeProfile(profile)
+	keys, err := collectProfileTokenKeys(profile)
+	if err != nil {
+		return false, err
+	}
+	if len(keys) == 0 {
+		// Also treat bare secure-storage entry without metadata as existing.
+		if m.storage != nil && m.storage.Available() {
+			if data, retrieveErr := m.storage.Retrieve(tokenStorageKey(profile, "")); retrieveErr == nil && len(data) > 0 {
+				if clearErr := m.ClearProfile(profile); clearErr != nil {
+					return true, clearErr
+				}
+				return true, nil
+			}
+		}
+		return false, nil
+	}
+	if err := m.ClearProfile(profile); err != nil {
+		return true, err
+	}
+	return true, nil
+}
+
+// ProfileExists reports whether any token metadata is stored for profile.
+func (m *Manager) ProfileExists(profile string) (bool, error) {
+	profile = normalizeProfile(profile)
+	keys, err := collectProfileTokenKeys(profile)
+	if err != nil {
+		return false, err
+	}
+	return len(keys) > 0, nil
+}

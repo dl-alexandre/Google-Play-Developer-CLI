@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/auth"
 	"github.com/dl-alexandre/Google-Play-Developer-CLI/internal/output"
@@ -17,10 +18,43 @@ const (
 	formatExcel    = "excel"
 )
 
-// newAuthManager creates a new auth manager instance.
+// Package-level auth defaults applied after globals are resolved in RunKongCLI.
+// This keeps existing newAuthManager() call sites profile-aware without a
+// wide refactor of every command package.
+var (
+	authDefaultsMu     sync.RWMutex
+	authDefaultProfile string
+	authDefaultStore   string
+)
+
+// applyAuthGlobals records profile and store-tokens defaults for newAuthManager.
+func applyAuthGlobals(globals *Globals) {
+	if globals == nil {
+		return
+	}
+	authDefaultsMu.Lock()
+	defer authDefaultsMu.Unlock()
+	authDefaultProfile = strings.TrimSpace(globals.Profile)
+	authDefaultStore = strings.TrimSpace(globals.StoreTokens)
+}
+
+// newAuthManager creates a new auth manager instance with resolved defaults.
 func newAuthManager() *auth.Manager {
 	secureStorage := storage.New()
-	return auth.NewManager(secureStorage)
+	mgr := auth.NewManager(secureStorage)
+
+	authDefaultsMu.RLock()
+	profile := authDefaultProfile
+	store := authDefaultStore
+	authDefaultsMu.RUnlock()
+
+	if store != "" {
+		mgr.SetStoreTokens(store)
+	}
+	if profile != "" {
+		mgr.SetActiveProfile(profile)
+	}
+	return mgr
 }
 
 // outputResult formats and outputs a result based on the format.

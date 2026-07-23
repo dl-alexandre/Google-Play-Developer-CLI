@@ -60,6 +60,7 @@ checksums.txt
 # Temporary files
 tmp/
 temp/
+/.tmp/install-checksum/
 
 # Play Developer Credentials
 creds/

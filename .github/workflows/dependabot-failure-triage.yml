@@ -75,6 +75,7 @@ jobs:
 
               const failures = checks.filter((check) =>
                 check.status === 'completed' &&
+                !['Dependabot Safe Auto-Merge', 'Label and summarize failed Dependabot PRs'].includes(check.name) &&
                 ['failure', 'timed_out', 'cancelled', 'startup_failure'].includes(check.conclusion)
               );
 

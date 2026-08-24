@@ -20,6 +20,49 @@ const revokeTypeFullRefund = "fullRefund"
 const revokeTypePartialRefund = "partialRefund"
 const revokeTypeProratedRefund = "proratedRefund"
 
+type retryClient interface {
+	DoWithRetry(context.Context, func() error) error
+}
+
+func latestSubscriptionOrderID(purchase *androidpublisher.SubscriptionPurchaseV2) string {
+	if purchase == nil {
+		return ""
+	}
+
+	for _, lineItem := range purchase.LineItems {
+		if lineItem != nil && lineItem.LatestSuccessfulOrderId != "" {
+			return lineItem.LatestSuccessfulOrderId
+		}
+	}
+
+	return ""
+}
+
+func getLatestSubscriptionOrderID(
+	ctx context.Context,
+	client retryClient,
+	svc *androidpublisher.Service,
+	packageName string,
+	token string,
+) (string, error) {
+	var purchase *androidpublisher.SubscriptionPurchaseV2
+	err := client.DoWithRetry(ctx, func() error {
+		var callErr error
+		purchase, callErr = svc.Purchases.Subscriptionsv2.Get(packageName, token).Context(ctx).Do()
+		return callErr
+	})
+	if err != nil {
+		return "", err
+	}
+
+	orderID := latestSubscriptionOrderID(purchase)
+	if orderID == "" {
+		return "", fmt.Errorf("subscription purchase has no latest successful order ID")
+	}
+
+	return orderID, nil
+}
+
 // ============================================================================
 // Purchases Commands
 // ============================================================================
@@ -349,8 +392,13 @@ func (cmd *PurchasesSubscriptionsRefundCmd) Run(globals *Globals) error {
 			WithHint("Ensure authentication is configured correctly")
 	}
 
+	orderID, err := getLatestSubscriptionOrderID(ctx, client, svc, globals.Package, cmd.Token)
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to resolve subscription order: %v", err))
+	}
+
 	err = client.DoWithRetry(ctx, func() error {
-		return svc.Purchases.Subscriptions.Refund(globals.Package, cmd.SubscriptionID, cmd.Token).Context(ctx).Do()
+		return svc.Orders.Refund(globals.Package, orderID).Revoke(false).Context(ctx).Do()
 	})
 	if err != nil {
 		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to refund subscription: %v", err))
@@ -358,6 +406,7 @@ func (cmd *PurchasesSubscriptionsRefundCmd) Run(globals *Globals) error {
 
 	data := map[string]interface{}{
 		"subscriptionId": cmd.SubscriptionID,
+		"orderId":        orderID,
 		"refunded":       true,
 	}
 
@@ -449,8 +498,13 @@ func (cmd *PurchasesSubscriptionsRevokeCmd) Run(globals *Globals) error {
 		)
 	}
 
+	orderID, err := getLatestSubscriptionOrderID(ctx, client, svc, globals.Package, cmd.Token)
+	if err != nil {
+		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to resolve subscription order: %v", err))
+	}
+
 	err = client.DoWithRetry(ctx, func() error {
-		return svc.Purchases.Subscriptions.Revoke(globals.Package, cmd.SubscriptionID, cmd.Token).Context(ctx).Do()
+		return svc.Orders.Refund(globals.Package, orderID).Revoke(true).Context(ctx).Do()
 	})
 	if err != nil {
 		return errors.NewAPIError(errors.CodeGeneralError, fmt.Sprintf("failed to revoke subscription: %v", err))
@@ -458,6 +512,7 @@ func (cmd *PurchasesSubscriptionsRevokeCmd) Run(globals *Globals) error {
 
 	data := map[string]interface{}{
 		"subscriptionId": cmd.SubscriptionID,
+		"orderId":        orderID,
 		"revoked":        true,
 		"apiVersion":     "v1",
 	}
@@ -587,7 +642,7 @@ func (cmd *PurchasesVerifyCmd) verifySubscription(ctx context.Context, client in
 		"type":                 purchaseTypeSubscription,
 		"acknowledgementState": purchase.AcknowledgementState,
 		"subscriptionState":    purchase.SubscriptionState,
-		"latestOrderId":        purchase.LatestOrderId,
+		"latestOrderId":        latestSubscriptionOrderID(purchase),
 		"linkedPurchaseToken":  purchase.LinkedPurchaseToken,
 		"kind":                 purchase.Kind,
 	}

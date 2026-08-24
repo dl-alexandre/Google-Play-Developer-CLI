@@ -5,6 +5,9 @@ on:
     types: [opened, synchronize, reopened]
   schedule:
     - cron: "17 */6 * * *"
+  workflow_run:
+    workflows: ["CI", "Lint", "Docker"]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -31,6 +34,17 @@ jobs:
             let pullRequests;
             if (context.payload.pull_request) {
               pullRequests = [context.payload.pull_request];
+            } else if (context.payload.workflow_run?.pull_requests?.length) {
+              pullRequests = await Promise.all(
+                context.payload.workflow_run.pull_requests.map(async (pullRequest) => {
+                  const response = await github.rest.pulls.get({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    pull_number: pullRequest.number
+                  });
+                  return response.data;
+                })
+              );
             } else {
               pullRequests = await github.paginate(
                 github.rest.pulls.list,
@@ -153,4 +167,3 @@ jobs:
                 });
               }
             }
-

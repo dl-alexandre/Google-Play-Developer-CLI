@@ -19,6 +19,7 @@ jobs:
         uses: dependabot/fetch-metadata@v3
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
+          skip-commit-verification: true
 
       - name: Enable patch auto-merge
         if: steps.metadata.outputs.update-type == 'version-update:semver-patch'
@@ -35,4 +36,3 @@ jobs:
           esac
 
           gh pr merge "${PR_URL}" --auto --squash --delete-branch
-

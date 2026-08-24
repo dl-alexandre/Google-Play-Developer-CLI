@@ -1,0 +1,156 @@
+name: Dependabot Failure Triage
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  checks: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  triage:
+    name: Label and summarize failed Dependabot PRs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Triage failed Dependabot updates
+        uses: actions/github-script@v9
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const marker = '<!-- dependabot-failure-triage -->';
+            const labelName = 'needs-manual-fix';
+            const labelColor = 'B60205';
+            const labelDescription = 'Dependabot PR needs a manual compatibility fix';
+
+            let pullRequests;
+            if (context.payload.pull_request) {
+              pullRequests = [context.payload.pull_request];
+            } else {
+              pullRequests = await github.paginate(
+                github.rest.pulls.list,
+                {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  state: 'open',
+                  per_page: 100
+                }
+              );
+            }
+
+            for (const pullRequest of pullRequests) {
+              const login = pullRequest.user?.login || '';
+              if (!login.includes('dependabot')) {
+                continue;
+              }
+
+              const checks = await github.paginate(
+                github.rest.checks.listForRef,
+                {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  ref: pullRequest.head.sha,
+                  per_page: 100
+                }
+              );
+
+              const failures = checks.filter((check) =>
+                check.status === 'completed' &&
+                ['failure', 'timed_out', 'cancelled', 'startup_failure'].includes(check.conclusion)
+              );
+
+              if (failures.length === 0) {
+                try {
+                  await github.rest.issues.removeLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: pullRequest.number,
+                    name: labelName
+                  });
+                } catch (error) {
+                  if (error.status !== 404) {
+                    throw error;
+                  }
+                }
+                continue;
+              }
+
+              try {
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: pullRequest.number,
+                  labels: [labelName]
+                });
+              } catch (error) {
+                if (error.status !== 404) {
+                  throw error;
+                }
+
+                await github.rest.issues.createLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name: labelName,
+                  color: labelColor,
+                  description: labelDescription
+                });
+
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: pullRequest.number,
+                  labels: [labelName]
+                });
+              }
+
+              const summary = failures
+                .slice(0, 12)
+                .map((check) => `- ${check.name}: ${check.html_url || 'no details URL'}`)
+                .join('\n');
+
+              const body = `${marker}
+            ### Dependabot update needs manual attention
+
+            CI is failing for this Dependabot update. The PR was not merged.
+
+            Failed checks:
+            ${summary}
+
+            This label and comment are maintained automatically. Fix or replace the dependency update, then push a new commit; the label will be removed when the checks recover.
+            `;
+
+              const comments = await github.paginate(
+                github.rest.issues.listComments,
+                {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: pullRequest.number,
+                  per_page: 100
+                }
+              );
+              const existing = comments.find((comment) =>
+                comment.user?.type === 'Bot' && comment.body?.includes(marker)
+              );
+
+              if (existing) {
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: existing.id,
+                  body
+                });
+              } else {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: pullRequest.number,
+                  body
+                });
+              }
+            }
+

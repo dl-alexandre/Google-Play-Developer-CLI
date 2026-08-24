@@ -1,0 +1,38 @@
+name: Dependabot Safe Auto-Merge
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  enable:
+    name: Enable safe patch auto-merge
+    if: contains(github.event.pull_request.user.login, 'dependabot')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Enable patch auto-merge
+        if: steps.metadata.outputs.update-type == 'version-update:semver-patch'
+        env:
+          DEPENDENCY_NAMES: ${{ steps.metadata.outputs.dependency-names }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          case "${DEPENDENCY_NAMES}" in
+            *google.golang.org/*|*modernc.org/*)
+              echo "High-risk SDK/database dependency; leaving for manual review."
+              exit 0
+              ;;
+          esac
+
+          gh pr merge "${PR_URL}" --auto --squash --delete-branch
+

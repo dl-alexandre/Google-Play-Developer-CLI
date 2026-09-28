@@ -37,7 +37,7 @@ jobs:
           echo "bench_file=$BENCH_FILE" >> $GITHUB_OUTPUT
 
       - name: Download previous main benchmark
-        uses: dawidd6/action-download-artifact@v24
+        uses: dawidd6/action-download-artifact@v25
         continue-on-error: true
         with:
           name: gpd-benchmark-main

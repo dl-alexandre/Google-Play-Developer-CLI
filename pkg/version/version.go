@@ -4,13 +4,15 @@ package version
 import (
 	"fmt"
 	"runtime"
+
+	cliver "github.com/dl-alexandre/cli-tools/version"
 )
 
 // Build information set by ldflags during compilation.
 var (
-	Version   = "dev"
-	GitCommit = "unknown"
-	BuildTime = "unknown"
+	Version   = cliver.Version
+	GitCommit = cliver.GitCommit
+	BuildTime = cliver.BuildTime
 )
 
 // Info contains version information.

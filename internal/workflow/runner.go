@@ -739,6 +739,9 @@ func (r *Runner) executeStepOnce(ctx context.Context, state *RunState, step Step
 		if cmd.Process != nil {
 			_ = cmd.Process.Kill()
 		}
+		// Wait for os/exec's output-copy goroutines before reading the buffers.
+		// This also avoids a race between Buffer.String and a final pipe write.
+		<-errChan
 		err = ctx.Err()
 	}
 

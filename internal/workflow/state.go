@@ -1,10 +1,14 @@
 package workflow
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -210,13 +214,21 @@ func hasJSONExtension(name string) bool {
 }
 
 func generateRandomID(length int) string {
-	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
-	b := make([]byte, length)
-	for i := range b {
-		b[i] = charset[time.Now().UnixNano()%int64(len(charset))]
+	if length <= 0 {
+		return ""
 	}
-	return string(b)
+	b := make([]byte, (length+1)/2)
+	if _, err := rand.Read(b); err == nil {
+		return hex.EncodeToString(b)[:length]
+	}
+	value := fmt.Sprintf("%x", runIDFallback.Add(1))
+	if len(value) > length {
+		value = value[len(value)-length:]
+	}
+	return strings.Repeat("0", length-len(value)) + value
 }
+
+var runIDFallback atomic.Uint64
 
 // ResumeInfo contains information needed to resume a workflow.
 type ResumeInfo struct {

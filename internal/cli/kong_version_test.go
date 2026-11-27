@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dl-alexandre/Google-Play-Developer-CLI/pkg/version"
+	"github.com/dl-alexandre/cli-tools/version"
 )
 
 func TestVersionCmd_Run_ReturnsNil(t *testing.T) {
